@@ -94,10 +94,17 @@ echo  ^|  Kapatmak icin bu pencereyi kapatin.             ^|
 echo  +--------------------------------------------------+
 echo.
 
-:: Tarayiciyi Flask basladiktan 3 saniye sonra ac
-start /b powershell -WindowStyle Hidden -Command "Start-Sleep 3; Start-Process 'http://localhost:5000'"
+:: Tarayiciyi ac ve Flask'i baslat
+start http://127.0.0.1:5000
 
 :: Flask'i baslat
 python app.py
-
-pause
+if %errorlevel% neq 0 (
+    echo.
+    echo  ============================================================
+    echo  [HATA] Uygulama baslatilamadi!
+    echo  Lutfen yukaridaki hata mesajini kontrol edin.
+    echo  ============================================================
+    echo.
+    pause
+)
