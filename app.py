@@ -1048,7 +1048,11 @@ def read_bkst_credentials():
                 elif line.startswith("SIFRE="):
                     password = line.split("=", 1)[1].strip()
                 elif line.startswith("ADRES_ID="):
-                    address_id = line.split("=", 1)[1].strip()
+                    raw_id = line.split("=", 1)[1].strip()
+                    if "-" in raw_id:
+                        address_id = raw_id.split("-")[0].strip()
+                    else:
+                        address_id = raw_id
                     
     return username, password, address_id
 
