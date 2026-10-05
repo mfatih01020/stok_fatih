@@ -105,7 +105,7 @@ def get_git_info_python():
         if not commit_hash:
             return get_git_info_subprocess()
 
-        return (commit_hash or "b10a2c"), (commit_date or "Canlı Sürüm"), (commit_msg or "Sistem Güncel")
+        return (commit_hash or "Bilinmiyor"), (commit_date or "Canlı Sürüm"), (commit_msg or "Sistem Güncel")
     except Exception:
         return get_git_info_subprocess()
 
@@ -139,7 +139,7 @@ def force_update():
     if not is_git_installed():
         git_ok = ensure_git_installed()
         if not git_ok:
-            print(f"  {RED}[HATA] Git otomatik yüklenemedi.{RESET}")
+            print(f"  {RED}[HATA] Git bu bilgisayarda bulunamadı ve otomatik kurulamadı.{RESET}")
             print(f"  {YELLOW}Lütfen indirip kurun: https://git-scm.com/download/win{RESET}\n")
             return False
 
@@ -151,20 +151,25 @@ def force_update():
     print(f"  {DIM}  • Sürüm Tarihi: {RESET}{WHITE}{cur_date}{RESET}")
     print(f"  {DIM}  • Son Değişiklik: {RESET}{WHITE}{cur_msg}{RESET}\n")
 
-    print(f"  {CYAN}[1/2] GitHub sunucusundan güncellemeler kontrol ediliyor...{RESET}")
-    fetch_res = subprocess.run(["git", "-c", "http.sslVerify=false", "fetch", "origin", "main:refs/remotes/origin/main", "--force"], capture_output=True, text=True, timeout=25, env=env, cwd=BASE_DIR)
+    print(f"  {CYAN}[1/2] GitHub sunucusundan güncellemeler çekiliyor...{RESET}")
+    repo_url = "https://github.com/mfatih01020/stok_fatih.git"
+    fetch_res = subprocess.run(["git", "-c", "http.sslVerify=false", "fetch", repo_url, "main", "--force"], capture_output=True, text=True, timeout=25, env=env, cwd=BASE_DIR)
     
+    if fetch_res.returncode != 0:
+        print(f"\n  {RED}{BOLD}[HATA] GitHub sunucusuna bağlanılamadı veya Git yanıt vermedi!{RESET}")
+        print(f"  {YELLOW}Git Hata Çıktısı: {fetch_res.stderr.strip() or 'Bağlantı zaman aşımına uğradı.'}{RESET}\n")
+        return False
+
     local_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
-    remote_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "origin/main"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
+    remote_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "FETCH_HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
 
     if not local_hash:
         local_hash = cur_hash
 
-    # Eğer local_hash ile remote_hash farklıysa VEYA local_hash Bilinmiyor ise -> GÜNCELLE!
     if remote_hash and (local_hash != remote_hash or local_hash == "Bilinmiyor" or not local_hash):
         print(f"\n  {YELLOW}{BOLD}[🔄 GÜNCELLEME BULUNDU] Web değişiklikleri yükleniyor...{RESET}")
-        subprocess.run(["git", "-c", "http.sslVerify=false", "checkout", "-B", "main", "origin/main", "--force"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
-        reset_res = subprocess.run(["git", "-c", "http.sslVerify=false", "reset", "--hard", "origin/main"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
+        subprocess.run(["git", "-c", "http.sslVerify=false", "checkout", "-B", "main", "FETCH_HEAD", "--force"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
+        reset_res = subprocess.run(["git", "-c", "http.sslVerify=false", "reset", "--hard", "FETCH_HEAD"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
         
         clear_pycache()
 

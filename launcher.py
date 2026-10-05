@@ -145,7 +145,7 @@ def get_git_info_python():
         if not commit_hash:
             return get_git_info_subprocess()
 
-        return (commit_hash or "b10a2c"), (commit_date or "Canlı Sürüm"), (commit_msg or "Sistem Güncel")
+        return (commit_hash or "Bilinmiyor"), (commit_date or "Canlı Sürüm"), (commit_msg or "Sistem Güncel")
     except Exception:
         return get_git_info_subprocess()
 
@@ -232,10 +232,15 @@ def check_updates():
         repo_check = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True, timeout=3, env=env, cwd=BASE_DIR)
         if repo_check.returncode == 0:
             print_step("4", "GitHub Otomatik Guncelleme", "loading", "GitHub sunucusu kontrol ediliyor...")
-            fetch_res = subprocess.run(["git", "-c", "http.sslVerify=false", "fetch", "origin", "main:refs/remotes/origin/main", "--force"], capture_output=True, text=True, timeout=30, env=env, cwd=BASE_DIR)
+            repo_url = "https://github.com/mfatih01020/stok_fatih.git"
+            fetch_res = subprocess.run(["git", "-c", "http.sslVerify=false", "fetch", repo_url, "main", "--force"], capture_output=True, text=True, timeout=30, env=env, cwd=BASE_DIR)
             
+            if fetch_res.returncode != 0:
+                print_step("4", "GitHub Otomatik Guncelleme", "warn", "Baglanti hatasi (Git sunucuya erisemedi)")
+                return False
+
             local_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
-            remote_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "origin/main"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
+            remote_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "FETCH_HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
 
             cur_h, cur_d, cur_m = get_git_info_python()
             if not local_hash:
@@ -243,8 +248,8 @@ def check_updates():
 
             if remote_hash and (local_hash != remote_hash or local_hash == "Bilinmiyor" or not local_hash):
                 print_step("4", "GitHub Otomatik Guncelleme", "loading", "Yeni kodlar yukleniyor...")
-                subprocess.run(["git", "-c", "http.sslVerify=false", "checkout", "-B", "main", "origin/main", "--force"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
-                reset_res = subprocess.run(["git", "-c", "http.sslVerify=false", "reset", "--hard", "origin/main"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
+                subprocess.run(["git", "-c", "http.sslVerify=false", "checkout", "-B", "main", "FETCH_HEAD", "--force"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
+                reset_res = subprocess.run(["git", "-c", "http.sslVerify=false", "reset", "--hard", "FETCH_HEAD"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
                 
                 clear_pycache()
 
