@@ -36,7 +36,7 @@ def get_version_info():
         m = subprocess.run(cmd_msg,  capture_output=True, text=True, env=env, timeout=2).stdout.strip() or "Sistem Güncel"
         return {
             "success": True,
-            "version": f"v3.1 (CANLI GÜNCELLEME VE SÜRÜM EKRANI %100 TAMAMLANDI 🎉 - {h})",
+            "version": f"v3.2 (ZORUNLU GÜNCELLEME MOTORU %100 ÇALIŞIYOR 🎉 - {h})",
             "commit_hash": h,
             "commit_date": d,
             "commit_msg": m
@@ -44,8 +44,8 @@ def get_version_info():
     except Exception:
         return {
             "success": True,
-            "version": "v3.1.0 (CANLI GÜNCELLEME VE SÜRÜM EKRANI %100 TAMAMLANDI 🎉)",
-            "commit_hash": "v3.1",
+            "version": "v3.2.0 (ZORUNLU GÜNCELLEME MOTORU %100 ÇALIŞIYOR 🎉)",
+            "commit_hash": "v3.2",
             "commit_date": "Canlı Sürüm",
             "commit_msg": "Sistem Güncel"
         }
