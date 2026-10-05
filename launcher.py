@@ -2,6 +2,7 @@ import os
 import sys
 import subprocess
 import time
+import shutil
 import webbrowser
 
 # Consolu UTF-8 moduna gecir ve pencere basligini ayarla
@@ -52,6 +53,15 @@ def print_step(step_no, title, status="ok", detail=""):
     if detail:
         step_text += f"  {DIM}{detail}{RESET}"
     print(step_text)
+
+def clear_pycache():
+    root = os.path.dirname(os.path.abspath(__file__))
+    for dirpath, dirnames, filenames in os.walk(root):
+        if "__pycache__" in dirnames:
+            try:
+                shutil.rmtree(os.path.join(dirpath, "__pycache__"), ignore_errors=True)
+            except Exception:
+                pass
 
 def is_git_installed():
     try:
@@ -164,20 +174,20 @@ def check_updates():
         repo_check = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True, timeout=3, env=env)
         if repo_check.returncode == 0:
             print_step("4", "GitHub Otomatik Guncelleme", "loading", "GitHub sunucusu kontrol ediliyor...")
-            fetch_res = subprocess.run(["git", "-c", "http.sslVerify=false", "fetch", "origin", "main"], capture_output=True, text=True, timeout=30, env=env)
+            fetch_res = subprocess.run(["git", "-c", "http.sslVerify=false", "fetch", "origin", "main:refs/remotes/origin/main", "--force"], capture_output=True, text=True, timeout=30, env=env)
             
             local_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "HEAD"], capture_output=True, text=True, env=env).stdout.strip()
-            remote_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "FETCH_HEAD"], capture_output=True, text=True, env=env).stdout.strip()
+            remote_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "origin/main"], capture_output=True, text=True, env=env).stdout.strip()
 
             cur_h, cur_d, cur_m = get_git_info("HEAD")
 
             if local_hash and remote_hash and local_hash != remote_hash:
                 print_step("4", "GitHub Otomatik Guncelleme", "loading", "Yeni kodlar yukleniyor...")
-                subprocess.run(["git", "-c", "http.sslVerify=false", "checkout", "-B", "main", "origin/main"], capture_output=True, text=True, timeout=15, env=env)
-                reset_res = subprocess.run(["git", "-c", "http.sslVerify=false", "reset", "--hard", "FETCH_HEAD"], capture_output=True, text=True, timeout=15, env=env)
-                if reset_res.returncode != 0:
-                    subprocess.run(["git", "-c", "http.sslVerify=false", "pull", "origin", "main"], capture_output=True, text=True, timeout=15, env=env)
+                subprocess.run(["git", "-c", "http.sslVerify=false", "checkout", "-B", "main", "origin/main", "--force"], capture_output=True, text=True, timeout=15, env=env)
+                reset_res = subprocess.run(["git", "-c", "http.sslVerify=false", "reset", "--hard", "origin/main"], capture_output=True, text=True, timeout=15, env=env)
                 
+                clear_pycache()
+
                 new_h, new_d, new_m = get_git_info("HEAD")
                 print_step("4", "GitHub Otomatik Guncelleme", "updated", f"Yeni Surum: {new_h} ({new_d})")
                 print(f"  {CYAN}  └─ Son Degisiklik: {WHITE}{new_m}{RESET}")
