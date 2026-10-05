@@ -5,6 +5,10 @@ import time
 import shutil
 import webbrowser
 
+# Çalışma dizinini script'in bulunduğu klasöre sabitle (System32 hatasını engeller)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+os.chdir(BASE_DIR)
+
 # Consolu UTF-8 moduna gecir ve pencere basligini ayarla
 os.system('title QR Stok Yonetim Sistemi - Baslatici')
 if hasattr(sys.stdout, 'reconfigure'):
@@ -55,8 +59,7 @@ def print_step(step_no, title, status="ok", detail=""):
     print(step_text)
 
 def clear_pycache():
-    root = os.path.dirname(os.path.abspath(__file__))
-    for dirpath, dirnames, filenames in os.walk(root):
+    for dirpath, dirnames, filenames in os.walk(BASE_DIR):
         if "__pycache__" in dirnames:
             try:
                 shutil.rmtree(os.path.join(dirpath, "__pycache__"), ignore_errors=True)
@@ -65,7 +68,7 @@ def clear_pycache():
 
 def is_git_installed():
     try:
-        res = subprocess.run(["git", "--version"], capture_output=True, text=True, timeout=2)
+        res = subprocess.run(["git", "--version"], capture_output=True, text=True, timeout=2, cwd=BASE_DIR)
         return res.returncode == 0
     except Exception:
         return False
@@ -82,7 +85,7 @@ def ensure_git_installed():
             "--accept-source-agreements",
             "--accept-package-agreements",
             "--silent"
-        ], capture_output=True, text=True, timeout=120)
+        ], capture_output=True, text=True, timeout=120, cwd=BASE_DIR)
 
         if is_git_installed():
             print_step("1", "Git Otomatik Kurulumu", "ok", "Git basariyla yuklendi!")
@@ -103,10 +106,10 @@ def get_git_info(commit_ref="HEAD"):
         cmd_date = ["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%cd", "--date=format:%d.%m.%Y %H:%M", commit_ref]
         cmd_msg  = ["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%s", commit_ref]
 
-        h = subprocess.run(cmd_hash, capture_output=True, text=True, env=env).stdout.strip()
-        d = subprocess.run(cmd_date, capture_output=True, text=True, env=env).stdout.strip()
-        m = subprocess.run(cmd_msg,  capture_output=True, text=True, env=env).stdout.strip()
-        return h, d, m
+        h = subprocess.run(cmd_hash, capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
+        d = subprocess.run(cmd_date, capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
+        m = subprocess.run(cmd_msg,  capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
+        return (h or "Bilinmiyor"), (d or "Bilinmiyor"), (m or "Bilinmiyor")
     except Exception:
         return "Bilinmiyor", "Bilinmiyor", "Bilinmiyor"
 
@@ -138,7 +141,7 @@ def check_libraries():
     if missing:
         print_step("2", "Gerekli Kutuphaneler", "loading", f"Eksikler kuruluyor: {', '.join(missing)}")
         try:
-            subprocess.run([sys.executable, "-m", "pip", "install"] + missing, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run([sys.executable, "-m", "pip", "install"] + missing, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=BASE_DIR)
             print_step("2", "Gerekli Kutuphaneler", "ok", "Tum paketler yuklendi")
         except Exception as e:
             print_step("2", "Gerekli Kutuphaneler", "error", f"Yukleme hatasi: {e}")
@@ -171,20 +174,20 @@ def check_updates():
     env["GIT_SSL_NO_VERIFY"] = "true"
 
     try:
-        repo_check = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True, timeout=3, env=env)
+        repo_check = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True, timeout=3, env=env, cwd=BASE_DIR)
         if repo_check.returncode == 0:
             print_step("4", "GitHub Otomatik Guncelleme", "loading", "GitHub sunucusu kontrol ediliyor...")
-            fetch_res = subprocess.run(["git", "-c", "http.sslVerify=false", "fetch", "origin", "main:refs/remotes/origin/main", "--force"], capture_output=True, text=True, timeout=30, env=env)
+            fetch_res = subprocess.run(["git", "-c", "http.sslVerify=false", "fetch", "origin", "main:refs/remotes/origin/main", "--force"], capture_output=True, text=True, timeout=30, env=env, cwd=BASE_DIR)
             
-            local_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "HEAD"], capture_output=True, text=True, env=env).stdout.strip()
-            remote_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "origin/main"], capture_output=True, text=True, env=env).stdout.strip()
+            local_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
+            remote_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "origin/main"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
 
             cur_h, cur_d, cur_m = get_git_info("HEAD")
 
             if local_hash and remote_hash and local_hash != remote_hash:
                 print_step("4", "GitHub Otomatik Guncelleme", "loading", "Yeni kodlar yukleniyor...")
-                subprocess.run(["git", "-c", "http.sslVerify=false", "checkout", "-B", "main", "origin/main", "--force"], capture_output=True, text=True, timeout=15, env=env)
-                reset_res = subprocess.run(["git", "-c", "http.sslVerify=false", "reset", "--hard", "origin/main"], capture_output=True, text=True, timeout=15, env=env)
+                subprocess.run(["git", "-c", "http.sslVerify=false", "checkout", "-B", "main", "origin/main", "--force"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
+                reset_res = subprocess.run(["git", "-c", "http.sslVerify=false", "reset", "--hard", "origin/main"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
                 
                 clear_pycache()
 
@@ -211,7 +214,7 @@ def launch_app():
     webbrowser.open("http://127.0.0.1:5000")
 
     try:
-        subprocess.run([sys.executable, "app.py"])
+        subprocess.run([sys.executable, "app.py"], cwd=BASE_DIR)
     except KeyboardInterrupt:
         print(f"\n{YELLOW}Uygulama kapatildi.{RESET}")
 

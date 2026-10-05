@@ -3,6 +3,10 @@ import sys
 import subprocess
 import shutil
 
+# Çalışma dizinini script'in bulunduğu klasöre sabitle (System32 hatasını engeller)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+os.chdir(BASE_DIR)
+
 # Consolu UTF-8 ve ANSI renklere ayarla
 os.system('chcp 65001 > nul 2>&1')
 if hasattr(sys.stdout, 'reconfigure'):
@@ -22,7 +26,7 @@ RESET = '\033[0m'
 
 def is_git_installed():
     try:
-        res = subprocess.run(["git", "--version"], capture_output=True, text=True, timeout=2)
+        res = subprocess.run(["git", "--version"], capture_output=True, text=True, timeout=2, cwd=BASE_DIR)
         return res.returncode == 0
     except Exception:
         return False
@@ -40,14 +44,13 @@ def ensure_git_installed():
             "--accept-source-agreements",
             "--accept-package-agreements",
             "--silent"
-        ], capture_output=True, text=True, timeout=120)
+        ], capture_output=True, text=True, timeout=120, cwd=BASE_DIR)
         return is_git_installed()
     except Exception:
         return False
 
 def clear_pycache():
-    root = os.path.dirname(os.path.abspath(__file__))
-    for dirpath, dirnames, filenames in os.walk(root):
+    for dirpath, dirnames, filenames in os.walk(BASE_DIR):
         if "__pycache__" in dirnames:
             try:
                 shutil.rmtree(os.path.join(dirpath, "__pycache__"), ignore_errors=True)
@@ -63,10 +66,10 @@ def get_git_info(commit_ref="HEAD"):
         cmd_date = ["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%cd", "--date=format:%d.%m.%Y %H:%M", commit_ref]
         cmd_msg  = ["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%s", commit_ref]
 
-        h = subprocess.run(cmd_hash, capture_output=True, text=True, env=env).stdout.strip()
-        d = subprocess.run(cmd_date, capture_output=True, text=True, env=env).stdout.strip()
-        m = subprocess.run(cmd_msg,  capture_output=True, text=True, env=env).stdout.strip()
-        return h, d, m
+        h = subprocess.run(cmd_hash, capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
+        d = subprocess.run(cmd_date, capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
+        m = subprocess.run(cmd_msg,  capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
+        return (h or "Bilinmiyor"), (d or "Bilinmiyor"), (m or "Bilinmiyor")
     except Exception:
         return "Bilinmiyor", "Bilinmiyor", "Bilinmiyor"
 
@@ -94,15 +97,15 @@ def force_update():
     print(f"  {DIM}  • Son Değişiklik: {RESET}{WHITE}{cur_msg}{RESET}\n")
 
     print(f"  {CYAN}[1/2] GitHub sunucusundan güncellemeler kontrol ediliyor...{RESET}")
-    fetch_res = subprocess.run(["git", "-c", "http.sslVerify=false", "fetch", "origin", "main:refs/remotes/origin/main", "--force"], capture_output=True, text=True, timeout=20, env=env)
+    fetch_res = subprocess.run(["git", "-c", "http.sslVerify=false", "fetch", "origin", "main:refs/remotes/origin/main", "--force"], capture_output=True, text=True, timeout=20, env=env, cwd=BASE_DIR)
     
-    local_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "HEAD"], capture_output=True, text=True, env=env).stdout.strip()
-    remote_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "origin/main"], capture_output=True, text=True, env=env).stdout.strip()
+    local_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
+    remote_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "origin/main"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
 
     if local_hash and remote_hash and local_hash != remote_hash:
         print(f"\n  {YELLOW}{BOLD}[🔄 GÜNCELLEME BULUNDU] Web değişiklikleri yükleniyor...{RESET}")
-        subprocess.run(["git", "-c", "http.sslVerify=false", "checkout", "-B", "main", "origin/main", "--force"], capture_output=True, text=True, timeout=15, env=env)
-        reset_res = subprocess.run(["git", "-c", "http.sslVerify=false", "reset", "--hard", "origin/main"], capture_output=True, text=True, timeout=15, env=env)
+        subprocess.run(["git", "-c", "http.sslVerify=false", "checkout", "-B", "main", "origin/main", "--force"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
+        reset_res = subprocess.run(["git", "-c", "http.sslVerify=false", "reset", "--hard", "origin/main"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
         
         clear_pycache()
 
