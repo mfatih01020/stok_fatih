@@ -35,24 +35,6 @@ def is_git_installed():
     except Exception:
         return False
 
-def ensure_git_installed():
-    if is_git_installed():
-        return True
-
-    print(f"\n  {YELLOW}[OTOMATİK KURULUM] Bu bilgisayarda Git bulunamadı.{RESET}")
-    print(f"  {CYAN}Git arka planda yükleniyor, lütfen bekleyin...{RESET}\n")
-    try:
-        subprocess.run([
-            "winget", "install", "--id", "Git.Git", "-e",
-            "--source", "winget",
-            "--accept-source-agreements",
-            "--accept-package-agreements",
-            "--silent"
-        ], capture_output=True, text=True, timeout=120, cwd=BASE_DIR)
-        return is_git_installed()
-    except Exception:
-        return False
-
 def clear_pycache():
     for dirpath, dirnames, filenames in os.walk(BASE_DIR):
         if "__pycache__" in dirnames:
@@ -62,7 +44,12 @@ def clear_pycache():
                 pass
 
 def get_unified_version_info():
-    # 1. Doğrudan .git klasörü okuma
+    """
+    Sürüm bilgisini 3 kademeli olarak tespit eder:
+    1. .git/HEAD ve logs/HEAD dosya okuması
+    2. git komut çıktısı
+    3. version.json yerel yedeği
+    """
     try:
         head_path = os.path.join(BASE_DIR, '.git', 'HEAD')
         if os.path.exists(head_path):
@@ -96,11 +83,10 @@ def get_unified_version_info():
                             commit_date = dt.strftime("%d.%m.%Y %H:%M")
 
             if commit_hash and commit_hash != "Bilinmiyor":
-                return commit_hash, (commit_date or "Canlı Sürüm"), (commit_msg or "Sistem Güncel")
+                return f"v1.0 ({commit_hash})", (commit_date or "Canlı Sürüm"), (commit_msg or "Sistem Güncel")
     except Exception:
         pass
 
-    # 2. Subprocess git komutları
     try:
         env = os.environ.copy()
         env["GIT_TERMINAL_PROMPT"] = "0"
@@ -110,25 +96,24 @@ def get_unified_version_info():
         d = subprocess.run(["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%cd", "--date=format:%d.%m.%Y %H:%M", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
         m = subprocess.run(["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%s", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
         if h and h != "Bilinmiyor":
-            return h, (d or "Canlı Sürüm"), (m or "Sistem Güncel")
+            return f"v1.0 ({h})", (d or "Canlı Sürüm"), (m or "Sistem Güncel")
     except Exception:
         pass
 
-    # 3. version.json yedeği
     v_path = os.path.join(BASE_DIR, "version.json")
     if os.path.exists(v_path):
         try:
             with open(v_path, "r", encoding="utf-8") as f:
                 v_data = json.load(f)
-                v_code = v_data.get("version", "v3.8")
-                v_commit = v_data.get("commit", "3.8.0")
-                v_date = v_data.get("date", "05.10.2026")
-                v_msg = v_data.get("message", "Canlı Sürüm")
+                v_code = v_data.get("version", "v1.0")
+                v_commit = v_data.get("commit", "1.0.0")
+                v_date = v_data.get("date", "06.10.2026")
+                v_msg = v_data.get("message", "v1.0 Sürümü")
                 return f"{v_code} ({v_commit})", v_date, v_msg
         except Exception:
             pass
 
-    return "v3.8 (3.8.0)", "05.10.2026 23:58", "v3.8 Dual-Engine Güncelleme Motoru"
+    return "v1.0 (1.0.0)", "06.10.2026", "QR Stok Yönetim Sistemi v1.0 Sürümü"
 
 def get_latest_remote_commit_sha(requests_module):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
@@ -144,15 +129,14 @@ def get_latest_remote_commit_sha(requests_module):
     return "main"
 
 def http_fallback_update():
-    """Git sunucusu erişilemez olduğunda doğrudan anlık Commit SHA üzerinden paket indirme motoru"""
-    print(f"\n  {YELLOW}{BOLD}[🔄 DUAL-ENGINE HTTP] Git bağlantısı yok, Anlık HTTPS Güncelleme Motoru çalışıyor...{RESET}")
+    print(f"  {CYAN}  • Güncelleme sunucusu kontrol ediliyor...{RESET}")
     
     try:
         import requests
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     except ImportError:
-        print(f"  {RED}[HATA] HTTP Güncelleme için 'requests' kütüphanesi eksik.{RESET}")
+        print(f"  {RED}[HATA] Güncelleme için 'requests' kütüphanesi bulunamadı.{RESET}")
         return False
 
     headers = {
@@ -162,20 +146,18 @@ def http_fallback_update():
     }
 
     latest_sha = get_latest_remote_commit_sha(requests)
-    print(f"  {CYAN}  • GitHub canlı commit tespiti: {WHITE}{latest_sha[:7]}{RESET}")
-
     timestamp = time.time_ns()
     remote_vurl = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/{latest_sha}/version.json?t={timestamp}"
 
     try:
         resp = requests.get(remote_vurl, verify=False, timeout=10, headers=headers)
         if resp.status_code != 200:
-            print(f"  {RED}[HATA] GitHub canlı sunucusuna ulaşılamadı (HTTP Status: {resp.status_code}){RESET}")
+            print(f"  {RED}[HATA] Sunucu yanıt vermedi (HTTP {resp.status_code}){RESET}")
             return False
 
         remote_data = resp.json()
         remote_commit = str(remote_data.get("commit", "")).strip()
-        remote_version = str(remote_data.get("version", "")).strip()
+        remote_version = str(remote_data.get("version", "v1.0")).strip()
         remote_date = str(remote_data.get("date", "")).strip()
         remote_msg = str(remote_data.get("message", "")).strip()
         files_to_update = remote_data.get("files", [])
@@ -191,12 +173,11 @@ def http_fallback_update():
 
         if local_commit and local_commit == remote_commit:
             print(f"\n{GREEN}{BOLD} =============================================================={RESET}")
-            print(f"{GREEN}{BOLD}  🟢 [GÜNCEL] Sisteminiz canlı HTTP motoru ile doğrulandı. En son sürüm yüklü.{RESET}")
-            print(f"{WHITE}  • Yüklü Sürüm: {remote_version} ({remote_commit}) - {remote_date}{RESET}")
+            print(f"{GREEN}{BOLD}  🟢 [GÜNCEL] Sisteminiz en son sürümde ({remote_version}).{RESET}")
             print(f"{GREEN}{BOLD} =============================================================={RESET}\n")
             return False
 
-        print(f"\n  {YELLOW}{BOLD}[🔄 YENİ GÜNCELLEME BULUNDU] Sürüm {remote_version} ({remote_commit}) indiriliyor...{RESET}")
+        print(f"\n  {YELLOW}{BOLD}[🔄 GÜNCELLEME BULUNDU] Sürüm {remote_version} indiriliyor...{RESET}")
 
         updated_count = 0
         for rel_path in files_to_update:
@@ -209,8 +190,6 @@ def http_fallback_update():
                 with open(dest_path, "wb") as f:
                     f.write(file_resp.content)
                 updated_count += 1
-            else:
-                print(f"  {YELLOW}  └─ [Atlandı] {rel_path} (HTTP {file_resp.status_code}){RESET}")
 
         with open(local_vpath, "w", encoding="utf-8") as f:
             json.dump(remote_data, f, ensure_ascii=False, indent=2)
@@ -218,29 +197,26 @@ def http_fallback_update():
         clear_pycache()
 
         print(f"\n{GREEN}{BOLD} =============================================================={RESET}")
-        print(f"{GREEN}{BOLD}  🟢 [BAŞARILI - HTTP MOTORU] SİSTEM EN SON SÜRÜME GÜNCELLENDİ!{RESET}")
-        print(f"{WHITE}{BOLD}  📦 İndirilen Dosya  : {updated_count} adet{RESET}")
-        print(f"{WHITE}{BOLD}  📦 Yeni Sürüm Kodu  : {remote_version} ({remote_commit}){RESET}")
-        print(f"{WHITE}{BOLD}  📅 Güncelleme Tarihi: {remote_date}{RESET}")
-        print(f"{WHITE}{BOLD}  📝 Değişiklik Notu  : {remote_msg}{RESET}")
-        print(f"{WHITE}  🔒 Verileriniz (cikis_kayitlari.db) %100 korundu.{RESET}")
+        print(f"{GREEN}{BOLD}  🟢 [BAŞARILI] Sistem {remote_version} sürümüne güncellendi.{RESET}")
+        print(f"{WHITE}{BOLD}  📦 Sürüm: {remote_version} ({remote_commit}) | {remote_date}{RESET}")
+        print(f"{WHITE}  📝 Not  : {remote_msg}{RESET}")
         print(f"{GREEN}{BOLD} =============================================================={RESET}\n")
         return True
 
     except Exception as e:
-        print(f"  {RED}[HATA] HTTP Güncelleme motoru başarısız: {e}{RESET}")
+        print(f"  {RED}[HATA] Güncelleme işlemi başarısız: {e}{RESET}")
         return False
 
 def force_update():
     print(f"\n{CYAN}{BOLD} =============================================================={RESET}")
-    print(f"{WHITE}{BOLD}       ⚡ QR STOK YÖNETİM SİSTEMİ - DUAL-ENGINE GÜNCELLEME EKRANI{RESET}")
+    print(f"{WHITE}{BOLD}       QR STOK YÖNETİM SİSTEMİ - GÜNCELLEME KONTROLÜ{RESET}")
     print(f"{CYAN}{BOLD} =============================================================={RESET}\n")
 
     cur_hash, cur_date, cur_msg = get_unified_version_info()
     print(f"  {WHITE}{BOLD}📌 MEVCUT SÜRÜM BİLGİLERİ:{RESET}")
-    print(f"  {DIM}  • Sürüm / Commit: {RESET}{WHITE}{cur_hash}{RESET}")
-    print(f"  {DIM}  • Sürüm Tarihi  : {RESET}{WHITE}{cur_date}{RESET}")
-    print(f"  {DIM}  • Son Değişiklik : {RESET}{WHITE}{cur_msg}{RESET}\n")
+    print(f"  {DIM}  • Yüklü Sürüm: {RESET}{WHITE}{cur_hash}{RESET}")
+    print(f"  {DIM}  • Tarih       : {RESET}{WHITE}{cur_date}{RESET}")
+    print(f"  {DIM}  • Not         : {RESET}{WHITE}{cur_msg}{RESET}\n")
 
     git_works = is_git_installed()
     if git_works:
@@ -250,7 +226,7 @@ def force_update():
         env["GIT_SSL_NO_VERIFY"] = "true"
         subprocess.run(["git", "config", "--global", "--add", "safe.directory", "*"], capture_output=True, text=True, cwd=BASE_DIR)
 
-        print(f"  {CYAN}[1/2] Git sunucusu kontrol ediliyor (https://github.com/mfatih01020/stok_fatih.git)...{RESET}")
+        print(f"  {CYAN}[1/2] Sunucu kontrol ediliyor...{RESET}")
         repo_url = "https://github.com/mfatih01020/stok_fatih.git"
         fetch_res = subprocess.run(["git", "-c", "http.sslVerify=false", "fetch", repo_url, "main", "--force"], capture_output=True, text=True, timeout=20, env=env, cwd=BASE_DIR)
 
@@ -259,28 +235,22 @@ def force_update():
             remote_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "FETCH_HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
 
             if remote_hash and (local_hash != remote_hash or local_hash == "Bilinmiyor" or not local_hash):
-                print(f"\n  {YELLOW}{BOLD}[🔄 GÜNCELLEME BULUNDU] Git üzerinden yeni sürüm yükleniyor...{RESET}")
+                print(f"\n  {YELLOW}{BOLD}[🔄 GÜNCELLEME BULUNDU] Yeni sürüm yükleniyor...{RESET}")
                 subprocess.run(["git", "-c", "http.sslVerify=false", "checkout", "-B", "main", "FETCH_HEAD", "--force"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
                 subprocess.run(["git", "-c", "http.sslVerify=false", "reset", "--hard", "FETCH_HEAD"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
                 clear_pycache()
 
                 new_hash, new_date, new_msg = get_unified_version_info()
                 print(f"\n{GREEN}{BOLD} =============================================================={RESET}")
-                print(f"{GREEN}{BOLD}  🟢 [BAŞARILI - GIT MOTORU] SİSTEM EN SON SÜRÜME GÜNCELLENDİ!{RESET}")
-                print(f"{WHITE}{BOLD}  📦 Yeni Sürüm Kodu  : {new_hash}{RESET}")
-                print(f"{WHITE}{BOLD}  📅 Güncelleme Tarihi: {new_date}{RESET}")
-                print(f"{WHITE}{BOLD}  📝 Değişiklik Notu  : {new_msg}{RESET}")
-                print(f"{WHITE}  🔒 Verileriniz (cikis_kayitlari.db) %100 korundu.{RESET}")
+                print(f"{GREEN}{BOLD}  🟢 [BAŞARILI] Sistem güncellendi ({new_hash}).{RESET}")
                 print(f"{GREEN}{BOLD} =============================================================={RESET}\n")
                 return True
             else:
                 print(f"\n{GREEN}{BOLD} =============================================================={RESET}")
-                print(f"{GREEN}{BOLD}  🟢 [GÜNCEL] Sisteminiz zaten en son sürümde. Yeni güncelleme yok.{RESET}")
-                print(f"{WHITE}  • Yüklü Sürüm: {cur_hash} ({cur_date}){RESET}")
+                print(f"{GREEN}{BOLD}  🟢 [GÜNCEL] Sisteminiz en son sürümde ({cur_hash}).{RESET}")
                 print(f"{GREEN}{BOLD} =============================================================={RESET}\n")
                 return False
 
-    # Git çalışmıyor veya fetch başarısız olduysa HTTP yedek motorunu çalıştır
     return http_fallback_update()
 
 if __name__ == "__main__":

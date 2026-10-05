@@ -57,7 +57,7 @@ def get_version_info():
 
     return {
         "success": True,
-        "version": f"v3.9 (🎉 SÜRÜM v3.9 BAŞARIYLA YÜKLENDİ - {h})",
+        "version": f"v1.0 ({h})",
         "commit_hash": h,
         "commit_date": d,
         "commit_msg": m

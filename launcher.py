@@ -4,6 +4,7 @@ import subprocess
 import time
 import shutil
 import json
+import re
 import webbrowser
 from datetime import datetime
 
@@ -12,7 +13,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
 
 # Consolu UTF-8 moduna gecir ve pencere basligini ayarla
-os.system('title QR Stok Yonetim Sistemi - Baslatici (v3.3)')
+os.system('title QR Stok Yonetim Sistemi (v1.0)')
 if hasattr(sys.stdout, 'reconfigure'):
     try:
         sys.stdout.reconfigure(encoding='utf-8')
@@ -37,8 +38,7 @@ def print_header():
     print(f"{CYAN}{BOLD}")
     print(" +------------------------------------------------------------------------+")
     print(" |                                                                        |")
-    print(f" |           {WHITE}{BOLD}*  QR STOK VE BAKANLIK KONTROL SISTEMI (v3.3) * {CYAN}{BOLD}          |")
-    print(f" |           {GREEN}{BOLD}[ v3.3 DUAL-ENGINE OTOMATIK GUNCELLEME YENILENDI ]{CYAN}{BOLD}       |")
+    print(f" |           {WHITE}{BOLD}*  QR STOK VE BAKANLIK KONTROL SİSTEMİ (v1.0) * {CYAN}{BOLD}          |")
     print(" |                                                                        |")
     print(" +------------------------------------------------------------------------+")
     print(f"{RESET}")
@@ -131,7 +131,7 @@ def get_unified_version_info():
                             commit_date = dt.strftime("%d.%m.%Y %H:%M")
 
             if commit_hash and commit_hash != "Bilinmiyor":
-                return commit_hash, (commit_date or "Canli Surum"), (commit_msg or "Sistem Guncel")
+                return f"v1.0 ({commit_hash})", (commit_date or "Canli Surum"), (commit_msg or "Sistem Guncel")
     except Exception:
         pass
 
@@ -143,7 +143,7 @@ def get_unified_version_info():
         d = subprocess.run(["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%cd", "--date=format:%d.%m.%Y %H:%M", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
         m = subprocess.run(["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%s", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
         if h and h != "Bilinmiyor":
-            return h, (d or "Canli Surum"), (m or "Sistem Guncel")
+            return f"v1.0 ({h})", (d or "Canli Surum"), (m or "Sistem Guncel")
     except Exception:
         pass
 
@@ -152,15 +152,15 @@ def get_unified_version_info():
         try:
             with open(v_path, "r", encoding="utf-8") as f:
                 v_data = json.load(f)
-                v_code = v_data.get("version", "v3.3")
-                v_commit = v_data.get("commit", "3.3.0")
-                v_date = v_data.get("date", "05.10.2026")
-                v_msg = v_data.get("message", "Canli Surum")
+                v_code = v_data.get("version", "v1.0")
+                v_commit = v_data.get("commit", "1.0.0")
+                v_date = v_data.get("date", "06.10.2026")
+                v_msg = v_data.get("message", "v1.0 Surumu")
                 return f"{v_code} ({v_commit})", v_date, v_msg
         except Exception:
             pass
 
-    return "v3.3 (3.3.0)", "05.10.2026 23:55", "v3.3 Dual-Engine Guncelleme Motoru"
+    return "v1.0 (1.0.0)", "06.10.2026", "v1.0 Surumu"
 
 def check_environment():
     txt_path = "bakanlik_giris_bilgileri.txt"
@@ -218,7 +218,6 @@ def get_latest_remote_commit_sha(requests_module):
         atom_url = f"https://github.com/mfatih01020/stok_fatih/commits/main.atom?t={time.time_ns()}"
         r = requests_module.get(atom_url, verify=False, timeout=8, headers=headers)
         if r.status_code == 200:
-            import re
             matches = re.findall(r'/commit/([0-9a-f]{40})', r.text)
             if matches:
                 return matches[0]
@@ -246,7 +245,7 @@ def http_fallback_update_launcher():
         if resp.status_code == 200:
             remote_data = resp.json()
             remote_commit = str(remote_data.get("commit", "")).strip()
-            remote_version = str(remote_data.get("version", "")).strip()
+            remote_version = str(remote_data.get("version", "v1.0")).strip()
             files_to_update = remote_data.get("files", [])
 
             local_vpath = os.path.join(BASE_DIR, "version.json")
@@ -260,10 +259,10 @@ def http_fallback_update_launcher():
 
             if local_commit and local_commit == remote_commit:
                 cur_h, cur_d, _ = get_unified_version_info()
-                print_step("4", "HTTP Otomatik Guncelleme", "ok", f"Surum: {cur_h} ({cur_d})")
+                print_step("4", "Otomatik Guncelleme", "ok", f"Surum: {cur_h}")
                 return False
 
-            print_step("4", "HTTP Otomatik Guncelleme", "loading", f"Yeni kodlar indiriliyor: {remote_version}")
+            print_step("4", "Otomatik Guncelleme", "loading", f"Yeni sürüm indiriliyor: {remote_version}")
             updated_count = 0
             for rel_path in files_to_update:
                 raw_url = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/{latest_sha}/{rel_path}?t={timestamp}"
@@ -280,13 +279,13 @@ def http_fallback_update_launcher():
                 json.dump(remote_data, f, ensure_ascii=False, indent=2)
 
             clear_pycache()
-            print_step("4", "HTTP Otomatik Guncelleme", "updated", f"Yeni Surum Yuklendi ({remote_version})")
+            print_step("4", "Otomatik Guncelleme", "updated", f"Guncellendi ({remote_version})")
             return True
     except Exception as e:
-        print_step("4", "HTTP Otomatik Guncelleme", "warn", f"HTTP Baglantisi: {e}")
+        print_step("4", "Otomatik Guncelleme", "warn", f"Baglanti: {e}")
     
     cur_h, cur_d, _ = get_unified_version_info()
-    print_step("4", "Otomatik Guncelleme Motoru", "ok", f"Surum: {cur_h} ({cur_d})")
+    print_step("4", "Otomatik Guncelleme", "ok", f"Surum: {cur_h}")
     return False
 
 def check_updates():
@@ -300,7 +299,7 @@ def check_updates():
             subprocess.run(["git", "config", "--global", "--add", "safe.directory", "*"], capture_output=True, text=True, cwd=BASE_DIR)
             repo_check = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True, timeout=3, env=env, cwd=BASE_DIR)
             if repo_check.returncode == 0:
-                print_step("4", "GitHub Otomatik Guncelleme", "loading", "GitHub sunucusu kontrol ediliyor...")
+                print_step("4", "Otomatik Guncelleme", "loading", "Sunucu kontrol ediliyor...")
                 repo_url = "https://github.com/mfatih01020/stok_fatih.git"
                 fetch_res = subprocess.run(["git", "-c", "http.sslVerify=false", "fetch", repo_url, "main", "--force"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
 
@@ -313,18 +312,17 @@ def check_updates():
                         local_hash = cur_h
 
                     if remote_hash and (local_hash != remote_hash or local_hash == "Bilinmiyor" or not local_hash):
-                        print_step("4", "GitHub Otomatik Guncelleme", "loading", "Yeni kodlar yukleniyor...")
+                        print_step("4", "Otomatik Guncelleme", "loading", "Yukleniyor...")
                         subprocess.run(["git", "-c", "http.sslVerify=false", "checkout", "-B", "main", "FETCH_HEAD", "--force"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
                         subprocess.run(["git", "-c", "http.sslVerify=false", "reset", "--hard", "FETCH_HEAD"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
 
                         clear_pycache()
 
                         new_h, new_d, new_m = get_unified_version_info()
-                        print_step("4", "GitHub Otomatik Guncelleme", "updated", f"Yeni Surum: {new_h} ({new_d})")
-                        print(f"  {CYAN}  └─ Son Degisiklik: {WHITE}{new_m}{RESET}")
+                        print_step("4", "Otomatik Guncelleme", "updated", f"Surum: {new_h}")
                         return True
                     else:
-                        print_step("4", "GitHub Otomatik Guncelleme", "ok", f"Surum: {cur_h} ({cur_d})")
+                        print_step("4", "Otomatik Guncelleme", "ok", f"Surum: {cur_h}")
                         return False
         except Exception:
             pass
@@ -334,9 +332,8 @@ def check_updates():
 def launch_app():
     print_step("5", "Uygulama Sunucusu", "ok", "HTTP 127.0.0.1:5000")
     print(f"\n  {WHITE}{BOLD}" + "-" * 72 + f"{RESET}")
-    print(f"  {GREEN}{BOLD}* YONETIM PANELI BASARIYLA BASLATILDI{RESET}")
+    print(f"  {GREEN}{BOLD}* YÖNETİM PANELİ BAŞARIYLA BAŞLATILDI (v1.0){RESET}")
     print(f"  {CYAN}  Web Adresi :{RESET} {WHITE}{BOLD}http://127.0.0.1:5000{RESET}")
-    print(f"  {DIM}  Ipucu: Kapatmak icin bu pencereyi kapatmaniz yeterlidir.{RESET}")
     print(f"  {WHITE}{BOLD}" + "-" * 72 + f"{RESET}\n")
 
     webbrowser.open("http://127.0.0.1:5000")
@@ -354,7 +351,7 @@ if __name__ == "__main__":
     has_updated = check_updates()
 
     if has_updated:
-        print(f"\n  {CYAN}{BOLD}[🔄 GUNCELLEME UYGULANDI]{RESET} {WHITE}Yeni kodlar yuklendi. Otomatik yeniden baslatiliyor...{RESET}\n")
+        print(f"\n  {CYAN}{BOLD}[🔄 GÜNCELLEME UYGULANDI]{RESET} {WHITE}Yeni sürüm yüklendi. Otomatik yeniden başlatılıyor...{RESET}\n")
         time.sleep(2)
         os.execv(sys.executable, [sys.executable, "launcher.py"])
     else:

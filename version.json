@@ -1,8 +1,8 @@
 {
-  "version": "v3.9",
-  "commit": "v3.9-release-900",
-  "date": "06.10.2026 00:05",
-  "message": "🎉 v3.9 DENEME SÜRÜMÜ: Otomatik Güncelleme Başarıyla v3.9 Sürümüne Yükseltildi!",
+  "version": "v1.0",
+  "commit": "1.0.0",
+  "date": "06.10.2026",
+  "message": "QR Stok Yönetim Sistemi v1.0 Sürümü",
   "files": [
     ".gitignore",
     "Calistir.bat",
