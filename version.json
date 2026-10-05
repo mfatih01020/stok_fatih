@@ -1,8 +1,8 @@
 {
-  "version": "v3.7",
-  "commit": "v3.7-direct-raw-500",
+  "version": "v3.8",
+  "commit": "v3.8-final-test-800",
   "date": "05.10.2026 23:58",
-  "message": "🎉 v3.7 CANLI GÜNCELLEME: Doğrudan Raw Cache-Buster ile Anlık v3.7 Sürüm Geçişi %100 BAŞARILI!",
+  "message": "🚀 v3.8 FİNAL SÜRÜMÜ: Otomatik Güncelleme Motoru %100 Kusursuz Çalışıyor!",
   "files": [
     ".gitignore",
     "Calistir.bat",
