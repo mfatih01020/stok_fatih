@@ -218,10 +218,28 @@ def http_fallback_update_launcher():
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         
-        remote_vurl = "https://raw.githubusercontent.com/mfatih01020/stok_fatih/main/version.json"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        resp = requests.get(remote_vurl, verify=False, timeout=8, headers=headers)
-        if resp.status_code == 200:
+        cb = time.time_ns()
+        urls_to_try = [
+            f"https://github.com/mfatih01020/stok_fatih/raw/main/version.json?cb={cb}",
+            f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/main/version.json?cb={cb}"
+        ]
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache"
+        }
+
+        resp = None
+        for u in urls_to_try:
+            try:
+                r = requests.get(u, verify=False, timeout=10, headers=headers, allow_redirects=True)
+                if r.status_code == 200:
+                    resp = r
+                    break
+            except Exception:
+                pass
+
+        if resp and resp.status_code == 200:
             remote_data = resp.json()
             remote_commit = str(remote_data.get("commit", "")).strip()
             remote_version = str(remote_data.get("version", "")).strip()
@@ -244,9 +262,20 @@ def http_fallback_update_launcher():
             print_step("4", "HTTP Otomatik Guncelleme", "loading", f"Yeni kodlar indiriliyor: {remote_version}")
             updated_count = 0
             for rel_path in files_to_update:
-                raw_url = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/main/{rel_path}"
-                file_resp = requests.get(raw_url, verify=False, timeout=15, headers=headers)
-                if file_resp.status_code == 200:
+                raw_url1 = f"https://github.com/mfatih01020/stok_fatih/raw/main/{rel_path}?cb={cb}"
+                raw_url2 = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/main/{rel_path}?cb={cb}"
+
+                file_resp = None
+                for url in [raw_url1, raw_url2]:
+                    try:
+                        f_r = requests.get(url, verify=False, timeout=15, headers=headers, allow_redirects=True)
+                        if f_r.status_code == 200:
+                            file_resp = f_r
+                            break
+                    except Exception:
+                        pass
+
+                if file_resp and file_resp.status_code == 200:
                     dest_path = os.path.join(BASE_DIR, rel_path.replace("/", os.sep))
                     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
                     with open(dest_path, "wb") as f:

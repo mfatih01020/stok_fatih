@@ -1,8 +1,8 @@
 {
-  "version": "v3.4",
-  "commit": "v3.4-deneme-surumu",
-  "date": "05.10.2026 23:42",
-  "message": "🎉 v3.4 DENEME SÜRÜMÜ: HTTP Motoru ve Versiyon Kontrolü Başarıyla Test Edildi!",
+  "version": "v3.5",
+  "commit": "v3.5-live-test-100",
+  "date": "05.10.2026 23:55",
+  "message": "🎉 v3.5 CANLI GÜNCELLEME: GitHub CDN Cache Aşma ve Otomatik Kod İndirme Başarılı!",
   "files": [
     ".gitignore",
     "Calistir.bat",
