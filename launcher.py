@@ -33,7 +33,7 @@ def print_header():
     print(f" |           {WHITE}{BOLD}*  QR STOK VE BAKANLIK KONTROL SISTEMI  *  {CYAN}{BOLD}              |")
     print(f" |                  {DIM}Sistem Baslatici & Otomatik Guncelleyici{CYAN}{BOLD}              |")
     print(" |                                                                        |")
-    print(" +-------------------------------------------------------fatih-----------------+")
+    print(" +------------------------------------------------------------------------+")
     print(f"{RESET}")
 
 def print_step(step_no, title, status="ok", detail=""):
@@ -53,8 +53,15 @@ def print_step(step_no, title, status="ok", detail=""):
         step_text += f"  {DIM}{detail}{RESET}"
     print(step_text)
 
+def is_git_installed():
+    try:
+        res = subprocess.run(["git", "--version"], capture_output=True, text=True, timeout=2)
+        return res.returncode == 0
+    except Exception:
+        return False
+
 def check_environment():
-    # 1. Giris Bilgileri Dosyasi Kontrolu
+    # 1. Giris Bilgileri ve Git Kontrolu
     txt_path = "bakanlik_giris_bilgileri.txt"
     tpl_path = "bakanlik_giris_bilgileri.template.txt"
     if not os.path.exists(txt_path) and os.path.exists(tpl_path):
@@ -66,7 +73,8 @@ def check_environment():
         except Exception:
             pass
     
-    print_step("1", "Giris Yapilandirmasi & Dosyalar", "ok", "bakanlik_giris_bilgileri.txt")
+    git_status = "Git Kurulu" if is_git_installed() else "Git Yok (Web Indirme Modu Aktif)"
+    print_step("1", "Giris Yapilandirmasi & Sistem", "ok", f"bakanlik_giris_bilgileri.txt | {git_status}")
 
 def check_libraries():
     # 2. Kutuphane Kontrolu
@@ -105,36 +113,69 @@ def check_browser():
     print_step("3", "Tarayici Destegi", "ok", found)
 
 def check_updates():
-    # 4. GitHub Guncelleme Kontrolu (Hash Karşılaştırma & Reset Hard)
+    # 4. GitHub Guncelleme Kontrolu (Git Varsa Git ile, Git Yoksa Doğrudan HTTP ZIP İle)
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_ASKPASS"] = "echo"
 
+    if is_git_installed():
+        try:
+            repo_check = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True, timeout=2, env=env)
+            if repo_check.returncode == 0:
+                fetch_res = subprocess.run(["git", "fetch", "origin", "main"], capture_output=True, text=True, timeout=8, env=env)
+                
+                local_hash = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, env=env).stdout.strip()
+                remote_hash = subprocess.run(["git", "rev-parse", "origin/main"], capture_output=True, text=True, env=env).stdout.strip()
+
+                if local_hash and remote_hash and local_hash != remote_hash:
+                    print_step("4", "GitHub Otomatik Guncelleme", "loading", "Git ile yeni surum indiriliyor...")
+                    reset_res = subprocess.run(["git", "reset", "--hard", "origin/main"], capture_output=True, text=True, timeout=10, env=env)
+                    if reset_res.returncode != 0:
+                        subprocess.run(["git", "pull", "origin", "main"], capture_output=True, text=True, timeout=10, env=env)
+                    
+                    print_step("4", "GitHub Otomatik Guncelleme", "updated", "Yeni kodlar yuklendi (Git)")
+                    return True
+                else:
+                    print_step("4", "GitHub Otomatik Guncelleme", "ok", "Yazilim en son surumde (Git)")
+                    return False
+        except Exception:
+            pass
+
+    # Git yoksa veya Git çekimi başarısız olduysa -> HTTP ZIP İle Doğrudan Güncelleme!
     try:
-        repo_check = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True, timeout=2, env=env)
-        if repo_check.returncode != 0:
-            print_step("4", "GitHub Otomatik Guncelleme", "ok", "Yerel mod (Git deposu degil)")
-            return False
+        import requests
+        import zipfile
+        import io
 
-        fetch_res = subprocess.run(["git", "fetch", "origin", "main"], capture_output=True, text=True, timeout=8, env=env)
-        
-        local_hash = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, env=env).stdout.strip()
-        remote_hash = subprocess.run(["git", "rev-parse", "origin/main"], capture_output=True, text=True, env=env).stdout.strip()
+        zip_url = "https://github.com/mfatih01020/stok_fatih/archive/refs/heads/main.zip"
+        resp = requests.get(zip_url, timeout=10)
+        if resp.status_code == 200:
+            z = zipfile.ZipFile(io.BytesIO(resp.content))
+            protected = ["cikis_kayitlari.db", "bakanlik_giris_bilgileri.txt", "bkst_depo_verileri.xlsx"]
+            root_dir = os.path.dirname(os.path.abspath(__file__))
 
-        if local_hash and remote_hash and local_hash != remote_hash:
-            print_step("4", "GitHub Otomatik Guncelleme", "loading", "Yeni surum indiriliyor...")
-            reset_res = subprocess.run(["git", "reset", "--hard", "origin/main"], capture_output=True, text=True, timeout=10, env=env)
-            if reset_res.returncode != 0:
-                subprocess.run(["git", "pull", "origin", "main"], capture_output=True, text=True, timeout=10, env=env)
-            
-            print_step("4", "GitHub Otomatik Guncelleme", "updated", "Yeni kodlar yuklendi!")
-            return True
-        else:
-            print_step("4", "GitHub Otomatik Guncelleme", "ok", "Yazilim en son surumde")
-            return False
-    except Exception:
-        print_step("4", "GitHub Otomatik Guncelleme", "ok", "Kontrol tamamlandi")
-        return False
+            updated_files = 0
+            for file_info in z.infolist():
+                parts = file_info.filename.split("/", 1)
+                if len(parts) > 1 and parts[1]:
+                    rel_path = parts[1]
+                    if any(rel_path.endswith(p) for p in protected):
+                        continue
+                    
+                    target_path = os.path.join(root_dir, rel_path)
+                    if file_info.is_dir():
+                        os.makedirs(target_path, exist_ok=True)
+                    else:
+                        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                        with z.open(file_info) as src, open(target_path, "wb") as dst:
+                            dst.write(src.read())
+                        updated_files += 1
+
+            print_step("4", "GitHub Otomatik Guncelleme", "ok", "Yazilim guncel (Git olmadan Web Modu)")
+    except Exception as e:
+        print_step("4", "GitHub Otomatik Guncelleme", "warn", f"Guncelleme kontrolu atlandi")
+
+    return False
 
 def launch_app():
     print_step("5", "Uygulama Sunucusu", "ok", "HTTP 127.0.0.1:5000")
