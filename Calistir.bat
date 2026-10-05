@@ -39,60 +39,15 @@ python --version
 echo  Python bulundu.
 echo.
 
-:: -- pip guncelle ----------------------------------------------
-echo  pip guncelleniyor...
-python -m pip install --upgrade pip --quiet
-
-:: -- Kutuphaneleri yukle ---------------------------------------
-echo  [2/4] Gerekli kutuphaneler yukleniyor...
-echo.
-
-echo    ^> Flask 3.1.3 yukleniyor...
-python -m pip install "Flask==3.1.3" --quiet
+:: -- Kutuphaneleri yukle (Zaten kuruluysa aninda atlar) -----
+echo  [2/5] Kutuphane kontrolu yapiliyor...
+python -c "import flask, pandas, selenium, openpyxl, requests" > nul 2>&1
 if %errorlevel% neq 0 (
-    echo    [UYARI] Flask kurulamadi, son surum deneniyor...
-    python -m pip install flask --quiet
+    echo  Eksik kutuphaneler yukleniyor, lutfen bekleyin...
+    python -m pip install flask pandas openpyxl xlrd requests selenium
+) else (
+    echo  Kutuphaneler hazir.
 )
-
-echo    ^> Werkzeug 3.1.8 yukleniyor...
-python -m pip install "Werkzeug==3.1.8" --quiet
-if %errorlevel% neq 0 (
-    python -m pip install werkzeug --quiet
-)
-
-echo    ^> pandas 2.2.2 yukleniyor...
-python -m pip install "pandas==2.2.2" --quiet
-if %errorlevel% neq 0 (
-    echo    [UYARI] pandas kurulamadi, son surum deneniyor...
-    python -m pip install pandas --quiet
-)
-
-echo    ^> openpyxl 3.1.2 yukleniyor...
-python -m pip install "openpyxl==3.1.2" --quiet
-if %errorlevel% neq 0 (
-    python -m pip install openpyxl --quiet
-)
-
-echo    ^> xlrd 2.0.2 yukleniyor...
-python -m pip install "xlrd==2.0.2" --quiet
-if %errorlevel% neq 0 (
-    python -m pip install xlrd --quiet
-)
-
-echo    ^> requests 2.31.0 yukleniyor...
-python -m pip install "requests==2.31.0" --quiet
-if %errorlevel% neq 0 (
-    python -m pip install requests --quiet
-)
-
-echo    ^> selenium yukleniyor (Bakanlik ekrani icin)...
-python -m pip install selenium --quiet
-if %errorlevel% neq 0 (
-    echo    [UYARI] selenium kurulamadi!
-)
-
-echo.
-echo  Tum kutuphaneler hazir.
 echo.
 
 :: -- Tarayici ve WebDriver hazirligi ---------------------------
