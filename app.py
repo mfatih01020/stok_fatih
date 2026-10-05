@@ -963,6 +963,9 @@ def _do_open():
                 if edge_path:
                     options.binary_location = edge_path
                 options.add_argument("--start-maximized")
+                options.add_argument("--no-sandbox")
+                options.add_argument("--disable-dev-shm-usage")
+                options.add_experimental_option("detach", True)
                 d = webdriver.Edge(service=service, options=options)
                 print("Successfully launched Edge using msedgedriver.exe!")
                 return d
@@ -986,6 +989,9 @@ def _do_open():
             if edge_path:
                 options.binary_location = edge_path
             options.add_argument("--start-maximized")
+            options.add_argument("--no-sandbox")
+            options.add_argument("--disable-dev-shm-usage")
+            options.add_experimental_option("detach", True)
             driver = webdriver.Edge(options=options)
             print("Successfully launched Edge via Selenium Manager!")
         except Exception as e1:
@@ -999,6 +1005,9 @@ def _do_open():
             if chrome_path:
                 options.binary_location = chrome_path
             options.add_argument("--start-maximized")
+            options.add_argument("--no-sandbox")
+            options.add_argument("--disable-dev-shm-usage")
+            options.add_experimental_option("detach", True)
             driver = webdriver.Chrome(options=options)
             print("Successfully launched Chrome!")
         except Exception as e2:
