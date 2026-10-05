@@ -2,6 +2,7 @@ import os
 import sys
 import subprocess
 import shutil
+from datetime import datetime
 
 # Çalışma dizinini script'in bulunduğu klasöre sabitle
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -57,14 +58,63 @@ def clear_pycache():
             except Exception:
                 pass
 
-def get_git_info(commit_ref="HEAD"):
+def get_git_info_python():
+    try:
+        head_path = os.path.join(BASE_DIR, '.git', 'HEAD')
+        if not os.path.exists(head_path):
+            return "Bilinmiyor", "Bilinmiyor", "Bilinmiyor"
+
+        with open(head_path, "r", encoding="utf-8", errors="ignore") as f:
+            head_content = f.read().strip()
+
+        commit_hash = ""
+        if head_content.startswith("ref:"):
+            ref_rel = head_content.split(": ", 1)[1].strip()
+            ref_path = os.path.join(BASE_DIR, '.git', ref_rel)
+            if os.path.exists(ref_path):
+                with open(ref_path, "r", encoding="utf-8", errors="ignore") as f:
+                    commit_hash = f.read().strip()[:7]
+        else:
+            commit_hash = head_content[:7]
+
+        commit_date = ""
+        commit_msg = ""
+        log_path = os.path.join(BASE_DIR, '.git', 'logs', 'HEAD')
+        if os.path.exists(log_path):
+            with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                lines = [l for l in f.readlines() if l.strip()]
+                if lines:
+                    last_line = lines[-1]
+                    parts = last_line.strip().split('\t', 1)
+                    if len(parts) > 1:
+                        raw_msg = parts[1]
+                        if raw_msg.startswith("commit: "):
+                            commit_msg = raw_msg[8:]
+                        elif raw_msg.startswith("checkout: "):
+                            commit_msg = raw_msg
+                        else:
+                            commit_msg = raw_msg
+                    
+                    meta_parts = parts[0].split()
+                    if len(meta_parts) >= 5:
+                        ts_str = meta_parts[-2]
+                        if ts_str.isdigit():
+                            dt = datetime.fromtimestamp(int(ts_str))
+                            commit_date = dt.strftime("%d.%m.%Y %H:%M")
+
+        if not commit_hash:
+            return get_git_info_subprocess()
+
+        return (commit_hash or "b10a2c"), (commit_date or "Canlı Sürüm"), (commit_msg or "Sistem Güncel")
+    except Exception:
+        return get_git_info_subprocess()
+
+def get_git_info_subprocess(commit_ref="HEAD"):
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_SSL_NO_VERIFY"] = "true"
     try:
-        # Safe directory ekle
         subprocess.run(["git", "config", "--global", "--add", "safe.directory", "*"], capture_output=True, text=True, cwd=BASE_DIR)
-        
         cmd_hash = ["git", "-c", "http.sslVerify=false", "rev-parse", "--short", commit_ref]
         cmd_date = ["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%cd", "--date=format:%d.%m.%Y %H:%M", commit_ref]
         cmd_msg  = ["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%s", commit_ref]
@@ -93,30 +143,32 @@ def force_update():
             print(f"  {YELLOW}Lütfen indirip kurun: https://git-scm.com/download/win{RESET}\n")
             return False
 
-    # Safe directory yapılandırması
     subprocess.run(["git", "config", "--global", "--add", "safe.directory", "*"], capture_output=True, text=True, cwd=BASE_DIR)
 
-    cur_hash, cur_date, cur_msg = get_git_info("HEAD")
+    cur_hash, cur_date, cur_msg = get_git_info_python()
     print(f"  {WHITE}{BOLD}📌 MEVCUT SÜRÜM BİLGİLERİ:{RESET}")
     print(f"  {DIM}  • Commit Kodu : {RESET}{WHITE}{cur_hash}{RESET}")
     print(f"  {DIM}  • Sürüm Tarihi: {RESET}{WHITE}{cur_date}{RESET}")
     print(f"  {DIM}  • Son Değişiklik: {RESET}{WHITE}{cur_msg}{RESET}\n")
 
     print(f"  {CYAN}[1/2] GitHub sunucusundan güncellemeler kontrol ediliyor...{RESET}")
-    fetch_res = subprocess.run(["git", "-c", "http.sslVerify=false", "fetch", "origin", "main:refs/remotes/origin/main", "--force"], capture_output=True, text=True, timeout=20, env=env, cwd=BASE_DIR)
+    fetch_res = subprocess.run(["git", "-c", "http.sslVerify=false", "fetch", "origin", "main:refs/remotes/origin/main", "--force"], capture_output=True, text=True, timeout=25, env=env, cwd=BASE_DIR)
     
     local_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
     remote_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "origin/main"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
 
-    # Eğer local_hash bilinmiyorsa/boşsa VEYA uzaktaki kodla farklıysa -> ZORUNLU GÜNCELLE!
-    if remote_hash and (local_hash != remote_hash or not local_hash or local_hash == "Bilinmiyor"):
+    if not local_hash:
+        local_hash = cur_hash
+
+    # Eğer local_hash ile remote_hash farklıysa VEYA local_hash Bilinmiyor ise -> GÜNCELLE!
+    if remote_hash and (local_hash != remote_hash or local_hash == "Bilinmiyor" or not local_hash):
         print(f"\n  {YELLOW}{BOLD}[🔄 GÜNCELLEME BULUNDU] Web değişiklikleri yükleniyor...{RESET}")
         subprocess.run(["git", "-c", "http.sslVerify=false", "checkout", "-B", "main", "origin/main", "--force"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
         reset_res = subprocess.run(["git", "-c", "http.sslVerify=false", "reset", "--hard", "origin/main"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
         
         clear_pycache()
 
-        new_hash, new_date, new_msg = get_git_info("HEAD")
+        new_hash, new_date, new_msg = get_git_info_python()
 
         print(f"\n{GREEN}{BOLD} =============================================================={RESET}")
         print(f"{GREEN}{BOLD}  🟢 [BAŞARILI] SİSTEM EN SON SÜRÜME GÜNCELLENDİ!{RESET}")
