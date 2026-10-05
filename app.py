@@ -22,33 +22,46 @@ def add_header(response):
 
 # ── Sürüm & Güncelleme Bilgisi Endpoint'i ─────────────────────────────────
 import subprocess
+import json
 
 def get_version_info():
-    env = os.environ.copy()
-    env["GIT_TERMINAL_PROMPT"] = "0"
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    h, d, m = "", "", ""
     try:
-        cmd_hash = ["git", "rev-parse", "--short", "HEAD"]
-        cmd_date = ["git", "log", "-1", "--format=%cd", "--date=format:%d.%m.%Y %H:%M", "HEAD"]
-        cmd_msg  = ["git", "log", "-1", "--format=%s", "HEAD"]
-
-        h = subprocess.run(cmd_hash, capture_output=True, text=True, env=env, timeout=2).stdout.strip() or "v2.5"
-        d = subprocess.run(cmd_date, capture_output=True, text=True, env=env, timeout=2).stdout.strip() or "Canlı Sürüm"
-        m = subprocess.run(cmd_msg,  capture_output=True, text=True, env=env, timeout=2).stdout.strip() or "Sistem Güncel"
-        return {
-            "success": True,
-            "version": f"v3.2 (ZORUNLU GÜNCELLEME MOTORU %100 ÇALIŞIYOR 🎉 - {h})",
-            "commit_hash": h,
-            "commit_date": d,
-            "commit_msg": m
-        }
+        env = os.environ.copy()
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        h = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, env=env, timeout=2, cwd=base_dir).stdout.strip()
+        d = subprocess.run(["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%cd", "--date=format:%d.%m.%Y %H:%M", "HEAD"], capture_output=True, text=True, env=env, timeout=2, cwd=base_dir).stdout.strip()
+        m = subprocess.run(["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%s", "HEAD"], capture_output=True, text=True, env=env, timeout=2, cwd=base_dir).stdout.strip()
     except Exception:
-        return {
-            "success": True,
-            "version": "v3.2.0 (ZORUNLU GÜNCELLEME MOTORU %100 ÇALIŞIYOR 🎉)",
-            "commit_hash": "v3.2",
-            "commit_date": "Canlı Sürüm",
-            "commit_msg": "Sistem Güncel"
-        }
+        pass
+
+    if not h or h == "Bilinmiyor":
+        v_path = os.path.join(base_dir, "version.json")
+        if os.path.exists(v_path):
+            try:
+                with open(v_path, "r", encoding="utf-8") as f:
+                    v_data = json.load(f)
+                    v_code = v_data.get("version", "v3.3")
+                    v_commit = v_data.get("commit", "3.3.0")
+                    d = v_data.get("date", "05.10.2026")
+                    m = v_data.get("message", "Dual-Engine Güncelleme Motoru")
+                    h = f"{v_code} ({v_commit})"
+            except Exception:
+                pass
+
+    if not h:
+        h = "v3.3"
+        d = "05.10.2026"
+        m = "v3.3 Canlı Sürüm"
+
+    return {
+        "success": True,
+        "version": f"v3.3 (Dual-Engine Güncelleme Motoru Aktif 🎉 - {h})",
+        "commit_hash": h,
+        "commit_date": d,
+        "commit_msg": m
+    }
 
 @app.route('/api/system/version', methods=['GET'])
 def system_version_api():

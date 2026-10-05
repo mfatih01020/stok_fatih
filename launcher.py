@@ -3,6 +3,7 @@ import sys
 import subprocess
 import time
 import shutil
+import json
 import webbrowser
 from datetime import datetime
 
@@ -11,7 +12,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
 
 # Consolu UTF-8 moduna gecir ve pencere basligini ayarla
-os.system('title QR Stok Yonetim Sistemi - Baslatici')
+os.system('title QR Stok Yonetim Sistemi - Baslatici (v3.3)')
 if hasattr(sys.stdout, 'reconfigure'):
     try:
         sys.stdout.reconfigure(encoding='utf-8')
@@ -36,8 +37,8 @@ def print_header():
     print(f"{CYAN}{BOLD}")
     print(" +------------------------------------------------------------------------+")
     print(" |                                                                        |")
-    print(f" |           {WHITE}{BOLD}*  QR STOK VE BAKANLIK KONTROL SISTEMI (v3.2) * {CYAN}{BOLD}          |")
-    print(f" |           {GREEN}{BOLD}[ v3.2 ZORUNLU GUNCELLEME MOTORU YENILENDI ]{CYAN}{BOLD}            |")
+    print(f" |           {WHITE}{BOLD}*  QR STOK VE BAKANLIK KONTROL SISTEMI (v3.3) * {CYAN}{BOLD}          |")
+    print(f" |           {GREEN}{BOLD}[ v3.3 DUAL-ENGINE OTOMATIK GUNCELLEME YENILENDI ]{CYAN}{BOLD}       |")
     print(" |                                                                        |")
     print(" +------------------------------------------------------------------------+")
     print(f"{RESET}")
@@ -94,77 +95,72 @@ def ensure_git_installed():
     except Exception:
         pass
 
-    print_step("1", "Git Kurulum Kontrolu", "warn", "Git indiriliyor...")
-    webbrowser.open("https://git-scm.com/download/win")
     return False
 
-def get_git_info_python():
+def get_unified_version_info():
     try:
         head_path = os.path.join(BASE_DIR, '.git', 'HEAD')
-        if not os.path.exists(head_path):
-            return "Bilinmiyor", "Bilinmiyor", "Bilinmiyor"
+        if os.path.exists(head_path):
+            with open(head_path, "r", encoding="utf-8", errors="ignore") as f:
+                head_content = f.read().strip()
 
-        with open(head_path, "r", encoding="utf-8", errors="ignore") as f:
-            head_content = f.read().strip()
+            commit_hash = ""
+            if head_content.startswith("ref:"):
+                ref_rel = head_content.split(": ", 1)[1].strip()
+                ref_path = os.path.join(BASE_DIR, '.git', ref_rel)
+                if os.path.exists(ref_path):
+                    with open(ref_path, "r", encoding="utf-8", errors="ignore") as f:
+                        commit_hash = f.read().strip()[:7]
+            else:
+                commit_hash = head_content[:7]
 
-        commit_hash = ""
-        if head_content.startswith("ref:"):
-            ref_rel = head_content.split(": ", 1)[1].strip()
-            ref_path = os.path.join(BASE_DIR, '.git', ref_rel)
-            if os.path.exists(ref_path):
-                with open(ref_path, "r", encoding="utf-8", errors="ignore") as f:
-                    commit_hash = f.read().strip()[:7]
-        else:
-            commit_hash = head_content[:7]
-
-        commit_date = ""
-        commit_msg = ""
-        log_path = os.path.join(BASE_DIR, '.git', 'logs', 'HEAD')
-        if os.path.exists(log_path):
-            with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
-                lines = [l for l in f.readlines() if l.strip()]
-                if lines:
-                    last_line = lines[-1]
-                    parts = last_line.strip().split('\t', 1)
-                    if len(parts) > 1:
-                        raw_msg = parts[1]
-                        if raw_msg.startswith("commit: "):
-                            commit_msg = raw_msg[8:]
-                        elif raw_msg.startswith("checkout: "):
-                            commit_msg = raw_msg
-                        else:
-                            commit_msg = raw_msg
-                    
-                    meta_parts = parts[0].split()
-                    if len(meta_parts) >= 5:
-                        ts_str = meta_parts[-2]
-                        if ts_str.isdigit():
-                            dt = datetime.fromtimestamp(int(ts_str))
+            commit_date = ""
+            commit_msg = ""
+            log_path = os.path.join(BASE_DIR, '.git', 'logs', 'HEAD')
+            if os.path.exists(log_path):
+                with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                    lines = [l for l in f.readlines() if l.strip()]
+                    if lines:
+                        last_line = lines[-1]
+                        parts = last_line.strip().split('\t', 1)
+                        if len(parts) > 1:
+                            commit_msg = parts[1].replace("commit: ", "").replace("checkout: ", "").strip()
+                        meta_parts = parts[0].split()
+                        if len(meta_parts) >= 5 and meta_parts[-2].isdigit():
+                            dt = datetime.fromtimestamp(int(meta_parts[-2]))
                             commit_date = dt.strftime("%d.%m.%Y %H:%M")
 
-        if not commit_hash:
-            return get_git_info_subprocess()
-
-        return (commit_hash or "Bilinmiyor"), (commit_date or "Canlı Sürüm"), (commit_msg or "Sistem Güncel")
+            if commit_hash and commit_hash != "Bilinmiyor":
+                return commit_hash, (commit_date or "Canli Surum"), (commit_msg or "Sistem Guncel")
     except Exception:
-        return get_git_info_subprocess()
+        pass
 
-def get_git_info_subprocess(commit_ref="HEAD"):
-    env = os.environ.copy()
-    env["GIT_TERMINAL_PROMPT"] = "0"
-    env["GIT_SSL_NO_VERIFY"] = "true"
     try:
-        subprocess.run(["git", "config", "--global", "--add", "safe.directory", "*"], capture_output=True, text=True, cwd=BASE_DIR)
-        cmd_hash = ["git", "-c", "http.sslVerify=false", "rev-parse", "--short", commit_ref]
-        cmd_date = ["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%cd", "--date=format:%d.%m.%Y %H:%M", commit_ref]
-        cmd_msg  = ["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%s", commit_ref]
-
-        h = subprocess.run(cmd_hash, capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
-        d = subprocess.run(cmd_date, capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
-        m = subprocess.run(cmd_msg,  capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
-        return (h or "Bilinmiyor"), (d or "Bilinmiyor"), (m or "Bilinmiyor")
+        env = os.environ.copy()
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        env["GIT_SSL_NO_VERIFY"] = "true"
+        h = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
+        d = subprocess.run(["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%cd", "--date=format:%d.%m.%Y %H:%M", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
+        m = subprocess.run(["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%s", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
+        if h and h != "Bilinmiyor":
+            return h, (d or "Canli Surum"), (m or "Sistem Guncel")
     except Exception:
-        return "Bilinmiyor", "Bilinmiyor", "Bilinmiyor"
+        pass
+
+    v_path = os.path.join(BASE_DIR, "version.json")
+    if os.path.exists(v_path):
+        try:
+            with open(v_path, "r", encoding="utf-8") as f:
+                v_data = json.load(f)
+                v_code = v_data.get("version", "v3.3")
+                v_commit = v_data.get("commit", "3.3.0")
+                v_date = v_data.get("date", "05.10.2026")
+                v_msg = v_data.get("message", "Canli Surum")
+                return f"{v_code} ({v_commit})", v_date, v_msg
+        except Exception:
+            pass
+
+    return "v3.3 (3.3.0)", "05.10.2026 23:55", "v3.3 Dual-Engine Guncelleme Motoru"
 
 def check_environment():
     txt_path = "bakanlik_giris_bilgileri.txt"
@@ -179,8 +175,8 @@ def check_environment():
             pass
     
     git_ok = ensure_git_installed()
-    git_msg = "Git Hazir" if git_ok else "Git Yuklu Degil"
-    print_step("1", "Giris Yapilandirmasi & Sistem", "ok" if git_ok else "warn", f"bakanlik_giris_bilgileri.txt | {git_msg}")
+    git_msg = "Git Hazir" if git_ok else "HTTP Motoru Aktif"
+    print_step("1", "Giris Yapilandirmasi & Sistem", "ok", f"bakanlik_giris_bilgileri.txt | {git_msg}")
 
 def check_libraries():
     required = ["flask", "pandas", "openpyxl", "requests", "selenium"]
@@ -216,54 +212,101 @@ def check_browser():
 
     print_step("3", "Tarayici Destegi", "ok", found)
 
-def check_updates():
-    if not is_git_installed():
-        print_step("4", "GitHub Otomatik Guncelleme", "warn", "Git bekleniyor...")
-        return False
+def http_fallback_update_launcher():
+    try:
+        import requests
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        
+        remote_vurl = "https://raw.githubusercontent.com/mfatih01020/stok_fatih/main/version.json"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        resp = requests.get(remote_vurl, verify=False, timeout=8, headers=headers)
+        if resp.status_code == 200:
+            remote_data = resp.json()
+            remote_commit = str(remote_data.get("commit", "")).strip()
+            remote_version = str(remote_data.get("version", "")).strip()
+            files_to_update = remote_data.get("files", [])
 
+            local_vpath = os.path.join(BASE_DIR, "version.json")
+            local_commit = ""
+            if os.path.exists(local_vpath):
+                try:
+                    with open(local_vpath, "r", encoding="utf-8") as f:
+                        local_commit = str(json.load(f).get("commit", "")).strip()
+                except Exception:
+                    pass
+
+            if local_commit and local_commit == remote_commit:
+                cur_h, cur_d, _ = get_unified_version_info()
+                print_step("4", "HTTP Otomatik Guncelleme", "ok", f"Surum: {cur_h} ({cur_d})")
+                return False
+
+            print_step("4", "HTTP Otomatik Guncelleme", "loading", f"Yeni kodlar indiriliyor: {remote_version}")
+            updated_count = 0
+            for rel_path in files_to_update:
+                raw_url = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/main/{rel_path}"
+                file_resp = requests.get(raw_url, verify=False, timeout=15, headers=headers)
+                if file_resp.status_code == 200:
+                    dest_path = os.path.join(BASE_DIR, rel_path.replace("/", os.sep))
+                    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                    with open(dest_path, "wb") as f:
+                        f.write(file_resp.content)
+                    updated_count += 1
+
+            with open(local_vpath, "w", encoding="utf-8") as f:
+                json.dump(remote_data, f, ensure_ascii=False, indent=2)
+
+            clear_pycache()
+            print_step("4", "HTTP Otomatik Guncelleme", "updated", f"Yeni Surum Yuklendi ({remote_version})")
+            return True
+    except Exception as e:
+        print_step("4", "HTTP Otomatik Guncelleme", "warn", f"HTTP Baglantisi: {e}")
+    
+    cur_h, cur_d, _ = get_unified_version_info()
+    print_step("4", "Otomatik Guncelleme Motoru", "ok", f"Surum: {cur_h} ({cur_d})")
+    return False
+
+def check_updates():
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_ASKPASS"] = "echo"
     env["GIT_SSL_NO_VERIFY"] = "true"
 
-    try:
-        subprocess.run(["git", "config", "--global", "--add", "safe.directory", "*"], capture_output=True, text=True, cwd=BASE_DIR)
-        
-        repo_check = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True, timeout=3, env=env, cwd=BASE_DIR)
-        if repo_check.returncode == 0:
-            print_step("4", "GitHub Otomatik Guncelleme", "loading", "GitHub sunucusu kontrol ediliyor...")
-            repo_url = "https://github.com/mfatih01020/stok_fatih.git"
-            fetch_res = subprocess.run(["git", "-c", "http.sslVerify=false", "fetch", repo_url, "main", "--force"], capture_output=True, text=True, timeout=30, env=env, cwd=BASE_DIR)
-            
-            if fetch_res.returncode != 0:
-                print_step("4", "GitHub Otomatik Guncelleme", "warn", "Baglanti hatasi (Git sunucuya erisemedi)")
-                return False
+    if is_git_installed():
+        try:
+            subprocess.run(["git", "config", "--global", "--add", "safe.directory", "*"], capture_output=True, text=True, cwd=BASE_DIR)
+            repo_check = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True, timeout=3, env=env, cwd=BASE_DIR)
+            if repo_check.returncode == 0:
+                print_step("4", "GitHub Otomatik Guncelleme", "loading", "GitHub sunucusu kontrol ediliyor...")
+                repo_url = "https://github.com/mfatih01020/stok_fatih.git"
+                fetch_res = subprocess.run(["git", "-c", "http.sslVerify=false", "fetch", repo_url, "main", "--force"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
 
-            local_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
-            remote_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "FETCH_HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
+                if fetch_res.returncode == 0:
+                    local_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
+                    remote_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "FETCH_HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
 
-            cur_h, cur_d, cur_m = get_git_info_python()
-            if not local_hash:
-                local_hash = cur_h
+                    cur_h, cur_d, cur_m = get_unified_version_info()
+                    if not local_hash:
+                        local_hash = cur_h
 
-            if remote_hash and (local_hash != remote_hash or local_hash == "Bilinmiyor" or not local_hash):
-                print_step("4", "GitHub Otomatik Guncelleme", "loading", "Yeni kodlar yukleniyor...")
-                subprocess.run(["git", "-c", "http.sslVerify=false", "checkout", "-B", "main", "FETCH_HEAD", "--force"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
-                reset_res = subprocess.run(["git", "-c", "http.sslVerify=false", "reset", "--hard", "FETCH_HEAD"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
-                
-                clear_pycache()
+                    if remote_hash and (local_hash != remote_hash or local_hash == "Bilinmiyor" or not local_hash):
+                        print_step("4", "GitHub Otomatik Guncelleme", "loading", "Yeni kodlar yukleniyor...")
+                        subprocess.run(["git", "-c", "http.sslVerify=false", "checkout", "-B", "main", "FETCH_HEAD", "--force"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
+                        subprocess.run(["git", "-c", "http.sslVerify=false", "reset", "--hard", "FETCH_HEAD"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
 
-                new_h, new_d, new_m = get_git_info_python()
-                print_step("4", "GitHub Otomatik Guncelleme", "updated", f"Yeni Surum: {new_h} ({new_d})")
-                print(f"  {CYAN}  └─ Son Degisiklik: {WHITE}{new_m}{RESET}")
-                return True
-            else:
-                print_step("4", "GitHub Otomatik Guncelleme", "ok", f"Surum: {cur_h} ({cur_d})")
-                return False
-    except Exception as e:
-        print_step("4", "GitHub Otomatik Guncelleme", "warn", f"Guncelleme: {e}")
+                        clear_pycache()
 
-    return False
+                        new_h, new_d, new_m = get_unified_version_info()
+                        print_step("4", "GitHub Otomatik Guncelleme", "updated", f"Yeni Surum: {new_h} ({new_d})")
+                        print(f"  {CYAN}  └─ Son Degisiklik: {WHITE}{new_m}{RESET}")
+                        return True
+                    else:
+                        print_step("4", "GitHub Otomatik Guncelleme", "ok", f"Surum: {cur_h} ({cur_d})")
+                        return False
+        except Exception:
+            pass
+
+    return http_fallback_update_launcher()
 
 def launch_app():
     print_step("5", "Uygulama Sunucusu", "ok", "HTTP 127.0.0.1:5000")

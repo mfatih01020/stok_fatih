@@ -1,0 +1,27 @@
+{
+  "version": "v3.3",
+  "commit": "v3.3-release",
+  "date": "05.10.2026 23:55",
+  "message": "v3.3 Dual-Engine (Git + Pure Python HTTP) Kesintisiz Otomatik Güncelleme Sistemi",
+  "files": [
+    ".gitignore",
+    "Calistir.bat",
+    "Guncelle.bat",
+    "KURULUM.md",
+    "app.py",
+    "bakanlik_giris_bilgileri.template.txt",
+    "check_ids.py",
+    "guncelleme_kontrol.py",
+    "indir_driver.ps1",
+    "launcher.py",
+    "requirements.txt",
+    "static/app.js",
+    "static/style.css",
+    "templates/cikis.html",
+    "templates/cikis_listesi.html",
+    "templates/index.html",
+    "update_routes.py",
+    "update_ui.py",
+    "version.json"
+  ]
+}
