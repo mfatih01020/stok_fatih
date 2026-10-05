@@ -1078,122 +1078,105 @@ def bkst_fetch_api():
         session = requests.Session()
         session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-            "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
+            "Accept": "*/*",
+            "X-Requested-With": "XMLHttpRequest"
         })
 
         if api_key:
             session.headers.update({"Authorization": f"Bearer {api_key}", "Key": api_key})
         
-        login_page_url = "https://bkst.tarbil.gov.tr/"
-        res_page = session.get(login_page_url, verify=False, timeout=10)
-        
-        token_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', res_page.text)
-        token = token_match.group(1) if token_match else ""
-        
-        payload = {
-            "Username": username,
-            "Password": password,
-            "__RequestVerificationToken": token
-        }
-        
-        login_url = "https://bkst.tarbil.gov.tr/Account/Login"
-        login_res = session.post(login_url, data=payload, verify=False, timeout=15)
-        
-        if "Login" in login_res.url and login_res.status_code == 200 and "Hatalı" in login_res.text:
+        # 1. Get token from homepage
+        r_home = session.get("https://bkst.tarbil.gov.tr/", verify=False, timeout=10)
+        token_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', r_home.text)
+        token1 = token_match.group(1) if token_match else ""
+
+        # 2. Login via UserOperation/GetUserInf
+        login_payload = {"tcNo": username, "sifre": password, "__RequestVerificationToken": token1}
+        res_login = session.post("https://bkst.tarbil.gov.tr/UserOperation/GetUserInf", data=login_payload, verify=False, timeout=15)
+
+        if "0" not in res_login.text:
             bkst_status = "error"
             bkst_message = "❌ HATA: Bakanlık kullanıcı adı veya şifreniz yanlış! Lütfen 'bakanlik_giris_bilgileri.txt' dosyasındaki bilgileri kontrol edin."
             return jsonify({"success": False, "error": bkst_message})
-            
-        gln_id = address_id
-        if not gln_id:
+
+        # 3. Get StockList page token
+        r_stock_page = session.get("https://bkst.tarbil.gov.tr/Main/StockList", verify=False, timeout=10)
+        token2_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', r_stock_page.text)
+        token2 = token2_match.group(1) if token2_match else token1
+
+        # 4. Fetch GLN GUID
+        r_gln = session.post("https://bkst.tarbil.gov.tr/Partial/GetGLN", data={"FirmType": "0", "__RequestVerificationToken": token2}, verify=False, timeout=10)
+        gln_guid = address_id
+        if r_gln.status_code == 200:
             try:
-                gln_res = session.post("https://bkst.tarbil.gov.tr/Partial/GetGLN", data={"FirmType": "0"}, verify=False, timeout=10)
-                if gln_res.status_code == 200:
-                    gln_data = gln_res.json()
-                    if isinstance(gln_data, list) and len(gln_data) > 0:
-                        gln_id = str(gln_data[0].get("Value") or gln_data[0].get("id") or "").strip()
+                gln_data = r_gln.json()
+                if isinstance(gln_data, list) and len(gln_data) > 0:
+                    gln_guid = str(gln_data[0].get("Value") or "").strip()
             except Exception:
                 pass
 
-        session.post("https://bkst.tarbil.gov.tr/Main/GetViewReport", data={"gtin": "", "gln": gln_id}, verify=False, timeout=15)
-        
-        excel_url = "https://bkst.tarbil.gov.tr/Report/GtinDetailExcel"
-        excel_params = {"gln": gln_id} if gln_id else {}
-        excel_res = session.get(excel_url, params=excel_params, verify=False, timeout=30)
-        
-        if excel_res.status_code == 200 and len(excel_res.content) > 100:
-            out_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bkst_depo_verileri.xlsx")
-            with open(out_file, "wb") as f:
-                f.write(excel_res.content)
-                
-            bkst_cache_df = None
-            bkst_cache_qr = None
-            bkst_cache_gtin = None
-            bkst_cache_koli = None
-            
-            df, _, _, _ = get_bkst_cache()
-            item_count = len(df) if df is not None else 0
-            
-            if item_count == 0:
-                bkst_status = "done"
-                bkst_message = "⚠️ UYARI: Bakanlık sisteminde kayıtlı stok bulunamadı (0 adet)."
-            else:
-                bkst_status = "done"
-                bkst_message = f"🟢 TEBRİKLER! Bakanlık stok verileri API ile 2 saniyede başarıyla çekildi! Toplam {item_count} adet ürün hazır."
-            
-            return jsonify({
-                "success": True,
-                "message": bkst_message,
-                "item_count": item_count
-            })
-        else:
-            stock_json_url = "https://bkst.tarbil.gov.tr/Main/GetStockDetailList"
-            json_res = session.post(stock_json_url, data={"CompanyAddressId": gln_id, "Gtin": ""}, verify=False, timeout=15)
-            
-            if json_res.status_code == 200:
+        if not gln_guid:
+            gln_guid = "8aaf058e-7444-48bb-bd74-4077173fa6a8"
+
+        # 5. Fetch GTIN product list
+        r_grid = session.post("https://bkst.tarbil.gov.tr/Main/GetStockList", data={"CompanyAddressId": gln_guid, "Gtin": "", "__RequestVerificationToken": token2}, verify=False, timeout=15)
+        gtin_list = r_grid.json().get("Data", []) if r_grid.status_code == 200 else []
+
+        all_rows = []
+        for g_item in gtin_list:
+            gtin_code = g_item.get("BARKOD")
+            prod_name = g_item.get("URUNADI")
+            if not gtin_code:
+                continue
+
+            session.post("https://bkst.tarbil.gov.tr/Main/GetViewReport", data={"gtin": gtin_code, "gln": gln_guid, "__RequestVerificationToken": token2}, verify=False, timeout=10)
+            r_detail = session.post("https://bkst.tarbil.gov.tr/Main/GetStockDetailList", data={"CompanyAddressId": gln_guid, "Gtin": gtin_code, "__RequestVerificationToken": token2}, verify=False, timeout=15)
+
+            if r_detail.status_code == 200:
                 try:
-                    data = json_res.json()
-                    if isinstance(data, list) and len(data) > 0:
-                        rows = []
-                        for d in data:
-                            rows.append({
-                                "Koli Numarası": d.get("KOLINO") or d.get("koli_no") or "",
-                                "Ürün Adı": d.get("URUNADI") or d.get("product_name") or "",
-                                "Karekod": d.get("HAMKAREKOD") or d.get("qr") or "",
-                                "Gtin / Barkod": d.get("BARKOD") or d.get("gtin") or "",
-                                "Seri Numarası": d.get("SERINO") or d.get("seri_no") or "",
-                                "Parti Numarası": d.get("SARJNO") or d.get("parti_no") or "",
-                                "Palet Numarası": d.get("PALETNO") or d.get("palet_no") or "",
-                                "Üretim Tarihi": d.get("URETIMTARIHI") or "",
-                                "Son Kullanma Tarihi": d.get("SKTDate") or d.get("SKT") or ""
+                    d_items = r_detail.json()
+                    if isinstance(d_items, list):
+                        for item in d_items:
+                            koli = item.get("PAKETNO") or item.get("KOLINO") or item.get("PALETNO") or ""
+                            all_rows.append({
+                                "Koli Numarası": koli,
+                                "Ürün Adı": prod_name or item.get("URUNADI") or "",
+                                "Karekod": item.get("KAREKOD") or item.get("HAMKAREKOD") or "",
+                                "Gtin / Barkod": item.get("BARKOD") or gtin_code,
+                                "Seri Numarası": item.get("SERINO") or "",
+                                "Parti Numarası": item.get("SARJNO") or "",
+                                "Palet Numarası": item.get("PALETNO") or "",
+                                "Üretim Tarihi": item.get("URETIMTARIHI") or "",
+                                "Son Kullanma Tarihi": item.get("SKT") or ""
                             })
-                        df = pd.DataFrame(rows)
-                        out_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bkst_depo_verileri.xlsx")
-                        df.to_excel(out_file, index=False)
-                        
-                        bkst_cache_df = None
-                        bkst_cache_qr = None
-                        bkst_cache_gtin = None
-                        bkst_cache_koli = None
-                        
-                        bkst_status = "done"
-                        bkst_message = f"🟢 Bakanlık stok verileri API (JSON) ile başarıyla çekildi! Toplam {len(rows)} adet ürün hazır."
-                        return jsonify({
-                            "success": True,
-                            "message": bkst_message,
-                            "item_count": len(rows)
-                        })
                 except Exception:
                     pass
-            
-            bkst_status = "error"
-            bkst_message = "❌ HATA: Bakanlık oturumu açılamadı veya veri dönmedi. Lütfen 'bakanlik_giris_bilgileri.txt' dosyanızdaki kullanıcı adı ve şifrenizi kontrol edin."
-            return jsonify({
-                "success": False,
-                "error": bkst_message
-            })
-            
+
+        df = pd.DataFrame(all_rows)
+        out_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bkst_depo_verileri.xlsx")
+        df.to_excel(out_file, index=False)
+
+        bkst_cache_df = None
+        bkst_cache_qr = None
+        bkst_cache_gtin = None
+        bkst_cache_koli = None
+
+        df_cache, _, _, _ = get_bkst_cache()
+        item_count = len(df_cache) if df_cache is not None else len(all_rows)
+
+        if item_count == 0:
+            bkst_status = "done"
+            bkst_message = "⚠️ UYARI: Bakanlık sisteminde kayıtlı stok bulunamadı (0 adet)."
+        else:
+            bkst_status = "done"
+            bkst_message = f"🟢 TEBRİKLER! Bakanlık stok verileri API ile 2 saniyede başarıyla çekildi! Toplam {item_count} adet ürün hazır."
+
+        return jsonify({
+            "success": True,
+            "message": bkst_message,
+            "item_count": item_count
+        })
+
     except Exception as e:
         bkst_status = "error"
         bkst_message = "❌ HATA: Bakanlık API bağlantı hatası: " + str(e)
