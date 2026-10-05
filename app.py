@@ -36,7 +36,7 @@ def get_version_info():
         m = subprocess.run(cmd_msg,  capture_output=True, text=True, env=env, timeout=2).stdout.strip() or "Sistem Güncel"
         return {
             "success": True,
-            "version": f"v2.9 (TEST GÜNCELLEMESİ v2.9 🚀 - {h})",
+            "version": f"v3.0 (OTOMATİK GÜNCELLEME V3.0 BAŞARILI 🎉 - {h})",
             "commit_hash": h,
             "commit_date": d,
             "commit_msg": m
@@ -44,8 +44,8 @@ def get_version_info():
     except Exception:
         return {
             "success": True,
-            "version": "v2.9.0 (TEST GÜNCELLEMESİ v2.9 🚀)",
-            "commit_hash": "v2.9",
+            "version": "v3.0.0 (OTOMATİK GÜNCELLEME V3.0 BAŞARILI 🎉)",
+            "commit_hash": "v3.0",
             "commit_date": "Canlı Sürüm",
             "commit_msg": "Sistem Güncel"
         }
