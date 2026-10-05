@@ -1,8 +1,8 @@
 {
-  "version": "v3.3",
-  "commit": "v3.3-release",
-  "date": "05.10.2026 23:55",
-  "message": "v3.3 Dual-Engine (Git + Pure Python HTTP) Kesintisiz Otomatik Güncelleme Sistemi",
+  "version": "v3.4",
+  "commit": "v3.4-deneme-surumu",
+  "date": "05.10.2026 23:42",
+  "message": "🎉 v3.4 DENEME SÜRÜMÜ: HTTP Motoru ve Versiyon Kontrolü Başarıyla Test Edildi!",
   "files": [
     ".gitignore",
     "Calistir.bat",
