@@ -5,7 +5,7 @@ import time
 import shutil
 import webbrowser
 
-# Çalışma dizinini script'in bulunduğu klasöre sabitle (System32 hatasını engeller)
+# Çalışma dizinini script'in bulunduğu klasöre sabitle
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
 
@@ -102,6 +102,8 @@ def get_git_info(commit_ref="HEAD"):
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_SSL_NO_VERIFY"] = "true"
     try:
+        subprocess.run(["git", "config", "--global", "--add", "safe.directory", "*"], capture_output=True, text=True, cwd=BASE_DIR)
+        
         cmd_hash = ["git", "-c", "http.sslVerify=false", "rev-parse", "--short", commit_ref]
         cmd_date = ["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%cd", "--date=format:%d.%m.%Y %H:%M", commit_ref]
         cmd_msg  = ["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%s", commit_ref]
@@ -174,6 +176,8 @@ def check_updates():
     env["GIT_SSL_NO_VERIFY"] = "true"
 
     try:
+        subprocess.run(["git", "config", "--global", "--add", "safe.directory", "*"], capture_output=True, text=True, cwd=BASE_DIR)
+        
         repo_check = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True, timeout=3, env=env, cwd=BASE_DIR)
         if repo_check.returncode == 0:
             print_step("4", "GitHub Otomatik Guncelleme", "loading", "GitHub sunucusu kontrol ediliyor...")
@@ -184,7 +188,8 @@ def check_updates():
 
             cur_h, cur_d, cur_m = get_git_info("HEAD")
 
-            if local_hash and remote_hash and local_hash != remote_hash:
+            # Eğer local_hash bilinmiyorsa VEYA uzaktakinden farklıysa -> ZORUNLU GÜNCELLE!
+            if remote_hash and (local_hash != remote_hash or not local_hash or local_hash == "Bilinmiyor"):
                 print_step("4", "GitHub Otomatik Guncelleme", "loading", "Yeni kodlar yukleniyor...")
                 subprocess.run(["git", "-c", "http.sslVerify=false", "checkout", "-B", "main", "origin/main", "--force"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
                 reset_res = subprocess.run(["git", "-c", "http.sslVerify=false", "reset", "--hard", "origin/main"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)

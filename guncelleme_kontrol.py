@@ -3,7 +3,7 @@ import sys
 import subprocess
 import shutil
 
-# Çalışma dizinini script'in bulunduğu klasöre sabitle (System32 hatasını engeller)
+# Çalışma dizinini script'in bulunduğu klasöre sabitle
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
 
@@ -62,6 +62,9 @@ def get_git_info(commit_ref="HEAD"):
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_SSL_NO_VERIFY"] = "true"
     try:
+        # Safe directory ekle
+        subprocess.run(["git", "config", "--global", "--add", "safe.directory", "*"], capture_output=True, text=True, cwd=BASE_DIR)
+        
         cmd_hash = ["git", "-c", "http.sslVerify=false", "rev-parse", "--short", commit_ref]
         cmd_date = ["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%cd", "--date=format:%d.%m.%Y %H:%M", commit_ref]
         cmd_msg  = ["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%s", commit_ref]
@@ -90,6 +93,9 @@ def force_update():
             print(f"  {YELLOW}Lütfen indirip kurun: https://git-scm.com/download/win{RESET}\n")
             return False
 
+    # Safe directory yapılandırması
+    subprocess.run(["git", "config", "--global", "--add", "safe.directory", "*"], capture_output=True, text=True, cwd=BASE_DIR)
+
     cur_hash, cur_date, cur_msg = get_git_info("HEAD")
     print(f"  {WHITE}{BOLD}📌 MEVCUT SÜRÜM BİLGİLERİ:{RESET}")
     print(f"  {DIM}  • Commit Kodu : {RESET}{WHITE}{cur_hash}{RESET}")
@@ -102,7 +108,8 @@ def force_update():
     local_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
     remote_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "origin/main"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
 
-    if local_hash and remote_hash and local_hash != remote_hash:
+    # Eğer local_hash bilinmiyorsa/boşsa VEYA uzaktaki kodla farklıysa -> ZORUNLU GÜNCELLE!
+    if remote_hash and (local_hash != remote_hash or not local_hash or local_hash == "Bilinmiyor"):
         print(f"\n  {YELLOW}{BOLD}[🔄 GÜNCELLEME BULUNDU] Web değişiklikleri yükleniyor...{RESET}")
         subprocess.run(["git", "-c", "http.sslVerify=false", "checkout", "-B", "main", "origin/main", "--force"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
         reset_res = subprocess.run(["git", "-c", "http.sslVerify=false", "reset", "--hard", "origin/main"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
