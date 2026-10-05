@@ -212,19 +212,35 @@ def check_browser():
 
     print_step("3", "Tarayici Destegi", "ok", found)
 
+def get_latest_remote_commit_sha(requests_module):
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    try:
+        atom_url = f"https://github.com/mfatih01020/stok_fatih/commits/main.atom?t={time.time_ns()}"
+        r = requests_module.get(atom_url, verify=False, timeout=8, headers=headers)
+        if r.status_code == 200:
+            import re
+            matches = re.findall(r'/commit/([0-9a-f]{40})', r.text)
+            if matches:
+                return matches[0]
+    except Exception:
+        pass
+    return "main"
+
 def http_fallback_update_launcher():
     try:
         import requests
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         
-        timestamp = time.time_ns()
-        remote_vurl = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/main/version.json?t={timestamp}"
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
             "Cache-Control": "no-cache, no-store, must-revalidate",
             "Pragma": "no-cache"
         }
+
+        latest_sha = get_latest_remote_commit_sha(requests)
+        timestamp = time.time_ns()
+        remote_vurl = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/{latest_sha}/version.json?t={timestamp}"
 
         resp = requests.get(remote_vurl, verify=False, timeout=10, headers=headers)
         if resp.status_code == 200:
@@ -250,7 +266,7 @@ def http_fallback_update_launcher():
             print_step("4", "HTTP Otomatik Guncelleme", "loading", f"Yeni kodlar indiriliyor: {remote_version}")
             updated_count = 0
             for rel_path in files_to_update:
-                raw_url = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/main/{rel_path}?t={timestamp}"
+                raw_url = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/{latest_sha}/{rel_path}?t={timestamp}"
                 file_resp = requests.get(raw_url, verify=False, timeout=15, headers=headers)
 
                 if file_resp.status_code == 200:

@@ -4,6 +4,7 @@ import subprocess
 import shutil
 import json
 import time
+import re
 from datetime import datetime
 
 # Çalışma dizinini script'in bulunduğu klasöre sabitle
@@ -119,19 +120,32 @@ def get_unified_version_info():
         try:
             with open(v_path, "r", encoding="utf-8") as f:
                 v_data = json.load(f)
-                v_code = v_data.get("version", "v3.7")
-                v_commit = v_data.get("commit", "3.7.0")
+                v_code = v_data.get("version", "v3.8")
+                v_commit = v_data.get("commit", "3.8.0")
                 v_date = v_data.get("date", "05.10.2026")
                 v_msg = v_data.get("message", "Canlı Sürüm")
                 return f"{v_code} ({v_commit})", v_date, v_msg
         except Exception:
             pass
 
-    return "v3.7 (3.7.0)", "05.10.2026 23:58", "v3.7 Dual-Engine Güncelleme Motoru"
+    return "v3.8 (3.8.0)", "05.10.2026 23:58", "v3.8 Dual-Engine Güncelleme Motoru"
+
+def get_latest_remote_commit_sha(requests_module):
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    try:
+        atom_url = f"https://github.com/mfatih01020/stok_fatih/commits/main.atom?t={time.time_ns()}"
+        r = requests_module.get(atom_url, verify=False, timeout=8, headers=headers)
+        if r.status_code == 200:
+            matches = re.findall(r'/commit/([0-9a-f]{40})', r.text)
+            if matches:
+                return matches[0]
+    except Exception:
+        pass
+    return "main"
 
 def http_fallback_update():
-    """Git sunucusu erişilemez olduğunda doğrudan raw.githubusercontent.com HTTPS paket indirme motoru"""
-    print(f"\n  {YELLOW}{BOLD}[🔄 DUAL-ENGINE HTTP] Git bağlantısı yok, Doğrudan HTTPS Güncelleme Motoru çalışıyor...{RESET}")
+    """Git sunucusu erişilemez olduğunda doğrudan anlık Commit SHA üzerinden paket indirme motoru"""
+    print(f"\n  {YELLOW}{BOLD}[🔄 DUAL-ENGINE HTTP] Git bağlantısı yok, Anlık HTTPS Güncelleme Motoru çalışıyor...{RESET}")
     
     try:
         import requests
@@ -141,14 +155,17 @@ def http_fallback_update():
         print(f"  {RED}[HATA] HTTP Güncelleme için 'requests' kütüphanesi eksik.{RESET}")
         return False
 
-    timestamp = time.time_ns()
-    # Doğrudan raw.githubusercontent.com + timestamp parametresi (Redirectiz ve CDN Cache-Buster)
-    remote_vurl = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/main/version.json?t={timestamp}"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
         "Cache-Control": "no-cache, no-store, must-revalidate",
         "Pragma": "no-cache"
     }
+
+    latest_sha = get_latest_remote_commit_sha(requests)
+    print(f"  {CYAN}  • GitHub canlı commit tespiti: {WHITE}{latest_sha[:7]}{RESET}")
+
+    timestamp = time.time_ns()
+    remote_vurl = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/{latest_sha}/version.json?t={timestamp}"
 
     try:
         resp = requests.get(remote_vurl, verify=False, timeout=10, headers=headers)
@@ -183,7 +200,7 @@ def http_fallback_update():
 
         updated_count = 0
         for rel_path in files_to_update:
-            raw_url = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/main/{rel_path}?t={timestamp}"
+            raw_url = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/{latest_sha}/{rel_path}?t={timestamp}"
             file_resp = requests.get(raw_url, verify=False, timeout=15, headers=headers)
 
             if file_resp.status_code == 200:
