@@ -47,10 +47,11 @@ def ensure_git_installed():
 def get_git_info(commit_ref="HEAD"):
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_SSL_NO_VERIFY"] = "true"
     try:
-        cmd_hash = ["git", "rev-parse", "--short", commit_ref]
-        cmd_date = ["git", "log", "-1", "--format=%cd", "--date=format:%d.%m.%Y %H:%M", commit_ref]
-        cmd_msg  = ["git", "log", "-1", "--format=%s", commit_ref]
+        cmd_hash = ["git", "-c", "http.sslVerify=false", "rev-parse", "--short", commit_ref]
+        cmd_date = ["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%cd", "--date=format:%d.%m.%Y %H:%M", commit_ref]
+        cmd_msg  = ["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%s", commit_ref]
 
         h = subprocess.run(cmd_hash, capture_output=True, text=True, env=env).stdout.strip()
         d = subprocess.run(cmd_date, capture_output=True, text=True, env=env).stdout.strip()
@@ -67,6 +68,7 @@ def force_update():
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_ASKPASS"] = "echo"
+    env["GIT_SSL_NO_VERIFY"] = "true"
 
     if not is_git_installed():
         git_ok = ensure_git_installed()
@@ -82,17 +84,17 @@ def force_update():
     print(f"  {DIM}  • Son Değişiklik: {RESET}{WHITE}{cur_msg}{RESET}\n")
 
     print(f"  {CYAN}[1/2] GitHub sunucusundan güncellemeler kontrol ediliyor...{RESET}")
-    fetch_res = subprocess.run(["git", "fetch", "origin", "main"], capture_output=True, text=True, timeout=12, env=env)
+    fetch_res = subprocess.run(["git", "-c", "http.sslVerify=false", "fetch", "origin", "main"], capture_output=True, text=True, timeout=15, env=env)
     
-    local_hash = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, env=env).stdout.strip()
-    remote_hash = subprocess.run(["git", "rev-parse", "FETCH_HEAD"], capture_output=True, text=True, env=env).stdout.strip()
+    local_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "HEAD"], capture_output=True, text=True, env=env).stdout.strip()
+    remote_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "FETCH_HEAD"], capture_output=True, text=True, env=env).stdout.strip()
 
     if local_hash and remote_hash and local_hash != remote_hash:
         print(f"\n  {YELLOW}{BOLD}[🔄 GÜNCELLEME BULUNDU] Web değişiklikleri yükleniyor...{RESET}")
-        reset_res = subprocess.run(["git", "reset", "--hard", "FETCH_HEAD"], capture_output=True, text=True, timeout=12, env=env)
+        reset_res = subprocess.run(["git", "-c", "http.sslVerify=false", "reset", "--hard", "FETCH_HEAD"], capture_output=True, text=True, timeout=12, env=env)
         
         if reset_res.returncode != 0:
-            subprocess.run(["git", "pull", "origin", "main"], capture_output=True, text=True, timeout=12, env=env)
+            subprocess.run(["git", "-c", "http.sslVerify=false", "pull", "origin", "main"], capture_output=True, text=True, timeout=12, env=env)
 
         new_hash, new_date, new_msg = get_git_info("HEAD")
 
