@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistemden Çıkacaklar Listesi — QR Compare</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .list-topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .stat-box {
+            background: rgba(20,22,33,.6);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 1rem 1.2rem;
+            display: flex;
+            flex-direction: column;
+            gap: .3rem;
+        }
+        .stat-box .s-val {
+            font-size: 2rem;
+            font-family: var(--font-outfit);
+            font-weight: 800;
+            line-height: 1;
+        }
+        .stat-box .s-lbl { font-size: .75rem; color: var(--text-muted); }
+
+        .search-bar {
+            display: flex;
+            gap: .8rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+        .search-bar input {
+            flex: 1;
+            min-width: 200px;
+            padding: .6rem 1rem;
+            background: rgba(255,255,255,.06);
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            color: var(--text-main);
+            font-family: var(--font-inter);
+            outline: none;
+        }
+        .search-bar input:focus { border-color: var(--primary); }
+        .search-bar select {
+            padding: .6rem .8rem;
+            background: rgba(255,255,255,.06);
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            color: var(--text-main);
+            outline: none;
+        }
+
+        .table-wrap { overflow-x: auto; }
+        .full-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: .83rem;
+        }
+        .full-table thead th {
+            background: rgba(88,101,242,.18);
+            color: var(--text-muted);
+            font-size: .7rem;
+            text-transform: uppercase;
+            letter-spacing: .6px;
+            padding: .65rem .8rem;
+            text-align: left;
+            white-space: nowrap;
+            cursor: pointer;
+            user-select: none;
+        }
+        .full-table thead th:hover { color: var(--text-main); }
+        .full-table thead th.sorted { color: var(--primary); }
+        .full-table thead th.no-sort { cursor: default; }
+        .full-table tbody tr {
+            border-bottom: 1px solid rgba(255,255,255,.04);
+            transition: background .12s;
+        }
+        .full-table tbody tr:hover { background: rgba(255,255,255,.04); }
+        .full-table tbody td { padding: .55rem .8rem; color: var(--text-main); white-space: nowrap; }
+        .full-table .warn-row td { background: rgba(245,158,11,.05); }
+        .full-table .warn-row td:first-child { border-left: 3px solid var(--warning); }
+
+        /* Sıra no + silme butonu hücresi */
+        .td-sira {
+            display: flex;
+            align-items: center;
+            gap: .4rem;
+        }
+        .badge-sira {
+            background: rgba(88,101,242,.2);
+            color: var(--primary);
+            border-radius: 6px;
+            padding: 2px 8px;
+            font-size: .75rem;
+            font-weight: 700;
+            min-width: 28px;
+            text-align: center;
+        }
+        .btn-del {
+            background: rgba(239,68,68,.15);
+            border: 1px solid rgba(239,68,68,.3);
+            color: #f87171;
+            border-radius: 6px;
+            padding: .25rem .5rem;
+            cursor: pointer;
+            font-size: .72rem;
+            transition: background .15s;
+            white-space: nowrap;
+            line-height: 1.4;
+        }
+        .btn-del:hover { background: rgba(239,68,68,.35); }
+
+        /* Karekod sütunu */
+        .td-karekod {
+            font-family: monospace;
+            font-size: .75rem;
+            color: var(--text-muted);
+            max-width: 180px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 4rem 2rem;
+            color: var(--text-muted);
+        }
+        .empty-state i { font-size: 3rem; margin-bottom: 1rem; display: block; opacity: .3; }
+        .empty-state a { color: var(--primary); text-decoration: none; font-weight: 600; }
+
+        .tekrar-badge {
+            display: inline-block;
+            background: rgba(245,158,11,.15);
+            color: var(--warning);
+            border-radius: 4px;
+            padding: 1px 5px;
+            font-size: .7rem;
+            font-weight: 700;
+        }
+
+        .action-btns { display: flex; gap: .7rem; flex-wrap: wrap; }
+
+        .nav-strip {
+            display: flex; align-items: center; gap: 1rem; margin-bottom: .5rem;
+        }
+        .nav-strip a { color: var(--text-muted); text-decoration: none; font-size:.85rem;
+            display:flex; align-items:center; gap:.4rem; transition:color .15s; }
+        .nav-strip a:hover { color: var(--text-main); }
+        .nav-sep { color: var(--text-muted); }
+        .nav-current { color: var(--text-main); font-weight:600; font-size:.85rem; }
+    </style>
+</head>
+<body>
+    <div class="glass-bg-decor1"></div>
+    <div class="glass-bg-decor2"></div>
+
+    <div class="container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo">
+                <i class="fa-solid fa-qrcode logo-icon"></i>
+                <div>
+                    <h1>QR Compare</h1>
+                    <p>Akıllı Karekod Karşılaştırma ve Stok Düşüm Sistemi</p>
+                </div>
+            </div>
+            <div class="system-status">
+                <span class="status-indicator online"></span>
+                <span>Sistem Aktif</span>
+            </div>
+        </header>
+
+                <!-- 60+ YAŞ REHBER BİLGİLENDİRME KUTUSU -->
+        <div style="background: rgba(88, 101, 242, 0.12); border: 2px solid rgba(88, 101, 242, 0.4); border-radius: 14px; padding: 1.2rem 1.5rem; margin-bottom: 1.5rem;">
+            <div style="display: flex; align-items: center; gap: 0.8rem; margin-bottom: 0.6rem;">
+                <i class="fa-solid fa-list-check" style="font-size: 1.6rem; color: #a5b4fc;"></i>
+                <h3 style="font-family: var(--font-outfit); font-size: 1.25rem; font-weight: 800; color: #fff; margin: 0;">
+                    📋 Çıkış Yapılan Ürünler Listesi Rehberi (Ne Yapmalıyım?)
+                </h3>
+            </div>
+            <div style="font-size: 0.92rem; color: var(--text-main); line-height: 1.6;">
+                Burada bugüne kadar okutup sistemden çıkışını yaptığınız tüm ürünlerin kayıtları görünür.<br>
+                • <b>Arama Yapma:</b> Arama kutusuna ürün adı veya koli no yazarak istediğiniz ilacı bulabilirsiniz.<br>
+                • <b>Excel İndir:</b> Üstteki yeşil <b>"Excel İndir"</b> butonuna tıklayarak listeyi Excel olarak bilgisayarınıza alabilirsiniz.<br>
+                • <b>Silme (Geri Alma):</b> Sıra numarasının (#) yanındaki 🔴 <b>Çöp Kovası</b> butonuna basarak o kaydı silebilirsiniz.
+            </div>
+        </div>
+
+        <!-- Breadcrumb -->
+        <div class="nav-strip">
+            <a href="/"><i class="fa-solid fa-house"></i> Ana Sayfa</a>
+            <span class="nav-sep">/</span>
+            <a href="/cikis"><i class="fa-solid fa-box-open"></i> Sistemden Çıkış</a>
+            <span class="nav-sep">/</span>
+            <span class="nav-current">Çıkış Listesi</span>
+        </div>
+
+        <!-- Stats Row -->
+        <div class="stats-row">
+            <div class="stat-box">
+                <div class="s-val" id="stat-toplam" style="color:var(--primary);">—</div>
+                <div class="s-lbl">Toplam Kayıt</div>
+            </div>
+            <div class="stat-box">
+                <div class="s-val" id="stat-tekil" style="color:var(--success);">—</div>
+                <div class="s-lbl">Tekil Ürün</div>
+            </div>
+            <div class="stat-box">
+                <div class="s-val" id="stat-tekrar" style="color:var(--warning);">—</div>
+                <div class="s-lbl">Tekrar Okutlan</div>
+            </div>
+        </div>
+
+        <!-- Main Card -->
+        <section class="panel glass-card">
+            <div class="list-topbar">
+                <h2 style="font-family:var(--font-outfit); font-size:1.3rem; font-weight:800;">
+                    <i class="fa-solid fa-list-check" style="color:var(--primary);"></i>
+                    Sistemden Çıkacaklar Listesi
+                </h2>
+                <div class="action-btns">
+                    <a href="/cikis" class="btn btn-outline"
+                       style="text-decoration:none; display:flex; align-items:center; gap:.4rem; font-size:.85rem;">
+                        <i class="fa-solid fa-barcode"></i> Barkod Okut
+                    </a>
+                    <a href="/api/cikis/indir" class="btn btn-success"
+                       style="text-decoration:none; display:flex; align-items:center; gap:.4rem; font-size:.85rem;">
+                        <i class="fa-solid fa-file-excel"></i> Excel İndir
+                    </a>
+                    <button class="btn btn-outline" id="btn-tumunu-sil"
+                            style="font-size:.85rem; border-color:rgba(239,68,68,.4); color:#f87171;">
+                        <i class="fa-solid fa-trash"></i> Tümünü Sil
+                    </button>
+                </div>
+            </div>
+
+            <!-- Arama -->
+            <div class="search-bar">
+                <input type="text" id="search-input"
+                       placeholder="Ürün adı, karekod, koli no ile ara..."
+                       autocomplete="off">
+                <select id="filter-col">
+                    <option value="all">Tüm Sütunlar</option>
+                    <option value="urun_adi">Ürün Adı</option>
+                    <option value="ham_karekod">Karekod</option>
+                    <option value="barkod">Barkod/Gtin</option>
+                    <option value="koli_no">Koli No</option>
+                    <option value="seri_no">Seri No</option>
+                    <option value="parti_no">Parti No</option>
+                </select>
+            </div>
+
+            <!-- Tablo -->
+            <div class="table-wrap">
+                <table class="full-table" id="main-table">
+                    <thead>
+                        <tr>
+                            <!-- Sıra no + silme butonu -->
+                            <th class="no-sort" style="width:90px;">#  &nbsp;Sil</th>
+                            <!-- Karekod en başta -->
+                            <th onclick="sortBy('ham_karekod')">
+                                Karekod <i class="fa-solid fa-sort sort-ico"></i>
+                            </th>
+                            <th onclick="sortBy('urun_adi')">
+                                Ürün Adı <i class="fa-solid fa-sort sort-ico"></i>
+                            </th>
+                            <th onclick="sortBy('koli_no')">
+                                Koli No <i class="fa-solid fa-sort sort-ico"></i>
+                            </th>
+                            <th onclick="sortBy('seri_no')">
+                                Seri No <i class="fa-solid fa-sort sort-ico"></i>
+                            </th>
+                            <th onclick="sortBy('parti_no')">
+                                Parti No <i class="fa-solid fa-sort sort-ico"></i>
+                            </th>
+                            <th onclick="sortBy('palet_no')">
+                                Palet No <i class="fa-solid fa-sort sort-ico"></i>
+                            </th>
+                            <th onclick="sortBy('barkod')">
+                                Gtin/Barkod <i class="fa-solid fa-sort sort-ico"></i>
+                            </th>
+                            <th onclick="sortBy('uretim_tarihi')">
+                                Üretim Tar. <i class="fa-solid fa-sort sort-ico"></i>
+                            </th>
+                            <th onclick="sortBy('skt')">
+                                SKT <i class="fa-solid fa-sort sort-ico"></i>
+                            </th>
+                            <th onclick="sortBy('tarih')">
+                                Kayıt Zamanı <i class="fa-solid fa-sort sort-ico"></i>
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody id="main-tbody">
+                        <tr><td colspan="11">
+                            <div class="empty-state">
+                                <i class="fa-solid fa-spinner fa-spin"></i>
+                                <p>Yükleniyor...</p>
+                            </div>
+                        </td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Tablo altı bilgi -->
+            <div style="margin-top:1rem; display:flex; align-items:center; justify-content:space-between;
+                        color:var(--text-muted); font-size:.8rem; flex-wrap:wrap; gap:.5rem;">
+                <span id="visible-count"></span>
+                <span>
+                    <i class="fa-solid fa-triangle-exclamation" style="color:var(--warning);"></i>
+                    Sarı satır = aynı barkod birden fazla okutulmuş
+                </span>
+            </div>
+        </section>
+
+        <footer class="app-footer-bottom" style="margin-top:2rem;">
+            <p>&copy; 2026 QR Compare - Tüm Hakları Saklıdır.</p>
+        </footer>
+    </div>
+
+<script>
+let allData  = [];
+let sortCol  = 'id';
+let sortAsc  = false;
+
+window.addEventListener('load', loadList);
+
+async function loadList() {
+    try {
+        const res  = await fetch('/api/cikis/listesi');
+        const data = await res.json();
+        if (!data.success) return;
+        allData = data.kayitlar;
+        updateStats();
+        render();
+    } catch(e) {
+        document.getElementById('main-tbody').innerHTML =
+            `<tr><td colspan="11"><div class="empty-state">
+                <i class="fa-solid fa-circle-xmark"></i>
+                <p>Sunucuya bağlanılamadı: ${e.message}</p>
+             </div></td></tr>`;
+    }
+}
+
+function updateStats() {
+    document.getElementById('stat-toplam').textContent = allData.length;
+    const tekilSet = new Set(allData.map(r => r.ham_karekod));
+    document.getElementById('stat-tekil').textContent  = tekilSet.size;
+    document.getElementById('stat-tekrar').textContent = allData.filter(r => r.tekrar_uyari).length;
+}
+
+function render() {
+    const q     = document.getElementById('search-input').value.toLowerCase();
+    const col   = document.getElementById('filter-col').value;
+    const tbody = document.getElementById('main-tbody');
+
+    let filtered = allData.filter(r => {
+        if (!q) return true;
+        if (col === 'all')
+            return Object.values(r).some(v => String(v||'').toLowerCase().includes(q));
+        return String(r[col]||'').toLowerCase().includes(q);
+    });
+
+    // Sırala
+    filtered.sort((a, b) => {
+        let va = String(a[sortCol]||''), vb = String(b[sortCol]||'');
+        if (!isNaN(va) && !isNaN(vb)) { va = Number(va); vb = Number(vb); }
+        if (va < vb) return sortAsc ? -1 : 1;
+        if (va > vb) return sortAsc ?  1 : -1;
+        return 0;
+    });
+
+    document.getElementById('visible-count').textContent =
+        `${filtered.length} / ${allData.length} kayıt gösteriliyor`;
+
+    if (!filtered.length) {
+        tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state">
+            <i class="fa-solid fa-box-open"></i>
+            <p>${allData.length
+                ? 'Arama sonucu bulunamadı.'
+                : 'Henüz çıkış kaydı yok. <a href="/cikis">Barkod okutmak için tıklayın.</a>'}</p>
+        </div></td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = filtered.map((r, i) => `
+        <tr class="${r.tekrar_uyari ? 'warn-row' : ''}" data-id="${r.id}">
+
+            <!-- # + Silme butonu -->
+            <td>
+                <div class="td-sira">
+                    <span class="badge-sira">${i + 1}</span>
+                    <button class="btn-del" onclick="silKayit(${r.id}, this)"
+                            title="Bu kaydı sil">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                </div>
+            </td>
+
+            <!-- Karekod — EN BAŞTA -->
+            <td class="td-karekod" title="${esc(r.ham_karekod)}">${esc(r.ham_karekod||'—')}</td>
+
+            <!-- Ürün Adı -->
+            <td style="max-width:220px; overflow:hidden; text-overflow:ellipsis;" title="${esc(r.urun_adi)}">
+                ${r.tekrar_uyari ? '<span class="tekrar-badge">TEKRAR</span> ' : ''}${esc(r.urun_adi||'—')}
+            </td>
+
+            <td>${esc(r.koli_no||'—')}</td>
+            <td>${esc(r.seri_no||'—')}</td>
+            <td>${esc(r.parti_no||'—')}</td>
+            <td>${esc(r.palet_no||'—')}</td>
+            <td style="font-family:monospace; font-size:.78rem;">${esc(r.barkod||'—')}</td>
+            <td>${esc(r.uretim_tarihi||'—')}</td>
+            <td>${esc(r.skt||'—')}</td>
+            <td style="font-size:.76rem; color:var(--text-muted);">${esc(r.tarih||'—')}</td>
+        </tr>`).join('');
+}
+
+function sortBy(col) {
+    sortAsc = (sortCol === col) ? !sortAsc : true;
+    sortCol = col;
+    // Başlık vurgusu
+    document.querySelectorAll('.full-table thead th').forEach(th => th.classList.remove('sorted'));
+    document.querySelectorAll('.full-table thead th').forEach(th => {
+        if (th.onclick && th.getAttribute('onclick') && th.getAttribute('onclick').includes(`'${col}'`))
+            th.classList.add('sorted');
+    });
+    render();
+}
+
+async function silKayit(id, btn) {
+    if (!confirm('Bu kaydı silmek istiyor musunuz?')) return;
+    btn.disabled = true;
+    const res  = await fetch(`/api/cikis/sil/${id}`, {method: 'DELETE'});
+    const data = await res.json();
+    if (data.success) {
+        allData = allData.filter(r => r.id !== id);
+        updateStats();
+        render();
+    } else {
+        btn.disabled = false;
+        alert('Silme işlemi başarısız.');
+    }
+}
+
+document.getElementById('btn-tumunu-sil').addEventListener('click', async () => {
+    if (!confirm(`Toplam ${allData.length} kaydın TAMAMI silinecek. Emin misiniz?`)) return;
+    const res  = await fetch('/api/cikis/temizle', {method: 'POST'});
+    const data = await res.json();
+    if (data.success) {
+        allData = [];
+        updateStats();
+        render();
+    }
+});
+
+document.getElementById('search-input').addEventListener('input', render);
+document.getElementById('filter-col').addEventListener('change', render);
+
+function esc(str) {
+    return String(str||'')
+        .replace(/&/g,'&amp;')
+        .replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;');
+}
+</script>
+</body>
+</html>

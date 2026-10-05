@@ -1,0 +1,39 @@
+# ── KAREKOD & STOK YÖNETİM SİSTEMİ GITIGNORE ──────────────────────────────
+
+# Kullanıcıya Özel Veriler ve Veritabanı (Kesinlikle GitHub'a Yüklenmez)
+cikis_kayitlari.db
+stok_takip.db
+*.db
+*.sqlite
+*.sqlite3
+
+# Excel ve Veri Dosyaları
+bkst_depo_verileri.xlsx
+kalan_sistem_envanteri_guncel.xlsx
+terek_eksik_urunler_bakanlik_cikis.xlsx
+*.xlsx
+*.xls
+*.csv
+
+# Özel Kullanıcı Notları ve Şifreler
+bakanlik_giris_bilgileri.txt
+günlük satışlar.txt
+*.log
+
+# Tarayıcı ve Sürücü Dosyaları (Her Bilgisayarda Otomatik İndirilir)
+msedgedriver.exe
+chromedriver.exe
+driver_version.txt
+edgedriver_tmp/
+edgedriver.zip
+
+# Python Geçici Dosyaları
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+scratch/
+.venv/
+env/
+venv/
