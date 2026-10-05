@@ -161,9 +161,10 @@ def check_updates():
     env["GIT_SSL_NO_VERIFY"] = "true"
 
     try:
-        repo_check = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True, timeout=2, env=env)
+        repo_check = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True, timeout=3, env=env)
         if repo_check.returncode == 0:
-            fetch_res = subprocess.run(["git", "-c", "http.sslVerify=false", "fetch", "origin", "main"], capture_output=True, text=True, timeout=15, env=env)
+            print_step("4", "GitHub Otomatik Guncelleme", "loading", "GitHub sunucusu kontrol ediliyor...")
+            fetch_res = subprocess.run(["git", "-c", "http.sslVerify=false", "fetch", "origin", "main"], capture_output=True, text=True, timeout=30, env=env)
             
             local_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "HEAD"], capture_output=True, text=True, env=env).stdout.strip()
             remote_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "FETCH_HEAD"], capture_output=True, text=True, env=env).stdout.strip()
@@ -171,10 +172,11 @@ def check_updates():
             cur_h, cur_d, cur_m = get_git_info("HEAD")
 
             if local_hash and remote_hash and local_hash != remote_hash:
-                print_step("4", "GitHub Otomatik Guncelleme", "loading", "Web degisiklikleri indiriliyor...")
-                reset_res = subprocess.run(["git", "-c", "http.sslVerify=false", "reset", "--hard", "FETCH_HEAD"], capture_output=True, text=True, timeout=12, env=env)
+                print_step("4", "GitHub Otomatik Guncelleme", "loading", "Yeni kodlar yukleniyor...")
+                subprocess.run(["git", "-c", "http.sslVerify=false", "checkout", "-B", "main", "origin/main"], capture_output=True, text=True, timeout=15, env=env)
+                reset_res = subprocess.run(["git", "-c", "http.sslVerify=false", "reset", "--hard", "FETCH_HEAD"], capture_output=True, text=True, timeout=15, env=env)
                 if reset_res.returncode != 0:
-                    subprocess.run(["git", "-c", "http.sslVerify=false", "pull", "origin", "main"], capture_output=True, text=True, timeout=12, env=env)
+                    subprocess.run(["git", "-c", "http.sslVerify=false", "pull", "origin", "main"], capture_output=True, text=True, timeout=15, env=env)
                 
                 new_h, new_d, new_m = get_git_info("HEAD")
                 print_step("4", "GitHub Otomatik Guncelleme", "updated", f"Yeni Surum: {new_h} ({new_d})")
@@ -183,8 +185,8 @@ def check_updates():
             else:
                 print_step("4", "GitHub Otomatik Guncelleme", "ok", f"Surum: {cur_h} ({cur_d})")
                 return False
-    except Exception:
-        print_step("4", "GitHub Otomatik Guncelleme", "ok", "Kontrol tamamlandi")
+    except Exception as e:
+        print_step("4", "GitHub Otomatik Guncelleme", "warn", f"Guncelleme: {e}")
 
     return False
 

@@ -8,22 +8,20 @@ echo ============================================================
 echo       QR STOK YONETIM SISTEMI - GITHUB GUNCELLEME
 echo ============================================================
 echo.
-echo  [1/2] GitHub sunucusundan en son kodlar cekiliyor...
+echo  [1/2] GitHub sunucusuna baglaniliyor ve kodlar cekiliyor...
 echo.
 
-git fetch origin main
-git reset --hard FETCH_HEAD
-
-if %errorlevel% neq 0 (
-    echo.
-    echo  [UYARI] Git komutu basarisiz oldu, Python motoru deneniyor...
-    python guncelleme_kontrol.py
-)
+git -c http.sslVerify=false fetch origin main
+git checkout -B main origin/main
+git reset --hard origin/main
 
 echo.
 echo ============================================================
-echo  [2/2] KODLAR BASARIYLA GUNCELLENDI!
-echo  Verileriniz (cikis_kayitlari.db) %100 korundu.
+echo  [2/2] KODLAR GUNCEL SURUME ESITLENDI!
+git log -1 --format="  • Surum Kodu: %%h | Tarih: %%cd" --date=format:"%%d.%%m.%%Y %%H:%%M"
+git log -1 --format="  • Son Degisiklik: %%s"
+echo ============================================================
+echo  Verileriniz (cikis_kayitlari.db) %%100 korundu.
 echo ============================================================
 echo.
 echo Programi baslatmak icin Calistir.bat dosyasini acabilirsiniz.
