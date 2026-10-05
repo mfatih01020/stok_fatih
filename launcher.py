@@ -33,7 +33,7 @@ def print_header():
     print(f" |           {WHITE}{BOLD}*  QR STOK VE BAKANLIK KONTROL SISTEMI  *  {CYAN}{BOLD}              |")
     print(f" |                  {DIM}Sistem Baslatici & Otomatik Guncelleyici{CYAN}{BOLD}              |")
     print(" |                                                                        |")
-    print(" +------------------------------------------------------------------------+")
+    print(" +-------------------------------------------------------fatih-----------------+")
     print(f"{RESET}")
 
 def print_step(step_no, title, status="ok", detail=""):
