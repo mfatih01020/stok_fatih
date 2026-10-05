@@ -33,7 +33,7 @@ def print_header():
     print(f" |           {WHITE}{BOLD}*  QR STOK VE BAKANLIK KONTROL SISTEMI  *  {CYAN}{BOLD}              |")
     print(f" |                  {DIM}Sistem Baslatici & Otomatik Guncelleyici{CYAN}{BOLD}              |")
     print(" |                                                                        |")
-    print(" +------------------------------------------11------------------------------+")
+    print(" +------------------------------------------------------------------------+")
     print(f"{RESET}")
 
 def print_step(step_no, title, status="ok", detail=""):
@@ -112,7 +112,7 @@ def check_environment():
             pass
     
     git_ok = ensure_git_installed()
-    git_msg = "Git Hazir" if git_ok else "Git Yuku Degil"
+    git_msg = "Git Hazir" if git_ok else "Git Yuklu Degil"
     print_step("1", "Giris Yapilandirmasi & Sistem", "ok" if git_ok else "warn", f"bakanlik_giris_bilgileri.txt | {git_msg}")
 
 def check_libraries():
@@ -151,7 +151,7 @@ def check_browser():
 
 def check_updates():
     if not is_git_installed():
-        print_step("4", "GitHub Otomatik Guncelleme", "warn", "Git yukleniyor...")
+        print_step("4", "GitHub Otomatik Guncelleme", "warn", "Git bekleniyor...")
         return False
 
     env = os.environ.copy()
@@ -161,18 +161,18 @@ def check_updates():
     try:
         repo_check = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True, timeout=2, env=env)
         if repo_check.returncode == 0:
-            fetch_res = subprocess.run(["git", "fetch", "origin", "main"], capture_output=True, text=True, timeout=8, env=env)
+            fetch_res = subprocess.run(["git", "fetch", "origin", "main"], capture_output=True, text=True, timeout=12, env=env)
             
             local_hash = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, env=env).stdout.strip()
-            remote_hash = subprocess.run(["git", "rev-parse", "origin/main"], capture_output=True, text=True, env=env).stdout.strip()
+            remote_hash = subprocess.run(["git", "rev-parse", "FETCH_HEAD"], capture_output=True, text=True, env=env).stdout.strip()
 
             cur_h, cur_d, cur_m = get_git_info("HEAD")
 
             if local_hash and remote_hash and local_hash != remote_hash:
-                print_step("4", "GitHub Otomatik Guncelleme", "loading", "Yeni surum indiriliyor...")
-                reset_res = subprocess.run(["git", "reset", "--hard", "origin/main"], capture_output=True, text=True, timeout=10, env=env)
+                print_step("4", "GitHub Otomatik Guncelleme", "loading", "Web degisiklikleri indiriliyor...")
+                reset_res = subprocess.run(["git", "reset", "--hard", "FETCH_HEAD"], capture_output=True, text=True, timeout=12, env=env)
                 if reset_res.returncode != 0:
-                    subprocess.run(["git", "pull", "origin", "main"], capture_output=True, text=True, timeout=10, env=env)
+                    subprocess.run(["git", "pull", "origin", "main"], capture_output=True, text=True, timeout=12, env=env)
                 
                 new_h, new_d, new_m = get_git_info("HEAD")
                 print_step("4", "GitHub Otomatik Guncelleme", "updated", f"Yeni Surum: {new_h} ({new_d})")

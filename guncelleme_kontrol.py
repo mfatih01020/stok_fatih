@@ -68,7 +68,6 @@ def force_update():
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_ASKPASS"] = "echo"
 
-    # 1. Git Kurulum Kontrolü
     if not is_git_installed():
         git_ok = ensure_git_installed()
         if not git_ok:
@@ -76,7 +75,6 @@ def force_update():
             print(f"  {YELLOW}Lütfen indirip kurun: https://git-scm.com/download/win{RESET}\n")
             return False
 
-    # 2. Mevcut Sürüm Bilgilerini Al
     cur_hash, cur_date, cur_msg = get_git_info("HEAD")
     print(f"  {WHITE}{BOLD}📌 MEVCUT SÜRÜM BİLGİLERİ:{RESET}")
     print(f"  {DIM}  • Commit Kodu : {RESET}{WHITE}{cur_hash}{RESET}")
@@ -84,17 +82,17 @@ def force_update():
     print(f"  {DIM}  • Son Değişiklik: {RESET}{WHITE}{cur_msg}{RESET}\n")
 
     print(f"  {CYAN}[1/2] GitHub sunucusundan güncellemeler kontrol ediliyor...{RESET}")
-    fetch_res = subprocess.run(["git", "fetch", "origin", "main"], capture_output=True, text=True, timeout=10, env=env)
+    fetch_res = subprocess.run(["git", "fetch", "origin", "main"], capture_output=True, text=True, timeout=12, env=env)
     
     local_hash = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, env=env).stdout.strip()
-    remote_hash = subprocess.run(["git", "rev-parse", "origin/main"], capture_output=True, text=True, env=env).stdout.strip()
+    remote_hash = subprocess.run(["git", "rev-parse", "FETCH_HEAD"], capture_output=True, text=True, env=env).stdout.strip()
 
     if local_hash and remote_hash and local_hash != remote_hash:
-        print(f"\n  {YELLOW}{BOLD}[🔄 GÜNCELLEME BULUNDU] Yeni kodlar yükleniyor...{RESET}")
-        reset_res = subprocess.run(["git", "reset", "--hard", "origin/main"], capture_output=True, text=True, timeout=10, env=env)
+        print(f"\n  {YELLOW}{BOLD}[🔄 GÜNCELLEME BULUNDU] Web değişiklikleri yükleniyor...{RESET}")
+        reset_res = subprocess.run(["git", "reset", "--hard", "FETCH_HEAD"], capture_output=True, text=True, timeout=12, env=env)
         
         if reset_res.returncode != 0:
-            subprocess.run(["git", "pull", "origin", "main"], capture_output=True, text=True, timeout=10, env=env)
+            subprocess.run(["git", "pull", "origin", "main"], capture_output=True, text=True, timeout=12, env=env)
 
         new_hash, new_date, new_msg = get_git_info("HEAD")
 
