@@ -5,6 +5,13 @@ title QR Stok Yonetim Sistemi
 :: -- Calisma dizinini bat dosyasinin klasorune sabitle --------
 cd /d "%~dp0"
 
+:: -- Otomatik Sablon Kontrolu (Giris bilgileri txt olusturma) --
+if not exist "bakanlik_giris_bilgileri.txt" (
+    if exist "bakanlik_giris_bilgileri.template.txt" (
+        copy "bakanlik_giris_bilgileri.template.txt" "bakanlik_giris_bilgileri.txt" > nul
+    )
+)
+
 echo.
 echo  ============================================================
 echo        QR STOK YONETIM SISTEMI - BASLATICI
