@@ -4,7 +4,8 @@ import subprocess
 import time
 import webbrowser
 
-# Consolu UTF-8 moduna gecir ve encoding hatalarini engelle
+# Consolu UTF-8 moduna gecir ve pencere basligini ayarla
+os.system('title QR Stok Yonetim Sistemi - Baslatici')
 if hasattr(sys.stdout, 'reconfigure'):
     try:
         sys.stdout.reconfigure(encoding='utf-8')
@@ -113,12 +114,12 @@ def check_updates():
         repo_check = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True, timeout=2, env=env)
         if repo_check.returncode != 0:
             print_step("4", "GitHub Otomatik Guncelleme", "ok", "Yerel mod (Git bulunamadi)")
-            return
+            return False
 
         fetch_res = subprocess.run(["git", "fetch", "origin"], capture_output=True, text=True, timeout=4, env=env)
         if fetch_res.returncode != 0:
             print_step("4", "GitHub Otomatik Guncelleme", "ok", "Baglanti aktif (Sistem Hazir)")
-            return
+            return False
 
         status = subprocess.run(["git", "status", "-uno"], capture_output=True, text=True, timeout=3, env=env)
         if "behind" in (status.stdout or ""):
@@ -126,11 +127,15 @@ def check_updates():
             pull_res = subprocess.run(["git", "pull", "origin", "main"], capture_output=True, text=True, timeout=10, env=env)
             if pull_res.returncode != 0:
                 subprocess.run(["git", "pull", "origin", "master"], capture_output=True, text=True, timeout=10, env=env)
-            print_step("4", "GitHub Otomatik Guncelleme", "updated", "Kodlar guncellendi (Veriler korundu)")
+            
+            print_step("4", "GitHub Otomatik Guncelleme", "updated", "Yeni kodlar indirildi!")
+            return True
         else:
             print_step("4", "GitHub Otomatik Guncelleme", "ok", "Yazilim en son surumde")
+            return False
     except Exception:
         print_step("4", "GitHub Otomatik Guncelleme", "ok", "Kontrol tamamlandi")
+        return False
 
 def launch_app():
     print_step("5", "Uygulama Sunucusu", "ok", "HTTP 127.0.0.1:5000")
@@ -154,5 +159,11 @@ if __name__ == "__main__":
     check_environment()
     check_libraries()
     check_browser()
-    check_updates()
-    launch_app()
+    has_updated = check_updates()
+
+    if has_updated:
+        print(f"\n  {CYAN}{BOLD}[🔄 GUNCELLEME UYGULANDI]{RESET} {WHITE}Yeni kodlar yuklendi. Uygulama otomatik olarak yeniden baslatiliyor...{RESET}\n")
+        time.sleep(2)
+        os.execv(sys.executable, [sys.executable, "launcher.py"])
+    else:
+        launch_app()
