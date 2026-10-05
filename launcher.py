@@ -33,7 +33,7 @@ def print_header():
     print(f" |           {WHITE}{BOLD}*  QR STOK VE BAKANLIK KONTROL SISTEMI  *  {CYAN}{BOLD}              |")
     print(f" |                  {DIM}Sistem Baslatici & Otomatik Guncelleyici{CYAN}{BOLD}              |")
     print(" |                                                                        |")
-    print(" +---------------------------------------1212---------------------------------+")
+    print(" +------------------------------------------------------------------------+")
     print(f"{RESET}")
 
 def print_step(step_no, title, status="ok", detail=""):
@@ -48,7 +48,7 @@ def print_step(step_no, title, status="ok", detail=""):
     elif status == "loading":
         badge = f"{YELLOW}[[ KONTROL EDILIYOR... ]]{RESET}"
 
-    step_text = f"  {BOLD}[{step_no}/5]{RESET} {title:<40} {badge}"
+    step_text = f"  {BOLD}[{step_no}/5]{RESET} {title:<38} {badge}"
     if detail:
         step_text += f"  {DIM}{detail}{RESET}"
     print(step_text)
@@ -66,7 +66,6 @@ def ensure_git_installed():
 
     print_step("1", "Git Kurulum Kontrolu", "loading", "Git yukleniyor, lutfen bekleyin...")
     try:
-        # Windows Winget ile sessiz arka plan kurulumu
         subprocess.run([
             "winget", "install", "--id", "Git.Git", "-e",
             "--source", "winget",
@@ -81,13 +80,26 @@ def ensure_git_installed():
     except Exception:
         pass
 
-    # Otomatik yukleme basarisiz olursa indirme sayfasini ac
     print_step("1", "Git Kurulum Kontrolu", "warn", "Git indiriliyor...")
     webbrowser.open("https://git-scm.com/download/win")
     return False
 
+def get_git_info(commit_ref="HEAD"):
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    try:
+        cmd_hash = ["git", "rev-parse", "--short", commit_ref]
+        cmd_date = ["git", "log", "-1", "--format=%cd", "--date=format:%d.%m.%Y %H:%M", commit_ref]
+        cmd_msg  = ["git", "log", "-1", "--format=%s", commit_ref]
+
+        h = subprocess.run(cmd_hash, capture_output=True, text=True, env=env).stdout.strip()
+        d = subprocess.run(cmd_date, capture_output=True, text=True, env=env).stdout.strip()
+        m = subprocess.run(cmd_msg,  capture_output=True, text=True, env=env).stdout.strip()
+        return h, d, m
+    except Exception:
+        return "Bilinmiyor", "Bilinmiyor", "Bilinmiyor"
+
 def check_environment():
-    # 1. Giris Bilgileri ve Git Kontrolu
     txt_path = "bakanlik_giris_bilgileri.txt"
     tpl_path = "bakanlik_giris_bilgileri.template.txt"
     if not os.path.exists(txt_path) and os.path.exists(tpl_path):
@@ -100,11 +112,10 @@ def check_environment():
             pass
     
     git_ok = ensure_git_installed()
-    git_msg = "Git Hazir" if git_ok else "Git Bekleniyor (Sayfa Acildi)"
+    git_msg = "Git Hazir" if git_ok else "Git Yuku Degil"
     print_step("1", "Giris Yapilandirmasi & Sistem", "ok" if git_ok else "warn", f"bakanlik_giris_bilgileri.txt | {git_msg}")
 
 def check_libraries():
-    # 2. Kutuphane Kontrolu
     required = ["flask", "pandas", "openpyxl", "requests", "selenium"]
     missing = []
     for req in required:
@@ -125,7 +136,6 @@ def check_libraries():
         print_step("2", "Gerekli Python Kutuphaneleri", "ok", f"{py_ver} | Flask, Pandas, Requests")
 
 def check_browser():
-    # 3. Tarayici Kontrolu
     chrome1 = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
     chrome2 = r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
     edge1 = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
@@ -140,9 +150,8 @@ def check_browser():
     print_step("3", "Tarayici Destegi", "ok", found)
 
 def check_updates():
-    # 4. GitHub Guncelleme Kontrolu
     if not is_git_installed():
-        print_step("4", "GitHub Otomatik Guncelleme", "warn", "Git kurulumu tamamlaninca aktif olacak")
+        print_step("4", "GitHub Otomatik Guncelleme", "warn", "Git yukleniyor...")
         return False
 
     env = os.environ.copy()
@@ -157,16 +166,20 @@ def check_updates():
             local_hash = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, env=env).stdout.strip()
             remote_hash = subprocess.run(["git", "rev-parse", "origin/main"], capture_output=True, text=True, env=env).stdout.strip()
 
+            cur_h, cur_d, cur_m = get_git_info("HEAD")
+
             if local_hash and remote_hash and local_hash != remote_hash:
                 print_step("4", "GitHub Otomatik Guncelleme", "loading", "Yeni surum indiriliyor...")
                 reset_res = subprocess.run(["git", "reset", "--hard", "origin/main"], capture_output=True, text=True, timeout=10, env=env)
                 if reset_res.returncode != 0:
                     subprocess.run(["git", "pull", "origin", "main"], capture_output=True, text=True, timeout=10, env=env)
                 
-                print_step("4", "GitHub Otomatik Guncelleme", "updated", "Yeni kodlar yuklendi!")
+                new_h, new_d, new_m = get_git_info("HEAD")
+                print_step("4", "GitHub Otomatik Guncelleme", "updated", f"Yeni Surum: {new_h} ({new_d})")
+                print(f"  {CYAN}  └─ Son Degisiklik: {WHITE}{new_m}{RESET}")
                 return True
             else:
-                print_step("4", "GitHub Otomatik Guncelleme", "ok", "Yazilim en son surumde")
+                print_step("4", "GitHub Otomatik Guncelleme", "ok", f"Surum: {cur_h} ({cur_d})")
                 return False
     except Exception:
         print_step("4", "GitHub Otomatik Guncelleme", "ok", "Kontrol tamamlandi")
@@ -181,10 +194,8 @@ def launch_app():
     print(f"  {DIM}  Ipucu: Kapatmak icin bu pencereyi kapatmaniz yeterlidir.{RESET}")
     print(f"  {WHITE}{BOLD}" + "-" * 72 + f"{RESET}\n")
 
-    # Tarayiciyi ac
     webbrowser.open("http://127.0.0.1:5000")
 
-    # Flask uygulamasini baslat
     try:
         subprocess.run([sys.executable, "app.py"])
     except KeyboardInterrupt:
@@ -198,7 +209,7 @@ if __name__ == "__main__":
     has_updated = check_updates()
 
     if has_updated:
-        print(f"\n  {CYAN}{BOLD}[🔄 GUNCELLEME UYGULANDI]{RESET} {WHITE}Yeni kodlar yuklendi. Uygulama otomatik olarak yeniden baslatiliyor...{RESET}\n")
+        print(f"\n  {CYAN}{BOLD}[🔄 GUNCELLEME UYGULANDI]{RESET} {WHITE}Yeni kodlar yuklendi. Otomatik yeniden baslatiliyor...{RESET}\n")
         time.sleep(2)
         os.execv(sys.executable, [sys.executable, "launcher.py"])
     else:
