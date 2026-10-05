@@ -61,12 +61,6 @@ def clear_pycache():
                 pass
 
 def get_unified_version_info():
-    """
-    Sürüm bilgisini 3 kademeli olarak tespit eder:
-    1. .git/HEAD ve logs/HEAD dosya okuması
-    2. git komut çıktısı
-    3. version.json yerel yedeği
-    """
     # 1. Doğrudan .git klasörü okuma
     try:
         head_path = os.path.join(BASE_DIR, '.git', 'HEAD')
@@ -125,19 +119,19 @@ def get_unified_version_info():
         try:
             with open(v_path, "r", encoding="utf-8") as f:
                 v_data = json.load(f)
-                v_code = v_data.get("version", "v3.5")
-                v_commit = v_data.get("commit", "3.5.0")
+                v_code = v_data.get("version", "v3.7")
+                v_commit = v_data.get("commit", "3.7.0")
                 v_date = v_data.get("date", "05.10.2026")
                 v_msg = v_data.get("message", "Canlı Sürüm")
                 return f"{v_code} ({v_commit})", v_date, v_msg
         except Exception:
             pass
 
-    return "v3.5 (3.5.0)", "05.10.2026 23:50", "v3.5 Dual-Engine Güncelleme Motoru"
+    return "v3.7 (3.7.0)", "05.10.2026 23:58", "v3.7 Dual-Engine Güncelleme Motoru"
 
 def http_fallback_update():
-    """Git sunucusu erişilemez olduğunda canlı HTTPS paket indirme motoru (CDN Cache-Buster destekli)"""
-    print(f"\n  {YELLOW}{BOLD}[🔄 DUAL-ENGINE HTTP] Git bağlantısı yok, Canlı HTTP güncelleme motoru çalışıyor...{RESET}")
+    """Git sunucusu erişilemez olduğunda doğrudan raw.githubusercontent.com HTTPS paket indirme motoru"""
+    print(f"\n  {YELLOW}{BOLD}[🔄 DUAL-ENGINE HTTP] Git bağlantısı yok, Doğrudan HTTPS Güncelleme Motoru çalışıyor...{RESET}")
     
     try:
         import requests
@@ -147,33 +141,21 @@ def http_fallback_update():
         print(f"  {RED}[HATA] HTTP Güncelleme için 'requests' kütüphanesi eksik.{RESET}")
         return False
 
-    cb = time.time_ns()
-    # Cache Bashing için 2 öncelikli canlı adres
-    urls_to_try = [
-        f"https://github.com/mfatih01020/stok_fatih/raw/main/version.json?cb={cb}",
-        f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/main/version.json?cb={cb}"
-    ]
+    timestamp = time.time_ns()
+    # Doğrudan raw.githubusercontent.com + timestamp parametresi (Redirectiz ve CDN Cache-Buster)
+    remote_vurl = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/main/version.json?t={timestamp}"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
         "Cache-Control": "no-cache, no-store, must-revalidate",
         "Pragma": "no-cache"
     }
 
-    resp = None
-    for u in urls_to_try:
-        try:
-            r = requests.get(u, verify=False, timeout=10, headers=headers, allow_redirects=True)
-            if r.status_code == 200:
-                resp = r
-                break
-        except Exception:
-            pass
-
-    if not resp or resp.status_code != 200:
-        print(f"  {RED}[HATA] GitHub sunucusuna ulaşılamadı veya canlı manifest okunamadı.{RESET}")
-        return False
-
     try:
+        resp = requests.get(remote_vurl, verify=False, timeout=10, headers=headers)
+        if resp.status_code != 200:
+            print(f"  {RED}[HATA] GitHub canlı sunucusuna ulaşılamadı (HTTP Status: {resp.status_code}){RESET}")
+            return False
+
         remote_data = resp.json()
         remote_commit = str(remote_data.get("commit", "")).strip()
         remote_version = str(remote_data.get("version", "")).strip()
@@ -197,31 +179,21 @@ def http_fallback_update():
             print(f"{GREEN}{BOLD} =============================================================={RESET}\n")
             return False
 
-        print(f"\n  {YELLOW}{BOLD}[🔄 YENİ GÜNCELLEME BULUNDU] Sürüm {remote_version} ({remote_commit}) canlı sunucudan indiriliyor...{RESET}")
+        print(f"\n  {YELLOW}{BOLD}[🔄 YENİ GÜNCELLEME BULUNDU] Sürüm {remote_version} ({remote_commit}) indiriliyor...{RESET}")
 
         updated_count = 0
         for rel_path in files_to_update:
-            raw_url1 = f"https://github.com/mfatih01020/stok_fatih/raw/main/{rel_path}?cb={cb}"
-            raw_url2 = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/main/{rel_path}?cb={cb}"
-            
-            file_resp = None
-            for url in [raw_url1, raw_url2]:
-                try:
-                    f_r = requests.get(url, verify=False, timeout=15, headers=headers, allow_redirects=True)
-                    if f_r.status_code == 200:
-                        file_resp = f_r
-                        break
-                except Exception:
-                    pass
+            raw_url = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/main/{rel_path}?t={timestamp}"
+            file_resp = requests.get(raw_url, verify=False, timeout=15, headers=headers)
 
-            if file_resp and file_resp.status_code == 200:
+            if file_resp.status_code == 200:
                 dest_path = os.path.join(BASE_DIR, rel_path.replace("/", os.sep))
                 os.makedirs(os.path.dirname(dest_path), exist_ok=True)
                 with open(dest_path, "wb") as f:
                     f.write(file_resp.content)
                 updated_count += 1
             else:
-                print(f"  {YELLOW}  └─ [Atlandı] {rel_path}{RESET}")
+                print(f"  {YELLOW}  └─ [Atlandı] {rel_path} (HTTP {file_resp.status_code}){RESET}")
 
         with open(local_vpath, "w", encoding="utf-8") as f:
             json.dump(remote_data, f, ensure_ascii=False, indent=2)

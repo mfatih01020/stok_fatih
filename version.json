@@ -1,8 +1,8 @@
 {
-  "version": "v3.6",
-  "commit": "v3.6-test-otomatik-300",
-  "date": "05.10.2026 23:50",
-  "message": "🎉 v3.6 CANLI TEST SÜRÜMÜ: Otomatik Güncelleme Motoru Tamamen Başarıyla Doğrulandı!",
+  "version": "v3.7",
+  "commit": "v3.7-direct-raw-500",
+  "date": "05.10.2026 23:58",
+  "message": "🎉 v3.7 CANLI GÜNCELLEME: Doğrudan Raw Cache-Buster ile Anlık v3.7 Sürüm Geçişi %100 BAŞARILI!",
   "files": [
     ".gitignore",
     "Calistir.bat",
