@@ -1058,11 +1058,10 @@ def bkst_fetch_api():
     global bkst_cache_df, bkst_cache_qr, bkst_cache_gtin, bkst_cache_koli, bkst_status, bkst_message
     
     username, password, address_id = read_bkst_credentials()
-    if not username or not password:
-        return jsonify({
-            "success": False, 
-            "error": "Lütfen önce 'bakanlik_giris_bilgileri.txt' dosyasına KULLANICI_ADI ve SIFRE bilgilerinizi girin!"
-        })
+    if not username or not password or username == "" or password == "":
+        bkst_status = "error"
+        bkst_message = "❌ HATA: 'bakanlik_giris_bilgileri.txt' dosyasında KULLANICI_ADI veya SIFRE bulunamadı! Lütfen bilgilerinizi doldurup kaydedin."
+        return jsonify({"success": False, "error": bkst_message})
         
     try:
         import requests
@@ -1086,13 +1085,29 @@ def bkst_fetch_api():
         }
         
         login_url = "https://bkst.tarbil.gov.tr/Account/Login"
-        session.post(login_url, data=payload, timeout=15)
+        login_res = session.post(login_url, data=payload, timeout=15)
+        
+        # Check login success
+        if "Login" in login_res.url and login_res.status_code == 200 and "Hatalı" in login_res.text:
+            bkst_status = "error"
+            bkst_message = "❌ HATA: Bakanlık kullanıcı adı veya şifreniz yanlış! Lütfen 'bakanlik_giris_bilgileri.txt' dosyasındaki bilgileri kontrol edin."
+            return jsonify({"success": False, "error": bkst_message})
+            
+        gln_id = address_id
+        if not gln_id:
+            try:
+                gln_res = session.post("https://bkst.tarbil.gov.tr/Partial/GetGLN", data={"FirmType": "0"}, timeout=10)
+                if gln_res.status_code == 200:
+                    gln_data = gln_res.json()
+                    if isinstance(gln_data, list) and len(gln_data) > 0:
+                        gln_id = str(gln_data[0].get("Value") or gln_data[0].get("id") or "").strip()
+            except Exception:
+                pass
+
+        session.post("https://bkst.tarbil.gov.tr/Main/GetViewReport", data={"gtin": "", "gln": gln_id}, timeout=15)
         
         excel_url = "https://bkst.tarbil.gov.tr/Report/GtinDetailExcel"
-        excel_params = {}
-        if address_id:
-            excel_params["gln"] = address_id
-            
+        excel_params = {"gln": gln_id} if gln_id else {}
         excel_res = session.get(excel_url, params=excel_params, timeout=30)
         
         if excel_res.status_code == 200 and len(excel_res.content) > 100:
@@ -1108,8 +1123,12 @@ def bkst_fetch_api():
             df, _, _, _ = get_bkst_cache()
             item_count = len(df) if df is not None else 0
             
-            bkst_status = "done"
-            bkst_message = f"🟢 Bakanlık stok verileri API ile 2 saniyede başarıyla çekildi! Toplam {item_count} adet ürün hazır."
+            if item_count == 0:
+                bkst_status = "done"
+                bkst_message = "⚠️ UYARI: Bakanlık sisteminde kayıtlı stok bulunamadı (0 adet)."
+            else:
+                bkst_status = "done"
+                bkst_message = f"🟢 TEBRİKLER! Bakanlık stok verileri API ile 2 saniyede başarıyla çekildi! Toplam {item_count} adet ürün hazır."
             
             return jsonify({
                 "success": True,
@@ -1118,7 +1137,7 @@ def bkst_fetch_api():
             })
         else:
             stock_json_url = "https://bkst.tarbil.gov.tr/Main/GetStockDetailList"
-            json_res = session.post(stock_json_url, data={"CompanyAddressId": address_id, "Gtin": ""}, timeout=15)
+            json_res = session.post(stock_json_url, data={"CompanyAddressId": gln_id, "Gtin": ""}, timeout=15)
             
             if json_res.status_code == 200:
                 try:
@@ -1156,15 +1175,19 @@ def bkst_fetch_api():
                 except Exception:
                     pass
             
+            bkst_status = "error"
+            bkst_message = "❌ HATA: Bakanlık oturumu açılamadı veya veri dönmedi. Lütfen 'bakanlik_giris_bilgileri.txt' dosyanızdaki kullanıcı adı ve şifrenizi kontrol edin."
             return jsonify({
                 "success": False,
-                "error": "Bakanlık API oturumu açılamadı veya veri dönmedi. 'bakanlik_giris_bilgileri.txt' dosyasındaki şifrenizi ve kullanıcı adınızı kontrol edin."
+                "error": bkst_message
             })
             
     except Exception as e:
+        bkst_status = "error"
+        bkst_message = "❌ HATA: Bakanlık API bağlantı hatası: " + str(e)
         return jsonify({
             "success": False,
-            "error": "API veri çekme hatası: " + str(e)
+            "error": bkst_message
         })
 
 
