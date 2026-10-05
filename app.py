@@ -1038,6 +1038,7 @@ def read_bkst_credentials():
     username = ""
     password = ""
     address_id = ""
+    api_key = ""
     
     if os.path.exists(cred_file):
         with open(cred_file, 'r', encoding='utf-8') as f:
@@ -1053,15 +1054,17 @@ def read_bkst_credentials():
                         address_id = raw_id.split("-")[0].strip()
                     else:
                         address_id = raw_id
+                elif line.startswith("KEY=") or line.startswith("API_KEY="):
+                    api_key = line.split("=", 1)[1].strip()
                     
-    return username, password, address_id
+    return username, password, address_id, api_key
 
 
 @app.route('/api/bkst/fetch_api', methods=['POST'])
 def bkst_fetch_api():
     global bkst_cache_df, bkst_cache_qr, bkst_cache_gtin, bkst_cache_koli, bkst_status, bkst_message
     
-    username, password, address_id = read_bkst_credentials()
+    username, password, address_id, api_key = read_bkst_credentials()
     if not username or not password or username == "" or password == "":
         bkst_status = "error"
         bkst_message = "❌ HATA: 'bakanlik_giris_bilgileri.txt' dosyasında KULLANICI_ADI veya SIFRE bulunamadı! Lütfen bilgilerinizi doldurup kaydedin."
@@ -1069,15 +1072,21 @@ def bkst_fetch_api():
         
     try:
         import requests
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
         session = requests.Session()
         session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
             "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
         })
+
+        if api_key:
+            session.headers.update({"Authorization": f"Bearer {api_key}", "Key": api_key})
         
         login_page_url = "https://bkst.tarbil.gov.tr/"
-        res_page = session.get(login_page_url, timeout=10)
+        res_page = session.get(login_page_url, verify=False, timeout=10)
         
         token_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', res_page.text)
         token = token_match.group(1) if token_match else ""
@@ -1089,9 +1098,8 @@ def bkst_fetch_api():
         }
         
         login_url = "https://bkst.tarbil.gov.tr/Account/Login"
-        login_res = session.post(login_url, data=payload, timeout=15)
+        login_res = session.post(login_url, data=payload, verify=False, timeout=15)
         
-        # Check login success
         if "Login" in login_res.url and login_res.status_code == 200 and "Hatalı" in login_res.text:
             bkst_status = "error"
             bkst_message = "❌ HATA: Bakanlık kullanıcı adı veya şifreniz yanlış! Lütfen 'bakanlik_giris_bilgileri.txt' dosyasındaki bilgileri kontrol edin."
@@ -1100,7 +1108,7 @@ def bkst_fetch_api():
         gln_id = address_id
         if not gln_id:
             try:
-                gln_res = session.post("https://bkst.tarbil.gov.tr/Partial/GetGLN", data={"FirmType": "0"}, timeout=10)
+                gln_res = session.post("https://bkst.tarbil.gov.tr/Partial/GetGLN", data={"FirmType": "0"}, verify=False, timeout=10)
                 if gln_res.status_code == 200:
                     gln_data = gln_res.json()
                     if isinstance(gln_data, list) and len(gln_data) > 0:
@@ -1108,11 +1116,11 @@ def bkst_fetch_api():
             except Exception:
                 pass
 
-        session.post("https://bkst.tarbil.gov.tr/Main/GetViewReport", data={"gtin": "", "gln": gln_id}, timeout=15)
+        session.post("https://bkst.tarbil.gov.tr/Main/GetViewReport", data={"gtin": "", "gln": gln_id}, verify=False, timeout=15)
         
         excel_url = "https://bkst.tarbil.gov.tr/Report/GtinDetailExcel"
         excel_params = {"gln": gln_id} if gln_id else {}
-        excel_res = session.get(excel_url, params=excel_params, timeout=30)
+        excel_res = session.get(excel_url, params=excel_params, verify=False, timeout=30)
         
         if excel_res.status_code == 200 and len(excel_res.content) > 100:
             out_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bkst_depo_verileri.xlsx")
@@ -1141,7 +1149,7 @@ def bkst_fetch_api():
             })
         else:
             stock_json_url = "https://bkst.tarbil.gov.tr/Main/GetStockDetailList"
-            json_res = session.post(stock_json_url, data={"CompanyAddressId": gln_id, "Gtin": ""}, timeout=15)
+            json_res = session.post(stock_json_url, data={"CompanyAddressId": gln_id, "Gtin": ""}, verify=False, timeout=15)
             
             if json_res.status_code == 200:
                 try:
