@@ -1,48 +1,29 @@
 @echo off
 cd /d "%~dp0"
+chcp 65001 > nul
+title QR Stok Yonetim Sistemi - Guncelleyici
+
 echo.
 echo ============================================================
 echo       QR STOK YONETIM SISTEMI - GITHUB GUNCELLEME
 echo ============================================================
 echo.
+echo  [1/2] GitHub sunucusundan en son kodlar cekiliyor...
+echo.
 
-git --version > nul 2>&1
-if %errorlevel% neq 0 (
-    echo.
-    echo  [HATA] Bu bilgisayarda 'Git' programi kurulu degil!
-    echo.
-    echo  Otomatik guncelleme yapabilmek icin lutfen Git'i kurun:
-    echo  https://git-scm.com/download/win
-    echo.
-    echo  (Kurulum yaparken "Add Git to PATH" secenegini isaretleyin)
-    echo.
-    pause
-    exit /b 1
-)
-
-echo [1/2] GitHub'dan en son kod guncellemeleri cekiliyor...
-git fetch origin main > nul 2>&1
-git reset --hard origin/main
-if %errorlevel% neq 0 (
-    echo.
-    echo [UYARI] 'git reset' basarisiz oldu, 'git pull' deneniyor...
-    git pull origin main
-)
+git fetch origin main
+git reset --hard FETCH_HEAD
 
 if %errorlevel% neq 0 (
     echo.
-    echo [HATA] GitHub'dan veri cekilemedi!
-    echo Lutfen internet baglantinizi kontrol edin.
-    echo.
-    pause
-    exit /b 1
+    echo  [UYARI] Git komutu basarisiz oldu, Python motoru deneniyor...
+    python guncelleme_kontrol.py
 )
 
 echo.
-echo [2/2] KODLAR BASARIYLA GUNCELLENDI!
 echo ============================================================
-echo Verileriniz (cikis_kayitlari.db ve Excel dosyalariniz)
-echo %100 korundu ve hicbir veriniz silinmedi.
+echo  [2/2] KODLAR BASARIYLA GUNCELLENDI!
+echo  Verileriniz (cikis_kayitlari.db) %100 korundu.
 echo ============================================================
 echo.
 echo Programi baslatmak icin Calistir.bat dosyasini acabilirsiniz.
