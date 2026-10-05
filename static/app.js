@@ -120,24 +120,26 @@ window.triggerBkstOpen = function() {
         });
 };
 
-window.triggerBkstFetch = function() {
-    console.log("triggerBkstFetch called");
-    setBkstUI('fetching', 'Bakanlık verileri çekiliyor...');
+window.triggerBkstFetchApi = function() {
+    console.log("triggerBkstFetchApi called");
+    setBkstUI('fetching', '⚡ Bakanlık verileri API üzerinden 2 saniyede çekiliyor...');
 
-    fetch('/api/bkst/fetch', { method: 'POST' })
+    fetch('/api/bkst/fetch_api', { method: 'POST' })
         .then(r => r.json())
         .then(data => {
             if (data.success) {
-                setBkstUI('fetching', data.message);
-                startBkstPolling();
+                setBkstUI('done', data.message);
+                const dlBtn = document.getElementById('btn-bkst-download-excel');
+                if (dlBtn) dlBtn.classList.remove('hidden');
             } else {
-                setBkstUI('error', data.message || 'Veri çekme başlatılamadı.');
+                setBkstUI('error', data.error || 'API veri çekme hatası oluştu.');
             }
         })
         .catch(err => {
             setBkstUI('error', 'Sunucu hatası: ' + err.message);
         });
 };
+
 
 function showAuditMsg(msg, isError = false) {
     const auditMsgBox = document.getElementById('audit-msg-box');
@@ -586,6 +588,14 @@ document.addEventListener('DOMContentLoaded', () => {
         btnFetch.addEventListener('click', (e) => {
             e.preventDefault();
             window.triggerBkstFetch();
+        });
+    }
+
+    const btnFetchApi = document.getElementById('btn-bkst-fetch-api');
+    if (btnFetchApi) {
+        btnFetchApi.addEventListener('click', (e) => {
+            e.preventDefault();
+            window.triggerBkstFetchApi();
         });
     }
 

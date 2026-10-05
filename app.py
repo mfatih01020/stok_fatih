@@ -1030,6 +1030,158 @@ def _do_open():
         bkst_message = "Tarayıcı (Edge veya Chrome) başlatılamadı. Lütfen bilgisayarınızda Edge veya Chrome tarayıcısının yüklü olduğundan emin olun." 
 
 
+def read_bkst_credentials():
+    cred_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bakanlik_giris_bilgileri.txt")
+    if not os.path.exists(cred_file):
+        cred_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bakanlik_giris_bilgileri.template.txt")
+    
+    username = ""
+    password = ""
+    address_id = ""
+    
+    if os.path.exists(cred_file):
+        with open(cred_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("KULLANICI_ADI="):
+                    username = line.split("=", 1)[1].strip()
+                elif line.startswith("SIFRE="):
+                    password = line.split("=", 1)[1].strip()
+                elif line.startswith("ADRES_ID="):
+                    address_id = line.split("=", 1)[1].strip()
+                    
+    return username, password, address_id
+
+
+@app.route('/api/bkst/fetch_api', methods=['POST'])
+def bkst_fetch_api():
+    global bkst_cache_df, bkst_cache_qr, bkst_cache_gtin, bkst_cache_koli, bkst_status, bkst_message
+    
+    username, password, address_id = read_bkst_credentials()
+    if not username or not password:
+        return jsonify({
+            "success": False, 
+            "error": "Lütfen önce 'bakanlik_giris_bilgileri.txt' dosyasına KULLANICI_ADI ve SIFRE bilgilerinizi girin!"
+        })
+        
+    try:
+        import requests
+        session = requests.Session()
+        session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
+        })
+        
+        login_page_url = "https://bkst.tarbil.gov.tr/"
+        res_page = session.get(login_page_url, timeout=10)
+        
+        token_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', res_page.text)
+        token = token_match.group(1) if token_match else ""
+        
+        payload = {
+            "Username": username,
+            "Password": password,
+            "__RequestVerificationToken": token
+        }
+        
+        login_url = "https://bkst.tarbil.gov.tr/Account/Login"
+        session.post(login_url, data=payload, timeout=15)
+        
+        excel_url = "https://bkst.tarbil.gov.tr/Report/GtinDetailExcel"
+        excel_params = {}
+        if address_id:
+            excel_params["gln"] = address_id
+            
+        excel_res = session.get(excel_url, params=excel_params, timeout=30)
+        
+        if excel_res.status_code == 200 and len(excel_res.content) > 100:
+            out_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bkst_depo_verileri.xlsx")
+            with open(out_file, "wb") as f:
+                f.write(excel_res.content)
+                
+            bkst_cache_df = None
+            bkst_cache_qr = None
+            bkst_cache_gtin = None
+            bkst_cache_koli = None
+            
+            df, _, _, _ = get_bkst_cache()
+            item_count = len(df) if df is not None else 0
+            
+            bkst_status = "done"
+            bkst_message = f"🟢 Bakanlık stok verileri API ile 2 saniyede başarıyla çekildi! Toplam {item_count} adet ürün hazır."
+            
+            return jsonify({
+                "success": True,
+                "message": bkst_message,
+                "item_count": item_count
+            })
+        else:
+            stock_json_url = "https://bkst.tarbil.gov.tr/Main/GetStockDetailList"
+            json_res = session.post(stock_json_url, data={"CompanyAddressId": address_id, "Gtin": ""}, timeout=15)
+            
+            if json_res.status_code == 200:
+                try:
+                    data = json_res.json()
+                    if isinstance(data, list) and len(data) > 0:
+                        rows = []
+                        for d in data:
+                            rows.append({
+                                "Koli Numarası": d.get("KOLINO") or d.get("koli_no") or "",
+                                "Ürün Adı": d.get("URUNADI") or d.get("product_name") or "",
+                                "Karekod": d.get("HAMKAREKOD") or d.get("qr") or "",
+                                "Gtin / Barkod": d.get("BARKOD") or d.get("gtin") or "",
+                                "Seri Numarası": d.get("SERINO") or d.get("seri_no") or "",
+                                "Parti Numarası": d.get("SARJNO") or d.get("parti_no") or "",
+                                "Palet Numarası": d.get("PALETNO") or d.get("palet_no") or "",
+                                "Üretim Tarihi": d.get("URETIMTARIHI") or "",
+                                "Son Kullanma Tarihi": d.get("SKTDate") or d.get("SKT") or ""
+                            })
+                        df = pd.DataFrame(rows)
+                        out_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bkst_depo_verileri.xlsx")
+                        df.to_excel(out_file, index=False)
+                        
+                        bkst_cache_df = None
+                        bkst_cache_qr = None
+                        bkst_cache_gtin = None
+                        bkst_cache_koli = None
+                        
+                        bkst_status = "done"
+                        bkst_message = f"🟢 Bakanlık stok verileri API (JSON) ile başarıyla çekildi! Toplam {len(rows)} adet ürün hazır."
+                        return jsonify({
+                            "success": True,
+                            "message": bkst_message,
+                            "item_count": len(rows)
+                        })
+                except Exception:
+                    pass
+            
+            return jsonify({
+                "success": False,
+                "error": "Bakanlık API oturumu açılamadı veya veri dönmedi. 'bakanlik_giris_bilgileri.txt' dosyasındaki şifrenizi ve kullanıcı adınızı kontrol edin."
+            })
+            
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": "API veri çekme hatası: " + str(e)
+        })
+
+
+@app.route('/api/bkst/download_api_data', methods=['GET'])
+def download_api_data():
+    out_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bkst_depo_verileri.xlsx")
+    if not os.path.exists(out_file):
+        return jsonify({"error": "Henüz stok verisi çekilmedi."}), 404
+        
+    return send_file(
+        out_file,
+        as_attachment=True,
+        download_name="bkst_depo_verileri_guncel.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+
 @app.route('/api/bkst/open', methods=['POST'])
 def bkst_open():
     global bkst_driver, bkst_status
