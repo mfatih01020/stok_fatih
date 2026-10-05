@@ -105,7 +105,7 @@ def check_browser():
     print_step("3", "Tarayici Destegi", "ok", found)
 
 def check_updates():
-    # 4. GitHub Guncelleme Kontrolu
+    # 4. GitHub Guncelleme Kontrolu (Hash Karşılaştırma & Reset Hard)
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_ASKPASS"] = "echo"
@@ -113,22 +113,21 @@ def check_updates():
     try:
         repo_check = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True, timeout=2, env=env)
         if repo_check.returncode != 0:
-            print_step("4", "GitHub Otomatik Guncelleme", "ok", "Yerel mod (Git bulunamadi)")
+            print_step("4", "GitHub Otomatik Guncelleme", "ok", "Yerel mod (Git deposu degil)")
             return False
 
-        fetch_res = subprocess.run(["git", "fetch", "origin"], capture_output=True, text=True, timeout=4, env=env)
-        if fetch_res.returncode != 0:
-            print_step("4", "GitHub Otomatik Guncelleme", "ok", "Baglanti aktif (Sistem Hazir)")
-            return False
+        fetch_res = subprocess.run(["git", "fetch", "origin", "main"], capture_output=True, text=True, timeout=8, env=env)
+        
+        local_hash = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, env=env).stdout.strip()
+        remote_hash = subprocess.run(["git", "rev-parse", "origin/main"], capture_output=True, text=True, env=env).stdout.strip()
 
-        status = subprocess.run(["git", "status", "-uno"], capture_output=True, text=True, timeout=3, env=env)
-        if "behind" in (status.stdout or ""):
+        if local_hash and remote_hash and local_hash != remote_hash:
             print_step("4", "GitHub Otomatik Guncelleme", "loading", "Yeni surum indiriliyor...")
-            pull_res = subprocess.run(["git", "pull", "origin", "main"], capture_output=True, text=True, timeout=10, env=env)
-            if pull_res.returncode != 0:
-                subprocess.run(["git", "pull", "origin", "master"], capture_output=True, text=True, timeout=10, env=env)
+            reset_res = subprocess.run(["git", "reset", "--hard", "origin/main"], capture_output=True, text=True, timeout=10, env=env)
+            if reset_res.returncode != 0:
+                subprocess.run(["git", "pull", "origin", "main"], capture_output=True, text=True, timeout=10, env=env)
             
-            print_step("4", "GitHub Otomatik Guncelleme", "updated", "Yeni kodlar indirildi!")
+            print_step("4", "GitHub Otomatik Guncelleme", "updated", "Yeni kodlar yuklendi!")
             return True
         else:
             print_step("4", "GitHub Otomatik Guncelleme", "ok", "Yazilim en son surumde")
