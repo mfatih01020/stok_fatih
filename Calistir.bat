@@ -198,8 +198,34 @@ if exist "%CHROME1%" (
 echo  Tarayici hazir.
 echo.
 
+:: -- GitHub Otomatik Guncelleme Kontrolu -----------------------
+echo  [4/5] GitHub guncellemeleri kontrol ediliyor...
+git rev-parse --is-inside-work-tree > nul 2>&1
+if %errorlevel% equ 0 (
+    git fetch origin > nul 2>&1
+    for /f "tokens=*" %%i in ('git status -uno 2^>nul') do (
+        echo %%i | findstr /c:"behind" > nul
+        if %errorlevel% equ 0 (
+            echo.
+            echo  ============================================================
+            echo  [GUNCELLEME BULUNDU] Yeni kodlar GitHub'dan yukleniyor...
+            echo  ============================================================
+            git pull origin main > nul 2>&1
+            if %errorlevel% neq 0 (
+                git pull origin master > nul 2>&1
+            )
+            echo  [TAMAMLANDI] Kodlariniz en son surume guncellendi!
+            echo  Verileriniz (cikis_kayitlari.db) %100 korundu.
+            echo.
+        )
+    )
+) else (
+    echo  Git deposu baglanmamis, yerel kodla devam ediliyor.
+)
+
 :: -- Uygulamayi baslat ----------------------------------------
-echo  [4/4] Uygulama baslatiliyor...
+echo.
+echo  [5/5] Uygulama baslatiliyor...
 echo.
 echo  +--------------------------------------------------+
 echo  ^|  Adres: http://localhost:5000                    ^|
