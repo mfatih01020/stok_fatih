@@ -776,4 +776,37 @@ document.addEventListener('DOMContentLoaded', () => {
             window.downloadAuditExcel();
         });
     }
+
+    // Sürüm Bilgisi Yükleme
+    loadSystemVersion();
 });
+
+function loadSystemVersion() {
+    fetch('/api/system/version')
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                const vText = document.getElementById('versionText');
+                if (vText) vText.textContent = data.version || ('v2.5 (' + data.commit_hash + ')');
+                
+                const h = document.getElementById('modalCommitHash');
+                const d = document.getElementById('modalCommitDate');
+                const m = document.getElementById('modalCommitMsg');
+                if (h) h.textContent = data.commit_hash || '-';
+                if (d) d.textContent = data.commit_date || '-';
+                if (m) m.textContent = data.commit_msg || '-';
+            }
+        })
+        .catch(e => console.warn('Version check error:', e));
+}
+
+window.showVersionModal = function() {
+    const modal = document.getElementById('versionModal');
+    if (modal) modal.style.display = 'block';
+};
+
+window.closeVersionModal = function() {
+    const modal = document.getElementById('versionModal');
+    if (modal) modal.style.display = 'none';
+};
+

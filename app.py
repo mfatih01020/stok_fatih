@@ -20,6 +20,40 @@ def add_header(response):
     response.headers['Expires'] = '0'
     return response
 
+# ── Sürüm & Güncelleme Bilgisi Endpoint'i ─────────────────────────────────
+import subprocess
+
+def get_version_info():
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    try:
+        cmd_hash = ["git", "rev-parse", "--short", "HEAD"]
+        cmd_date = ["git", "log", "-1", "--format=%cd", "--date=format:%d.%m.%Y %H:%M", "HEAD"]
+        cmd_msg  = ["git", "log", "-1", "--format=%s", "HEAD"]
+
+        h = subprocess.run(cmd_hash, capture_output=True, text=True, env=env, timeout=2).stdout.strip() or "v2.5"
+        d = subprocess.run(cmd_date, capture_output=True, text=True, env=env, timeout=2).stdout.strip() or "Canlı Sürüm"
+        m = subprocess.run(cmd_msg,  capture_output=True, text=True, env=env, timeout=2).stdout.strip() or "Sistem Güncel"
+        return {
+            "success": True,
+            "version": f"v2.5 ({h})",
+            "commit_hash": h,
+            "commit_date": d,
+            "commit_msg": m
+        }
+    except Exception:
+        return {
+            "success": True,
+            "version": "v2.5.0",
+            "commit_hash": "v2.5",
+            "commit_date": "Canlı Sürüm",
+            "commit_msg": "Sistem Güncel"
+        }
+
+@app.route('/api/system/version', methods=['GET'])
+def system_version_api():
+    return jsonify(get_version_info())
+
 # ── SQLite Veritabanı ────────────────────────────────────────────────────────
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cikis_kayitlari.db')
 
