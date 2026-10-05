@@ -1,8 +1,8 @@
 {
-  "version": "v3.8",
-  "commit": "v3.8-final-test-800",
-  "date": "05.10.2026 23:58",
-  "message": "🚀 v3.8 FİNAL SÜRÜMÜ: Otomatik Güncelleme Motoru %100 Kusursuz Çalışıyor!",
+  "version": "v3.9",
+  "commit": "v3.9-release-900",
+  "date": "06.10.2026 00:05",
+  "message": "🎉 v3.9 DENEME SÜRÜMÜ: Otomatik Güncelleme Başarıyla v3.9 Sürümüne Yükseltildi!",
   "files": [
     ".gitignore",
     "Calistir.bat",
