@@ -63,6 +63,31 @@ def get_version_info():
         "commit_msg": m
     }
 
+import time
+import threading
+
+last_heartbeat_time = time.time()
+server_start_time = time.time()
+
+@app.route('/api/system/heartbeat', methods=['POST', 'GET'])
+def system_heartbeat():
+    global last_heartbeat_time
+    last_heartbeat_time = time.time()
+    return jsonify({"status": "ok"})
+
+def auto_shutdown_monitor():
+    while True:
+        time.sleep(4)
+        now = time.time()
+        if now - server_start_time < 25:
+            continue
+        if now - last_heartbeat_time > 10:
+            print("[OTOMATİK KAPANMA] Tüm tarayıcı sekmeleri kapatıldı. Sunucu sonlandırılıyor...")
+            os._exit(0)
+
+shutdown_thread = threading.Thread(target=auto_shutdown_monitor, daemon=True)
+shutdown_thread.start()
+
 @app.route('/api/system/version', methods=['GET'])
 def system_version_api():
     return jsonify(get_version_info())

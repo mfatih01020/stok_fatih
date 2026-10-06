@@ -810,3 +810,12 @@ window.closeVersionModal = function() {
     if (modal) modal.style.display = 'none';
 };
 
+// ── Heartbeat Auto-Shutdown Monitor (Sekme Kapatılınca Sunucu Kapanır) ──────────
+(function startHeartbeat() {
+    function sendPing() {
+        fetch('/api/system/heartbeat', { method: 'POST' }).catch(() => {});
+    }
+    sendPing();
+    setInterval(sendPing, 3000);
+})();
+

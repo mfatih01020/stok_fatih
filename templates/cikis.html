@@ -505,6 +505,13 @@ document.getElementById('btn-temizle-son').addEventListener('click', async () =>
 function esc(str) {
     return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+
+// ── Heartbeat Auto-Shutdown Monitor ──────────────────────────────────────────
+(function startHeartbeat() {
+    function sendPing() { fetch('/api/system/heartbeat', { method: 'POST' }).catch(() => {}); }
+    sendPing();
+    setInterval(sendPing, 3000);
+})();
 </script>
 </body>
 </html>

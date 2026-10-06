@@ -2,7 +2,7 @@
   "version": "v1.0",
   "commit": "1.0.4",
   "date": "06.10.2026",
-  "message": "v1.0.4: Tek tıkla Kapat.bat arka plan kapatıcı betiği eklendi",
+  "message": "v1.0.4: Web sitesi kapatılınca sunucunun otomatik kapanma motoru eklendi",
   "files": [
     ".gitignore",
     "Calistir.bat",
