@@ -329,7 +329,20 @@ def check_updates():
 
     return http_fallback_update_launcher()
 
+def kill_existing_flask():
+    try:
+        res = subprocess.run(["netstat", "-ano"], capture_output=True, text=True)
+        for line in res.stdout.splitlines():
+            if ":5000 " in line and "LISTENING" in line:
+                parts = line.strip().split()
+                pid = parts[-1]
+                if pid.isdigit() and int(pid) != os.getpid():
+                    subprocess.run(["taskkill", "/F", "/PID", pid], capture_output=True)
+    except Exception:
+        pass
+
 def launch_app():
+    kill_existing_flask()
     print_step("5", "Uygulama Sunucusu", "ok", "HTTP 127.0.0.1:5000")
     print(f"\n  {WHITE}{BOLD}" + "-" * 72 + f"{RESET}")
     print(f"  {GREEN}{BOLD}* YÖNETİM PANELİ BAŞARIYLA BAŞLATILDI (v1.0){RESET}")

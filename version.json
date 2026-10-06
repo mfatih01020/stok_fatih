@@ -1,6 +1,6 @@
 {
   "version": "v1.0",
-  "commit": "1.0.0",
+  "commit": "1.0.1",
   "date": "06.10.2026",
   "message": "QR Stok Yönetim Sistemi v1.0 Sürümü",
   "files": [
@@ -10,7 +10,6 @@
     "KURULUM.md",
     "app.py",
     "bakanlik_giris_bilgileri.template.txt",
-    "check_ids.py",
     "guncelleme_kontrol.py",
     "indir_driver.ps1",
     "launcher.py",
