@@ -12,5 +12,5 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo Devam etmek veya pencereyi kapatmak icin bir tusa basin...
-pause > nul
+echo Pencere 10 saniye icinde otomatik kapatilacaktir...
+timeout /t 10 > nul

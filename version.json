@@ -1,8 +1,8 @@
 {
   "version": "v1.0",
-  "commit": "1.0.1",
+  "commit": "1.0.2",
   "date": "06.10.2026",
-  "message": "QR Stok Yönetim Sistemi v1.0 Sürümü",
+  "message": "v1.0.2: Arka plan çalışma ve 10sn otomatik konsol kapanışı eklendi",
   "files": [
     ".gitignore",
     "Calistir.bat",

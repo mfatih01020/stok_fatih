@@ -347,14 +347,22 @@ def launch_app():
     print(f"\n  {WHITE}{BOLD}" + "-" * 72 + f"{RESET}")
     print(f"  {GREEN}{BOLD}* YÖNETİM PANELİ BAŞARIYLA BAŞLATILDI (v1.0){RESET}")
     print(f"  {CYAN}  Web Adresi :{RESET} {WHITE}{BOLD}http://127.0.0.1:5000{RESET}")
+    print(f"  {WHITE}  Uygulama arka planda güvenle çalışmaya başladı.{RESET}")
     print(f"  {WHITE}{BOLD}" + "-" * 72 + f"{RESET}\n")
 
+    creationflags = 0x08000000 if os.name == 'nt' else 0
+    subprocess.Popen([sys.executable, "app.py"], cwd=BASE_DIR, creationflags=creationflags)
+
+    time.sleep(1)
     webbrowser.open("http://127.0.0.1:5000")
 
-    try:
-        subprocess.run([sys.executable, "app.py"], cwd=BASE_DIR)
-    except KeyboardInterrupt:
-        print(f"\n{YELLOW}Uygulama kapatildi.{RESET}")
+    for i in range(10, 0, -1):
+        print(f"\r  {YELLOW}Pencere {i} saniye içinde otomatik kapatılacak... (Uygulama arkada aktif kalır){RESET} ", end="", flush=True)
+        time.sleep(1)
+    
+    print(f"\n\n  {GREEN}İşlem tamamlandı. Konsol kapatılıyor.{RESET}\n")
+    time.sleep(1)
+    sys.exit(0)
 
 if __name__ == "__main__":
     print_header()
