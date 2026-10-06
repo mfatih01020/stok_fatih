@@ -9,8 +9,6 @@ if %errorlevel% neq 0 (
     echo ============================================================
     echo [HATA] Guncelleme islemi basarisiz oldu!
     echo ============================================================
+    pause
 )
-
-echo.
-echo Pencere 10 saniye icinde otomatik kapatilacaktir...
-timeout /t 10 > nul
+exit

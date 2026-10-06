@@ -1,8 +1,8 @@
 {
   "version": "v1.0",
-  "commit": "1.0.2",
+  "commit": "1.0.3",
   "date": "06.10.2026",
-  "message": "v1.0.2: Arka plan çalışma ve 10sn otomatik konsol kapanışı eklendi",
+  "message": "v1.0.3: Anında kaybolan CMD konsolu ve arka plan çalışma güncellemesi",
   "files": [
     ".gitignore",
     "Calistir.bat",

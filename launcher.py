@@ -344,23 +344,14 @@ def kill_existing_flask():
 def launch_app():
     kill_existing_flask()
     print_step("5", "Uygulama Sunucusu", "ok", "HTTP 127.0.0.1:5000")
-    print(f"\n  {WHITE}{BOLD}" + "-" * 72 + f"{RESET}")
-    print(f"  {GREEN}{BOLD}* YÖNETİM PANELİ BAŞARIYLA BAŞLATILDI (v1.0){RESET}")
-    print(f"  {CYAN}  Web Adresi :{RESET} {WHITE}{BOLD}http://127.0.0.1:5000{RESET}")
-    print(f"  {WHITE}  Uygulama arka planda güvenle çalışmaya başladı.{RESET}")
-    print(f"  {WHITE}{BOLD}" + "-" * 72 + f"{RESET}\n")
+    print(f"\n  {GREEN}{BOLD}* YÖNETİM PANELİ BAŞLATILDI (Arka Planda Aktif){RESET}")
+    print(f"  {CYAN}  Web Adresi: {WHITE}{BOLD}http://127.0.0.1:5000{RESET}\n")
 
     creationflags = 0x08000000 if os.name == 'nt' else 0
     subprocess.Popen([sys.executable, "app.py"], cwd=BASE_DIR, creationflags=creationflags)
 
-    time.sleep(1)
+    time.sleep(0.5)
     webbrowser.open("http://127.0.0.1:5000")
-
-    for i in range(10, 0, -1):
-        print(f"\r  {YELLOW}Pencere {i} saniye içinde otomatik kapatılacak... (Uygulama arkada aktif kalır){RESET} ", end="", flush=True)
-        time.sleep(1)
-    
-    print(f"\n\n  {GREEN}İşlem tamamlandı. Konsol kapatılıyor.{RESET}\n")
     time.sleep(1)
     sys.exit(0)
 
