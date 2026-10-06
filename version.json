@@ -1,12 +1,13 @@
 {
   "version": "v1.0",
-  "commit": "1.0.3",
+  "commit": "1.0.4",
   "date": "06.10.2026",
-  "message": "v1.0.3: Anında kaybolan CMD konsolu ve arka plan çalışma güncellemesi",
+  "message": "v1.0.4: Tek tıkla Kapat.bat arka plan kapatıcı betiği eklendi",
   "files": [
     ".gitignore",
     "Calistir.bat",
     "Guncelle.bat",
+    "Kapat.bat",
     "KURULUM.md",
     "app.py",
     "bakanlik_giris_bilgileri.template.txt",
