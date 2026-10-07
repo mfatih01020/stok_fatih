@@ -2518,6 +2518,21 @@ def api_system_login():
     if not username or not password:
         return jsonify({'success': False, 'error': 'Kullanıcı adı ve şifre giriniz.'})
 
+    cred_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bakanlik_giris_bilgileri.txt")
+    user_name = username
+
+    if os.path.exists(cred_file):
+        try:
+            with open(cred_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if line.strip().startswith("KULLANICI_ISIM="):
+                        val = line.strip().split("=", 1)[1].strip()
+                        if val:
+                            user_name = val
+                            break
+        except Exception:
+            pass
+
     try:
         import requests
         import urllib3
@@ -2530,30 +2545,31 @@ def api_system_login():
             "X-Requested-With": "XMLHttpRequest"
         })
 
-        r_home = session.get("https://bkst.tarbil.gov.tr/", verify=False, timeout=10)
+        r_home = session.get("https://bkst.tarbil.gov.tr/", verify=False, timeout=5)
         token_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', r_home.text)
         token1 = token_match.group(1) if token_match else ""
 
         login_payload = {"tcNo": username, "sifre": password, "__RequestVerificationToken": token1}
-        res_login = session.post("https://bkst.tarbil.gov.tr/UserOperation/GetUserInf", data=login_payload, verify=False, timeout=15)
+        res_login = session.post("https://bkst.tarbil.gov.tr/UserOperation/GetUserInf", data=login_payload, verify=False, timeout=8)
         
         if "0" not in res_login.text:
             return jsonify({'success': False, 'error': 'Bakanlık kullanıcı adı veya şifreniz hatalı.'})
 
-        user_name = username
         try:
             jdata = res_login.json()
             if isinstance(jdata, dict):
-                user_name = jdata.get("NameSurname") or jdata.get("UserName") or jdata.get("Name") or username
+                fetched_name = jdata.get("NameSurname") or jdata.get("UserName") or jdata.get("Name")
+                if fetched_name:
+                    user_name = fetched_name
         except Exception:
             pass
 
         try:
-            r_stock = session.get("https://bkst.tarbil.gov.tr/Main/StockList", verify=False, timeout=8)
+            r_stock = session.get("https://bkst.tarbil.gov.tr/Main/StockList", verify=False, timeout=5)
             token2_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', r_stock.text)
             token2 = token2_match.group(1) if token2_match else token1
 
-            r_gln = session.post("https://bkst.tarbil.gov.tr/Partial/GetGLN", data={"FirmType": "0", "__RequestVerificationToken": token2}, verify=False, timeout=8)
+            r_gln = session.post("https://bkst.tarbil.gov.tr/Partial/GetGLN", data={"FirmType": "0", "__RequestVerificationToken": token2}, verify=False, timeout=5)
             if r_gln.status_code == 200:
                 gln_data = r_gln.json()
                 if isinstance(gln_data, list) and len(gln_data) > 0:
@@ -2564,12 +2580,11 @@ def api_system_login():
                         clean_name = clean_user_name(raw_text)
                         if clean_name and not clean_name.isdigit():
                             user_name = clean_name
-        except Exception as e_gln:
-            print(f"GLN fetch error during login: {e_gln}")
+        except Exception:
+            pass
 
         user_name = clean_user_name(user_name)
 
-        cred_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bakanlik_giris_bilgileri.txt")
         lines = [
             "# ==============================================================================",
             "# BAKANLIK BKST GİRİŞ BİLGİLERİ",
@@ -2584,8 +2599,28 @@ def api_system_login():
             f.write("\n".join(lines))
 
         return jsonify({'success': True, 'message': 'Giriş başarılı ve kaydedildi.', 'user_name': user_name})
+
     except Exception as e:
-        return jsonify({'success': False, 'error': f'Bağlantı hatası: {str(e)}'})
+        # Offline Mode: Save credentials locally and allow offline login
+        lines = [
+            "# ==============================================================================",
+            "# BAKANLIK BKST GİRİŞ BİLGİLERİ",
+            "# ==============================================================================",
+            f"KULLANICI_ADI={username}",
+            f"SIFRE={password}",
+            f"ADRES_ID={address_id}",
+            f"KULLANICI_ISIM={user_name}",
+            ""
+        ]
+        with open(cred_file, 'w', encoding='utf-8') as f:
+            f.write("\n".join(lines))
+
+        return jsonify({
+            'success': True,
+            'offline_mode': True,
+            'message': 'İnternet bağlantısı yok veya Bakanlık sunucusu erişilemiyor. Yerel Çevrimdışı (Offline) Modda Giriş Yapıldı.',
+            'user_name': clean_user_name(user_name)
+        })
 
 
 @app.route('/api/system/user_info', methods=['GET'])

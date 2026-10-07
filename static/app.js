@@ -1235,8 +1235,6 @@ async function applyWebSystemUpdate() {
 
 function initApp() {
     loadUserInfo();
-    checkWebSystemUpdate();
-    runAutoBkstSync();
 }
 
 if (document.readyState === "loading") {
