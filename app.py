@@ -25,30 +25,42 @@ import subprocess
 import json
 
 NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
-APP_VERSION = "v3.0.0"
-
 def get_version_info():
+    try:
+        from guncelleme_kontrol import get_unified_version_info
+        ver_code, ver_date, ver_msg = get_unified_version_info()
+        return {
+            "success": True,
+            "version": ver_code,
+            "commit_hash": ver_code,
+            "commit_date": ver_date,
+            "commit_msg": ver_msg
+        }
+    except Exception:
+        pass
+
     v_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.json")
     if os.path.exists(v_path):
         try:
             with open(v_path, "r", encoding="utf-8") as f:
                 v_data = json.load(f)
+                v_code = v_data.get("version", "v3.1.0")
                 return {
                     "success": True,
-                    "version": v_data.get("version", APP_VERSION),
-                    "commit_hash": v_data.get("commit", APP_VERSION),
-                    "commit_date": v_data.get("date", "07.10.2026"),
-                    "commit_msg": v_data.get("message", f"QR Compare {APP_VERSION} Canlı Sürüm")
+                    "version": f"{v_code} ({v_data.get('commit', '3.1.0')})",
+                    "commit_hash": f"{v_code} ({v_data.get('commit', '3.1.0')})",
+                    "commit_date": v_data.get("date", "08.10.2026"),
+                    "commit_msg": v_data.get("message", f"{v_code} Sürümü")
                 }
         except Exception:
             pass
 
     return {
         "success": True,
-        "version": APP_VERSION,
-        "commit_hash": APP_VERSION,
-        "commit_date": "07.10.2026",
-        "commit_msg": f"QR Compare {APP_VERSION} Canlı Sürüm"
+        "version": "v3.1.0",
+        "commit_hash": "v3.1.0",
+        "commit_date": "08.10.2026",
+        "commit_msg": "v3.1.0 Sürümü"
     }
 
 import time

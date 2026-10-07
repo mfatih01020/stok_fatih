@@ -39,18 +39,35 @@ def clear_pycache():
 
 def get_unified_version_info():
     """
-    Sürüm bilgisini 3 kademeli olarak tespit eder:
-    1. .git/HEAD ve logs/HEAD dosya okuması
-    2. git komut çıktısı
-    3. version.json yerel yedeği
+    Sürüm bilgisini version.json dosyasından ve git geçmişinden birleştirerek sunar.
+    Tek Gerçeklik Kaynağı: version.json
     """
+    v_code = "v3.1.0"
+    v_commit = "3.1.0"
+    v_date = "08.10.2026"
+    v_msg = "Sistem Güncel"
+
+    v_path = os.path.join(BASE_DIR, "version.json")
+    if os.path.exists(v_path):
+        try:
+            with open(v_path, "r", encoding="utf-8") as f:
+                v_data = json.load(f)
+                v_code = v_data.get("version", "v3.1.0")
+                v_commit = v_data.get("commit", "3.1.0")
+                v_date = v_data.get("date", "08.10.2026")
+                v_msg = v_data.get("message", f"{v_code} Sürümü")
+        except Exception:
+            pass
+
+    commit_hash = ""
+    commit_date = ""
+    commit_msg = ""
     try:
         head_path = os.path.join(BASE_DIR, '.git', 'HEAD')
         if os.path.exists(head_path):
             with open(head_path, "r", encoding="utf-8", errors="ignore") as f:
                 head_content = f.read().strip()
 
-            commit_hash = ""
             if head_content.startswith("ref:"):
                 ref_rel = head_content.split(": ", 1)[1].strip()
                 ref_path = os.path.join(BASE_DIR, '.git', ref_rel)
@@ -60,8 +77,6 @@ def get_unified_version_info():
             else:
                 commit_hash = head_content[:7]
 
-            commit_date = ""
-            commit_msg = ""
             log_path = os.path.join(BASE_DIR, '.git', 'logs', 'HEAD')
             if os.path.exists(log_path):
                 with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -75,39 +90,14 @@ def get_unified_version_info():
                         if len(meta_parts) >= 5 and meta_parts[-2].isdigit():
                             dt = datetime.fromtimestamp(int(meta_parts[-2]))
                             commit_date = dt.strftime("%d.%m.%Y %H:%M")
-
-            if commit_hash and commit_hash != "Bilinmiyor":
-                return f"v1.0 ({commit_hash})", (commit_date or "Canlı Sürüm"), (commit_msg or "Sistem Güncel")
     except Exception:
         pass
 
-    try:
-        env = os.environ.copy()
-        env["GIT_TERMINAL_PROMPT"] = "0"
-        env["GIT_SSL_NO_VERIFY"] = "true"
-        subprocess.run(["git", "config", "--global", "--add", "safe.directory", "*"], capture_output=True, text=True, cwd=BASE_DIR, creationflags=NO_WINDOW)
-        h = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR, creationflags=NO_WINDOW).stdout.strip()
-        d = subprocess.run(["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%cd", "--date=format:%d.%m.%Y %H:%M", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR, creationflags=NO_WINDOW).stdout.strip()
-        m = subprocess.run(["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%s", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR, creationflags=NO_WINDOW).stdout.strip()
-        if h and h != "Bilinmiyor":
-            return f"v1.0 ({h})", (d or "Canlı Sürüm"), (m or "Sistem Güncel")
-    except Exception:
-        pass
+    final_version_code = f"{v_code} ({commit_hash or v_commit})"
+    final_date = commit_date or v_date
+    final_message = v_msg or commit_msg or f"{v_code} Sürümü"
 
-    v_path = os.path.join(BASE_DIR, "version.json")
-    if os.path.exists(v_path):
-        try:
-            with open(v_path, "r", encoding="utf-8") as f:
-                v_data = json.load(f)
-                v_code = v_data.get("version", "v1.0")
-                v_commit = v_data.get("commit", "1.0.0")
-                v_date = v_data.get("date", "06.10.2026")
-                v_msg = v_data.get("message", "v1.0 Sürümü")
-                return f"{v_code} ({v_commit})", v_date, v_msg
-        except Exception:
-            pass
-
-    return "v1.0 (1.0.0)", "06.10.2026", "QR Stok Yönetim Sistemi v1.0 Sürümü"
+    return final_version_code, final_date, final_message
 
 def get_latest_remote_commit_sha(requests_module):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
