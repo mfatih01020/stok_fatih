@@ -2597,59 +2597,22 @@ def api_system_user_info():
 
     user_name = username
     if os.path.exists(cred_file):
-        with open(cred_file, 'r', encoding='utf-8') as f:
-            for line in f:
-                if line.strip().startswith("KULLANICI_ISIM="):
-                    val = line.strip().split("=", 1)[1].strip()
-                    if val and val != username:
-                        user_name = val
-
-    if user_name == username:
-        session, gln_guid, token2, err = get_bkst_authenticated_session()
-        if session:
-            try:
-                r_user = session.get("https://bkst.tarbil.gov.tr/UserOperation/GetUserInf", verify=False, timeout=5)
-                if r_user.status_code == 200:
-                    try:
-                        j = r_user.json()
-                        if isinstance(j, dict):
-                            fetched_name = j.get("NameSurname") or j.get("UserName") or j.get("Name")
-                            if fetched_name:
-                                user_name = fetched_name
-                    except Exception:
-                        pass
-                
-                if user_name == username:
-                    r_stock = session.get("https://bkst.tarbil.gov.tr/Main/StockList", verify=False, timeout=5)
-                    match = re.search(r'class="[^"]*(?:user-name|profile-name|user|account)[^"]*"[^>]*>\s*([A-Za-zÇĞİÖŞÜçğiöşü\s]{3,40})\s*<', r_stock.text)
-                    if match:
-                        user_name = match.group(1).strip()
-
-                user_name = clean_user_name(user_name)
-
-                if user_name and user_name != username:
-                    lines = []
-                    with open(cred_file, 'r', encoding='utf-8') as f:
-                        lines = [l.strip() for l in f.readlines()]
-                    has_isim = False
-                    for i, l in enumerate(lines):
-                        if l.startswith("KULLANICI_ISIM="):
-                            lines[i] = f"KULLANICI_ISIM={user_name}"
-                            has_isim = True
+        try:
+            with open(cred_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if line.strip().startswith("KULLANICI_ISIM="):
+                        val = line.strip().split("=", 1)[1].strip()
+                        if val:
+                            user_name = val
                             break
-                    if not has_isim:
-                        lines.append(f"KULLANICI_ISIM={user_name}")
-                    with open(cred_file, 'w', encoding='utf-8') as f:
-                        f.write("\n".join(lines) + "\n")
-            except Exception:
-                pass
+        except Exception:
+            pass
 
-    user_name = clean_user_name(user_name)
-
+    display_name = clean_user_name(user_name or username)
     return jsonify({
         'success': True,
         'username': username,
-        'user_name': user_name
+        'user_name': display_name
     })
 
 
