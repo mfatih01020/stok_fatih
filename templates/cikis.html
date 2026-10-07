@@ -554,6 +554,31 @@ function esc(str) {
     return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
     </script>
+
+    <!-- SÜRÜM & GÜNCELLEME MODALI -->
+    <div id="versionModal" class="modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px);">
+        <div style="background:#1e293b; color:#fff; max-width:450px; margin:10% auto; padding:24px; border-radius:16px; border:1px solid rgba(255,255,255,0.1); box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:12px; margin-bottom:16px;">
+                <h3 style="margin:0; font-size:1.15rem; color:#38bdf8; display:flex; align-items:center; gap:8px;">
+                    <i class="fa-solid fa-circle-info"></i> Uygulama Sürüm Bilgisi
+                </h3>
+                <span onclick="closeVersionModal()" style="cursor:pointer; font-size:1.4rem; color:#94a3b8;">&times;</span>
+            </div>
+            <div style="font-size:0.95rem; line-height:1.8;">
+                <p style="margin:6px 0;"><strong>📦 Sürüm Kodu:</strong> <span id="modalCommitHash" style="color:#38bdf8; font-family:monospace; font-weight:bold;">v3.1.0</span></p>
+                <p style="margin:6px 0;"><strong>📅 Son Güncelleme:</strong> <span id="modalCommitDate" style="color:#f1f5f9;">08.10.2026</span></p>
+                <p style="margin:6px 0;"><strong>📝 Son Değişiklik Notu:</strong></p>
+                <div id="modalCommitMsg" style="background:#0f172a; padding:10px 14px; border-radius:8px; font-size:0.85rem; color:#cbd5e1; border:1px solid rgba(255,255,255,0.05); margin-top:4px;">v3.1.0: Tam ekran masaüstü modu, SQLite DB entegrasyonu, otomatik kapanma ve stabilite güncellemeleri</div>
+                <div style="margin-top:16px; background:rgba(34, 197, 94, 0.15); border:1px solid rgba(34, 197, 94, 0.3); color:#4ade80; padding:8px 12px; border-radius:8px; text-align:center; font-size:0.85rem; font-weight:600;">
+                    🟢 GitHub Sunucusu ile Eşitlendi & Güncel
+                </div>
+            </div>
+            <div style="margin-top:16px; text-align:right;">
+                <button onclick="closeVersionModal()" style="background:#3b82f6; color:#fff; border:none; padding:8px 18px; border-radius:8px; font-weight:600; cursor:pointer;">Kapat</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/app.js?v=20261005_v3000"></script>
 </body>
 </html>
