@@ -1313,6 +1313,18 @@ def read_bkst_credentials():
     return username, password, address_id, api_key
 
 
+def check_internet_connection():
+    try:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(2.0)
+        s.connect(("8.8.8.8", 53))
+        s.close()
+        return True
+    except Exception:
+        return False
+
+
 @app.route('/api/bkst/fetch_api', methods=['POST'])
 def bkst_fetch_api():
     global bkst_cache_df, bkst_cache_qr, bkst_cache_gtin, bkst_cache_koli, bkst_status, bkst_message
@@ -1322,6 +1334,16 @@ def bkst_fetch_api():
         bkst_status = "error"
         bkst_message = "❌ HATA: 'bakanlik_giris_bilgileri.txt' dosyasında KULLANICI_ADI veya SIFRE bulunamadı! Lütfen bilgilerinizi doldurup kaydedin."
         return jsonify({"success": False, "unauthenticated": True, "error": bkst_message})
+
+    if not check_internet_connection():
+        df_cache, _, _, _ = get_bkst_cache()
+        item_count = len(df_cache) if df_cache is not None else 0
+        return jsonify({
+            "success": True,
+            "offline": True,
+            "message": "İnternet bağlantısı yok. Yerel veritabanındaki stok verileri yüklendi.",
+            "item_count": item_count
+        })
         
     try:
         import requests
@@ -1753,27 +1775,37 @@ def depo_stoklari_page():
 
 @app.route('/api/depo_stoklari', methods=['GET'])
 def api_depo_stoklari():
-    df, _, _, _ = get_bkst_cache()
-    if df is None or df.empty:
-        excel_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bkst_depo_verileri.xlsx")
-        if os.path.exists(excel_path):
-            try:
-                df = pd.read_excel(excel_path)
-            except Exception:
+    try:
+        df, _, _, _ = get_bkst_cache()
+        if df is None or df.empty:
+            excel_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bkst_depo_verileri.xlsx")
+            if os.path.exists(excel_path):
+                try:
+                    df = pd.read_excel(excel_path)
+                except Exception:
+                    df = pd.DataFrame()
+            else:
                 df = pd.DataFrame()
-        else:
-            df = pd.DataFrame()
 
-    rows = []
-    if df is not None and not df.empty:
-        df_clean = df.fillna("")
-        rows = df_clean.to_dict(orient="records")
+        rows = []
+        if df is not None and not df.empty:
+            df_clean = df.fillna("")
+            for col in df_clean.columns:
+                df_clean[col] = df_clean[col].astype(str)
+            rows = df_clean.to_dict(orient="records")
 
-    return jsonify({
-        "success": True,
-        "products": rows,
-        "total": len(rows)
-    })
+        return jsonify({
+            "success": True,
+            "products": rows,
+            "total": len(rows)
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "products": [],
+            "total": 0,
+            "error": str(e)
+        })
 
 
 @app.route('/api/cikis/okut', methods=['POST'])
@@ -2721,4 +2753,4 @@ def api_system_logout():
 
 
 if __name__ == '__main__':
-    app.run(host='127.0.0.1', port=5000, debug=False)
+    app.run(host='127.0.0.1', port=5000, debug=False, threaded=True)
