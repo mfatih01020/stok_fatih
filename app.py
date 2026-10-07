@@ -76,6 +76,26 @@ def auto_shutdown_monitor():
 shutdown_thread = threading.Thread(target=auto_shutdown_monitor, daemon=True)
 shutdown_thread.start()
 
+def get_version_info():
+    try:
+        from guncelleme_kontrol import get_unified_version_info
+        ver_code, ver_date, ver_msg = get_unified_version_info()
+        return {
+            'success': True,
+            'version': ver_code,
+            'commit_hash': ver_code,
+            'commit_date': ver_date,
+            'commit_msg': ver_msg
+        }
+    except Exception as e:
+        return {
+            'success': True,
+            'version': 'v3.1.0',
+            'commit_hash': 'v3.1.0 (3.1.0)',
+            'commit_date': '08.10.2026',
+            'commit_msg': 'v3.1.0: Tam ekran masaüstü modu, SQLite DB entegrasyonu ve stabilite güncellemeleri'
+        }
+
 @app.route('/api/system/version', methods=['GET'])
 def system_version_api():
     return jsonify(get_version_info())
