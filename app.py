@@ -1810,220 +1810,253 @@ def api_depo_stoklari():
 
 @app.route('/api/cikis/okut', methods=['POST'])
 def cikis_okut():
-    data = request.json or {}
-    barkod_raw = data.get('barkod', '').strip()
-    if not barkod_raw:
-        return jsonify({'success': False, 'error': 'Barkod boş olamaz.'})
+    try:
+        data = request.json or {}
+        barkod_raw = data.get('barkod', '').strip()
+        if not barkod_raw:
+            return jsonify({'success': False, 'error': 'Barkod boş olamaz.'})
 
-    barkod_norm = normalize_qr(barkod_raw)
-    username, _, _, _ = read_bkst_credentials()
+        barkod_norm = normalize_qr(barkod_raw)
+        username, _, _, _ = read_bkst_credentials()
 
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    if username:
-        c.execute('SELECT id, tarih, urun_adi FROM cikis_kayitlari WHERE ham_karekod = ? AND (kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = "")', (barkod_norm, username))
-    else:
-        c.execute('SELECT id, tarih, urun_adi FROM cikis_kayitlari WHERE ham_karekod = ?', (barkod_norm,))
-    existing = c.fetchone()
-    conn.close()
-
-    if existing:
-        ex_id, ex_tarih, ex_urun = existing
-        return jsonify({
-            'success': False,
-            'already_exited': True,
-            'error': f'Bu ürün zaten depodan çıkarılmış! Ürün: {ex_urun} (Tarih: {ex_tarih})'
-        })
-
-    df, qr_map, gtin_map, koli_map = get_bkst_cache()
-    if df is None or df.empty:
-        return jsonify({
-            'success': False,
-            'error': 'Bakanlık depo verisi bulunamadı. Lütfen önce "Bakanlık Ekranı Aç" ile verileri çekin.'
-        })
-
-    match_row = qr_map.get(barkod_norm)
-    if match_row is None:
-        match_row = gtin_map.get(barkod_norm)
-
-    if match_row is None:
-        for k_qr, r_dict in qr_map.items():
-            if barkod_norm in k_qr or k_qr in barkod_norm:
-                match_row = r_dict
-                break
-
-    if match_row is None:
-        return jsonify({
-            'success': False,
-            'error': f'"{barkod_raw}" barkoduna ait ürün Bakanlık depo verisinde bulunamadı.'
-        })
-
-    tarih         = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    urun_adi      = str(match_row.get('Ürün Adı', '')).strip()
-    barkod_col    = str(match_row.get('Gtin Numarası', '')).strip()
-    koli_no       = str(match_row.get('Koli Numarası', '')).strip()
-    seri_no       = str(match_row.get('Seri Numarası', '')).strip()
-    parti_no      = str(match_row.get('Parti Numarası', '')).strip()
-    palet_no      = str(match_row.get('Palet Numarası', '')).strip()
-    uretim_tarihi = str(match_row.get('Üretim Tarihi', '')).strip()
-    skt           = str(match_row.get('Son Kullanma Tarihi', '')).strip()
-
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("PRAGMA journal_mode=WAL")
-    c.execute("PRAGMA synchronous=NORMAL")
-    c.execute('''INSERT INTO cikis_kayitlari
-        (tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no,
-         uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)''',
-        (tarih, urun_adi, barkod_col, koli_no, seri_no, parti_no, palet_no,
-         uretim_tarihi, skt, barkod_norm, username))
-    new_id = c.lastrowid
-    conn.commit()
-    conn.close()
-
-    return jsonify({
-        'success': True,
-        'tekrar_uyari': False,
-        'kayit': {
-            'id': new_id,
-            'tarih': tarih,
-            'urun_adi': urun_adi,
-            'barkod': barkod_col,
-            'koli_no': koli_no,
-            'seri_no': seri_no,
-            'parti_no': parti_no,
-            'palet_no': palet_no,
-            'uretim_tarihi': uretim_tarihi,
-            'skt': skt,
-            'ham_karekod': barkod_norm
-        }
-    })
-
-
-@app.route('/api/cikis/toplu_ekle', methods=['POST'])
-def cikis_toplu_ekle():
-    data = request.json or {}
-    items = data.get('items', [])
-    if not items or not isinstance(items, list):
-        return jsonify({'success': False, 'error': 'Aktarılacak karekod listesi bulunamadı.'})
-
-    df, qr_map, gtin_map, koli_map = get_bkst_cache()
-    if df is None or df.empty:
-        return jsonify({
-            'success': False,
-            'error': 'Bakanlık depo verisi bulunamadı. Lütfen önce güncel stok verilerini çekin.'
-        })
-
-    username, _, _, _ = read_bkst_credentials()
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("PRAGMA journal_mode=WAL")
-    c.execute("PRAGMA synchronous=NORMAL")
-
-    added_count = 0
-    already_count = 0
-    tarih = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-    for barkod_raw in items:
-        barkod_norm = normalize_qr(str(barkod_raw).strip())
-        if not barkod_norm:
-            continue
-
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        c = conn.cursor()
         if username:
-            c.execute('SELECT id FROM cikis_kayitlari WHERE ham_karekod = ? AND (kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = "")', (barkod_norm, username))
+            c.execute('SELECT id, tarih, urun_adi FROM cikis_kayitlari WHERE ham_karekod = ? AND (kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = "")', (barkod_norm, username))
         else:
-            c.execute('SELECT id FROM cikis_kayitlari WHERE ham_karekod = ?', (barkod_norm,))
-        if c.fetchone():
-            already_count += 1
-            continue
+            c.execute('SELECT id, tarih, urun_adi FROM cikis_kayitlari WHERE ham_karekod = ?', (barkod_norm,))
+        existing = c.fetchone()
+        conn.close()
 
-        match_row = qr_map.get(barkod_norm) or gtin_map.get(barkod_norm)
-        if match_row is None:
+        if existing:
+            ex_id, ex_tarih, ex_urun = existing
+            return jsonify({
+                'success': False,
+                'already_exited': True,
+                'error': f'Bu ürün zaten depodan çıkarılmış! Ürün: {ex_urun} (Tarih: {ex_tarih})'
+            })
+
+        df, qr_map, gtin_map, koli_map = get_bkst_cache()
+        if df is None or df.empty:
+            return jsonify({
+                'success': False,
+                'error': 'Bakanlık depo verisi bulunamadı. Lütfen önce verileri çekin.'
+            })
+
+        match_row = qr_map.get(barkod_norm) if qr_map else None
+        if match_row is None and gtin_map:
+            match_row = gtin_map.get(barkod_norm)
+
+        if match_row is None and qr_map:
             for k_qr, r_dict in qr_map.items():
                 if barkod_norm in k_qr or k_qr in barkod_norm:
                     match_row = r_dict
                     break
 
         if match_row is None:
-            urun_adi = "Tanımsız Ürün"
-            barkod_col = ""
-            koli_no = ""
-            seri_no = ""
-            parti_no = ""
-            palet_no = ""
-            uretim_tarihi = ""
-            skt = ""
-        else:
-            urun_adi      = str(match_row.get('Ürün Adı', '')).strip()
-            barkod_col    = str(match_row.get('Gtin Numarası', '')).strip()
-            koli_no       = str(match_row.get('Koli Numarası', '')).strip()
-            seri_no       = str(match_row.get('Seri Numarası', '')).strip()
-            parti_no      = str(match_row.get('Parti Numarası', '')).strip()
-            palet_no      = str(match_row.get('Palet Numarası', '')).strip()
-            uretim_tarihi = str(match_row.get('Üretim Tarihi', '')).strip()
-            skt           = str(match_row.get('Son Kullanma Tarihi', '')).strip()
+            return jsonify({
+                'success': False,
+                'error': f'"{barkod_raw}" barkoduna ait ürün Bakanlık depo verisinde bulunamadı.'
+            })
 
+        tarih         = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        urun_adi      = str(match_row.get('Ürün Adı', '')).strip()
+        barkod_col    = str(match_row.get('Gtin Numarası', '')).strip()
+        koli_no       = str(match_row.get('Koli Numarası', '')).strip()
+        seri_no       = str(match_row.get('Seri Numarası', '')).strip()
+        parti_no      = str(match_row.get('Parti Numarası', '')).strip()
+        palet_no      = str(match_row.get('Palet Numarası', '')).strip()
+        uretim_tarihi = str(match_row.get('Üretim Tarihi', '')).strip()
+        skt           = str(match_row.get('Son Kullanma Tarihi', '')).strip()
+
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        c = conn.cursor()
+        c.execute("PRAGMA journal_mode=WAL")
+        c.execute("PRAGMA synchronous=NORMAL")
         c.execute('''INSERT INTO cikis_kayitlari
             (tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no,
              uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)''',
             (tarih, urun_adi, barkod_col, koli_no, seri_no, parti_no, palet_no,
              uretim_tarihi, skt, barkod_norm, username))
-        added_count += 1
+        new_id = c.lastrowid
+        conn.commit()
+        conn.close()
 
-    conn.commit()
-    conn.close()
+        return jsonify({
+            'success': True,
+            'tekrar_uyari': False,
+            'kayit': {
+                'id': new_id,
+                'tarih': tarih,
+                'urun_adi': urun_adi,
+                'barkod': barkod_col,
+                'koli_no': koli_no,
+                'seri_no': seri_no,
+                'parti_no': parti_no,
+                'palet_no': palet_no,
+                'uretim_tarihi': uretim_tarihi,
+                'skt': skt,
+                'ham_karekod': barkod_norm
+            }
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Kayıt sırasında hata: {str(e)}'})
 
-    return jsonify({
-        'success': True,
-        'added_count': added_count,
-        'already_count': already_count,
-        'message': f'{added_count} adet ürün Çıkış Listesine aktarıldı.'
-    })
+
+@app.route('/api/cikis/toplu_ekle', methods=['POST'])
+def cikis_toplu_ekle():
+    try:
+        data = request.json or {}
+        items = data.get('items', [])
+        if not items or not isinstance(items, list):
+            return jsonify({'success': False, 'error': 'Aktarılacak karekod listesi bulunamadı.'})
+
+        df, qr_map, gtin_map, koli_map = get_bkst_cache()
+        username, _, _, _ = read_bkst_credentials()
+
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        c = conn.cursor()
+
+        if username:
+            c.execute('SELECT ham_karekod FROM cikis_kayitlari WHERE kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = ""', (username,))
+        else:
+            c.execute('SELECT ham_karekod FROM cikis_kayitlari')
+        existing_set = set(row[0] for row in c.fetchall() if row[0])
+
+        insert_rows = []
+        added_count = 0
+        already_count = 0
+        tarih = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        for barkod_raw in items:
+            barkod_norm = normalize_qr(str(barkod_raw).strip())
+            if not barkod_norm:
+                continue
+
+            if barkod_norm in existing_set:
+                already_count += 1
+                continue
+
+            existing_set.add(barkod_norm)
+
+            match_row = qr_map.get(barkod_norm) if qr_map else None
+            if match_row is None and gtin_map:
+                match_row = gtin_map.get(barkod_norm)
+
+            if match_row is None and qr_map:
+                for k_qr, r_dict in qr_map.items():
+                    if barkod_norm in k_qr or k_qr in barkod_norm:
+                        match_row = r_dict
+                        break
+
+            if match_row is None:
+                urun_adi = "Tanımsız Ürün"
+                barkod_col = ""
+                koli_no = ""
+                seri_no = ""
+                parti_no = ""
+                palet_no = ""
+                uretim_tarihi = ""
+                skt = ""
+            else:
+                urun_adi      = str(match_row.get('Ürün Adı', '')).strip()
+                barkod_col    = str(match_row.get('Gtin Numarası', '')).strip()
+                koli_no       = str(match_row.get('Koli Numarası', '')).strip()
+                seri_no       = str(match_row.get('Seri Numarası', '')).strip()
+                parti_no      = str(match_row.get('Parti Numarası', '')).strip()
+                palet_no      = str(match_row.get('Palet Numarası', '')).strip()
+                uretim_tarihi = str(match_row.get('Üretim Tarihi', '')).strip()
+                skt           = str(match_row.get('Son Kullanma Tarihi', '')).strip()
+
+            insert_rows.append((tarih, urun_adi, barkod_col, koli_no, seri_no, parti_no, palet_no,
+                                uretim_tarihi, skt, barkod_norm, 0, username))
+            added_count += 1
+
+        if insert_rows:
+            c.executemany('''INSERT INTO cikis_kayitlari
+                (tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no,
+                 uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', insert_rows)
+            conn.commit()
+
+        conn.close()
+
+        return jsonify({
+            'success': True,
+            'added_count': added_count,
+            'already_count': already_count,
+            'message': f'{added_count} adet ürün Çıkış Listesine aktarıldı.'
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'added_count': 0,
+            'already_count': 0,
+            'error': f'Toplu ekleme hatası: {str(e)}'
+        })
 
 
 @app.route('/api/cikis/listesi', methods=['GET'])
 def cikis_listesi_api():
-    username, _, _, _ = read_bkst_credentials()
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
-    if username:
-        c.execute('SELECT * FROM cikis_kayitlari WHERE kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = "" ORDER BY id DESC', (username,))
-    else:
-        c.execute('SELECT * FROM cikis_kayitlari ORDER BY id DESC')
-    rows = [dict(r) for r in c.fetchall()]
-    conn.close()
-    return jsonify({'success': True, 'kayitlar': rows, 'toplam': len(rows)})
+    try:
+        username, _, _, _ = read_bkst_credentials()
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        if username:
+            c.execute('SELECT * FROM cikis_kayitlari WHERE kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = "" ORDER BY id DESC', (username,))
+        else:
+            c.execute('SELECT * FROM cikis_kayitlari ORDER BY id DESC')
+        rows = [dict(r) for r in c.fetchall()]
+        conn.close()
+
+        clean_rows = []
+        for row in rows:
+            clean_row = {}
+            for k, v in row.items():
+                clean_row[k] = "" if v is None else str(v)
+            clean_rows.append(clean_row)
+
+        return jsonify({'success': True, 'kayitlar': clean_rows, 'toplam': len(clean_rows)})
+    except Exception as e:
+        return jsonify({'success': False, 'kayitlar': [], 'toplam': 0, 'error': str(e)})
 
 
 @app.route('/api/cikis/sil/<int:kayit_id>', methods=['DELETE'])
 def cikis_sil(kayit_id):
-    username, _, _, _ = read_bkst_credentials()
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    if username:
-        c.execute('DELETE FROM cikis_kayitlari WHERE id = ? AND (kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = "")', (kayit_id, username))
-    else:
-        c.execute('DELETE FROM cikis_kayitlari WHERE id = ?', (kayit_id,))
-    conn.commit()
-    conn.close()
-    return jsonify({'success': True})
+    try:
+        username, _, _, _ = read_bkst_credentials()
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        c = conn.cursor()
+        if username:
+            c.execute('DELETE FROM cikis_kayitlari WHERE id = ? AND (kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = "")', (kayit_id, username))
+        else:
+            c.execute('DELETE FROM cikis_kayitlari WHERE id = ?', (kayit_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
 
 
 @app.route('/api/cikis/temizle', methods=['POST'])
 def cikis_temizle():
-    username, _, _, _ = read_bkst_credentials()
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    if username:
-        c.execute('DELETE FROM cikis_kayitlari WHERE kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = ""', (username,))
-    else:
-        c.execute('DELETE FROM cikis_kayitlari')
-    conn.commit()
-    conn.close()
-    return jsonify({'success': True, 'mesaj': 'Tüm çıkış kayıtları silindi.'})
+    try:
+        username, _, _, _ = read_bkst_credentials()
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        c = conn.cursor()
+        if username:
+            c.execute('DELETE FROM cikis_kayitlari WHERE kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = ""', (username,))
+        else:
+            c.execute('DELETE FROM cikis_kayitlari')
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'mesaj': 'Tüm çıkış kayıtları silindi.'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
 
 
 @app.route('/api/cikis/indir', methods=['GET'])
