@@ -191,7 +191,7 @@
                 <div class="user-profile-card">
                     <div class="user-profile-info">
                         <i class="fa-solid fa-user-circle user-avatar-icon"></i>
-                        <span id="sidebar-user-name" class="user-name-title">Giriş Yapılmadı</span>
+                        <span id="sidebar-user-name" class="user-name-title">{{ current_user_name }}</span>
                     </div>
                     <button type="button" class="btn-logout-icon" onclick="logoutUser()" title="Oturumdan Çıkış Yap">
                         <i class="fa-solid fa-power-off"></i>
@@ -199,7 +199,7 @@
                 </div>
                 <div class="version-pill" onclick="showVersionModal()" title="Sürüm Bilgisi">
                     <i class="fa-solid fa-code-branch" style="color: #38bdf8;"></i>
-                    <span id="versionText">v3.1.0</span>
+                    <span id="versionText">{{ current_app_version }}</span>
                 </div>
             </div>
         </aside>

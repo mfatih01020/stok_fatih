@@ -232,6 +232,47 @@ def clean_user_name(name):
     cleaned = cleaned.split(" (")[0].strip()
     return cleaned if cleaned else name
 
+
+@app.context_processor
+def inject_global_template_vars():
+    user_name = "Giriş Yapılmadı"
+    cred_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bakanlik_giris_bilgileri.txt")
+    username = ""
+    if os.path.exists(cred_file):
+        try:
+            with open(cred_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line_s = line.strip()
+                    if line_s.startswith("KULLANICI="):
+                        username = line_s.split("=", 1)[1].strip()
+                    elif line_s.startswith("KULLANICI_ISIM="):
+                        val = line_s.split("=", 1)[1].strip()
+                        if val:
+                            user_name = val
+        except Exception:
+            pass
+    if username and user_name == "Giriş Yapılmadı":
+        user_name = username
+
+    if user_name and user_name != "Giriş Yapılmadı":
+        user_name = clean_user_name(user_name)
+
+    version_str = "v3.1.0"
+    v_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.json")
+    if os.path.exists(v_path):
+        try:
+            with open(v_path, "r", encoding="utf-8") as f:
+                v_data = json.load(f)
+                v_code = v_data.get("version", "3.1.0")
+                if not str(v_code).startswith("v"):
+                    version_str = f"v{v_code}"
+                else:
+                    version_str = str(v_code)
+        except Exception:
+            pass
+
+    return dict(current_user_name=user_name, current_app_version=version_str)
+
 def normalize_qr(qr):
     if pd.isna(qr):
         return ""

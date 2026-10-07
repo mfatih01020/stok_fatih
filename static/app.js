@@ -1030,11 +1030,17 @@ function cleanUserName(name) {
 
 // ── Kullanıcı Bilgisi ve Oturum Kapatma (Logout) ──────────────────────────────────────────
 async function loadUserInfo() {
+    const userNameEl = document.getElementById('sidebar-user-name');
+    const cachedName = localStorage.getItem('cached_user_name');
+    if (userNameEl && cachedName && (userNameEl.textContent === 'Giriş Yapılmadı' || !userNameEl.textContent.trim())) {
+        userNameEl.textContent = cachedName;
+        userNameEl.title = cachedName;
+    }
     try {
         const res = await fetch('/api/system/user_info');
         const data = await res.json();
-        const userNameEl = document.getElementById('sidebar-user-name');
         if (data.unauthenticated) {
+            localStorage.removeItem('cached_user_name');
             if (userNameEl) userNameEl.textContent = 'Giriş Yapılmadı';
             if (window.location.pathname !== '/login') {
                 window.location.href = '/login';
@@ -1043,13 +1049,14 @@ async function loadUserInfo() {
         }
         if (userNameEl) {
             const displayName = cleanUserName(data.user_name || data.username || 'Giriş Yapılmadı');
-            userNameEl.textContent = displayName;
-            userNameEl.title = displayName;
+            localStorage.setItem('cached_user_name', displayName);
+            if (userNameEl.textContent !== displayName) {
+                userNameEl.textContent = displayName;
+                userNameEl.title = displayName;
+            }
         }
     } catch (e) {
         console.error("User info error:", e);
-        const userNameEl = document.getElementById('sidebar-user-name');
-        if (userNameEl) userNameEl.textContent = 'Giriş Yapılmadı';
     }
 }
 
@@ -1059,6 +1066,7 @@ async function logoutUser() {
     }
     try {
         sessionStorage.removeItem('bkst_auto_synced');
+        localStorage.removeItem('cached_user_name');
         const res = await fetch('/api/system/logout', { method: 'POST' });
         const data = await res.json();
         if (data.success) {
