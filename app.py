@@ -66,27 +66,9 @@ def get_version_info():
 import time
 import threading
 
-last_heartbeat_time = time.time()
-server_start_time = time.time()
-
 @app.route('/api/system/heartbeat', methods=['POST', 'GET'])
 def system_heartbeat():
-    global last_heartbeat_time
-    last_heartbeat_time = time.time()
     return jsonify({"status": "ok"})
-
-def auto_shutdown_monitor():
-    while True:
-        time.sleep(5)
-        now = time.time()
-        if now - server_start_time < 30:
-            continue
-        if now - last_heartbeat_time > 60:
-            print("[OTOMATİK KAPANMA] Tüm tarayıcı sekmeleri kapatıldı. Sunucu sonlandırılıyor...")
-            os._exit(0)
-
-shutdown_thread = threading.Thread(target=auto_shutdown_monitor, daemon=True)
-shutdown_thread.start()
 
 def get_version_info():
     try:
@@ -231,41 +213,9 @@ def read_bkst_credentials():
                     
     return username, password, address_id, api_key
 
-_last_client_heartbeat = time.time()
-
 @app.route('/api/heartbeat', methods=['POST', 'GET'])
 def api_heartbeat():
-    global _last_client_heartbeat
-    _last_client_heartbeat = time.time()
     return jsonify({'status': 'ok'})
-
-@app.route('/api/shutdown', methods=['POST'])
-def api_shutdown():
-    def _do_shutdown():
-        time.sleep(0.3)
-        os._exit(0)
-    threading.Thread(target=_do_shutdown, daemon=True).start()
-    return jsonify({'status': 'shutting_down'})
-
-def _heartbeat_checker():
-    time.sleep(12)
-    last_loop_time = time.time()
-    while True:
-        time.sleep(3)
-        now = time.time()
-        loop_duration = now - last_loop_time
-        last_loop_time = now
-
-        # System sleep/hibernation detection
-        if loop_duration > 7:
-            global _last_client_heartbeat
-            _last_client_heartbeat = now
-            continue
-
-        if now - _last_client_heartbeat > 35:
-            os._exit(0)
-
-threading.Thread(target=_heartbeat_checker, daemon=True).start()
 
 @app.after_request
 def add_no_cache_headers(response):
