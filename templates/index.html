@@ -3,7 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>QR Compare - Akıllı Stok & Karekod Eşitleme</title>
+    <title>QR Compare</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
+    <link rel="shortcut icon" href="/static/favicon.ico">
     <!-- Google Fonts Outfit & Inter -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -12,34 +15,71 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+<body class="sidebar-layout">
     <div class="glass-bg-decor1"></div>
     <div class="glass-bg-decor2"></div>
     
-    <div class="container">
-        <!-- Header -->
-        <header class="app-header">
-            <div class="logo">
+    <div class="app-wrapper">
+        <!-- SOL DİKİNE SIDEBAR NAVİGASYON -->
+        <aside class="sidebar">
+            <div class="sidebar-brand">
                 <i class="fa-solid fa-qrcode logo-icon"></i>
                 <div>
-                    <h1>QR Compare</h1>
-                    <p>Bakanlık Stok Eşitleme & Karekod Düşüm Sistemi</p>
+                    <h2>QR Compare</h2>
+                    <p>Akıllı Stok Sistemi</p>
                 </div>
             </div>
-            <div style="display:flex; align-items:center; gap:1rem;">
-                <a href="/cikis" class="btn-cikis-quick">
-                    <i class="fa-solid fa-box-open"></i> ⚡ Barkod Okut & Çıkış Yap
+
+            <nav class="sidebar-menu">
+                <a href="/cikis" class="sidebar-link">
+                    <i class="fa-solid fa-box-open"></i>
+                    <span>Barkod Okut & Çıkış</span>
                 </a>
-                <div class="system-status">
+                <a href="/cikis-listesi" class="sidebar-link">
+                    <i class="fa-solid fa-list-check"></i>
+                    <span>Çıkış Listesi</span>
+                </a>
+                <a href="/stok-esitleme" class="sidebar-link active">
+                    <i class="fa-solid fa-chart-line"></i>
+                    <span>Stok & Eşitleme</span>
+                </a>
+                <a href="/depo_stoklari" class="sidebar-link">
+                    <i class="fa-solid fa-warehouse"></i>
+                    <span>Depomdaki Stoklar</span>
+                </a>
+                <a href="/depo_kabul" class="sidebar-link">
+                    <i class="fa-solid fa-boxes-packing"></i>
+                    <span>Depoya Kabul Et</span>
+                </a>
+                <a href="/kullaniciya-satis" class="sidebar-link">
+                    <i class="fa-solid fa-user-tag"></i>
+                    <span>Kullanıcıya Satış (Demo)</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="system-status-pill">
                     <span class="status-indicator online"></span>
                     <span>Sistem Aktif</span>
                 </div>
-                <div class="version-badge" id="versionBadge" onclick="showVersionModal()" title="Yazılım Sürümü ve Güncelleme Bilgisi" style="background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); padding: 5px 12px; border-radius: 20px; font-size: 0.82rem; color: #fff; display: flex; align-items: center; gap: 6px; cursor: pointer; transition: all 0.2s ease;">
+                <div class="user-profile-card">
+                    <div class="user-profile-info">
+                        <i class="fa-solid fa-user-circle user-avatar-icon"></i>
+                        <span id="sidebar-user-name" class="user-name-title">Yükleniyor...</span>
+                    </div>
+                    <button type="button" class="btn-logout-icon" onclick="logoutUser()" title="Oturumdan Çıkış Yap">
+                        <i class="fa-solid fa-power-off"></i>
+                    </button>
+                </div>
+                <div class="version-pill" id="versionBadge" onclick="showVersionModal()" title="Sürüm Bilgisi">
                     <i class="fa-solid fa-code-branch" style="color: #38bdf8;"></i>
-                    <span id="versionText">v2.5.0</span>
+                    <span id="versionText">v3.0.0</span>
                 </div>
             </div>
-        </header>
+        </aside>
+
+        <!-- SAĞ ANA İÇERİK ALANI -->
+        <main class="main-content">
 
         <!-- SÜRÜM & GÜNCELLEME MODALI -->
         <div id="versionModal" class="modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px);">
@@ -70,209 +110,51 @@
             <div class="guide-item">
                 <span class="guide-num">1</span>
                 <div>
-                    <strong>Bakanlık Verisi Çek</strong>
-                    <span>1. Bölümden stokları çekin</span>
+                    <strong>Bakanlık Verisi</strong>
+                    <span>Sunucudan otomatik çekilir</span>
                 </div>
             </div>
             <div class="guide-item">
                 <span class="guide-num">2</span>
                 <div>
-                    <strong>Dosya Karşılaştır</strong>
-                    <span>Depo ve Satış listelerini eşleştirin</span>
+                    <strong>Terek (Raf) Sayımı Yap</strong>
+                    <span>Koli / Ürün QR okutarak eksikleri bulun</span>
                 </div>
             </div>
             <div class="guide-item">
                 <span class="guide-num">3</span>
                 <div>
-                    <strong>Terek Sayımı Yap</strong>
-                    <span>Koli / Ürün QR okutarak eksikleri bulun</span>
-                </div>
-            </div>
-            <div class="guide-item">
-                <span class="guide-num">4</span>
-                <div>
-                    <strong>Sistemden Çık</strong>
-                    <span>Elden satılan ürünleri düşüş yapın</span>
+                    <strong>Çıkış Listesine Aktar</strong>
+                    <span>Tereğinizde olmayan ürünleri tek tıkla düşüş yapın</span>
                 </div>
             </div>
         </div>
 
-        <!-- 1. BÖLÜM: Bakanlık BKST Stok Çekici -->
-        <section class="panel glass-card bkst-panel">
-            <div class="panel-head-flex">
-                <div class="panel-title-group">
-                    <i class="fa-solid fa-globe icon-primary"></i>
-                    <div>
-                        <h2>1. Bölüm: Bakanlık BKST Stok Çekici</h2>
-                        <p class="panel-subtitle">Bakanlık sayfasındaki güncel stok verilerinizi otomatik çekin ve kaydedin.</p>
-                    </div>
+        <!-- OTOMATİK YÜKLEME EKRANI (APPLICATION START LOADING OVERLAY) -->
+        <div id="auto-sync-loader" style="display:none; position:fixed; z-index:99999; left:0; top:0; width:100%; height:100%; background:rgba(10, 11, 16, 0.94); backdrop-filter:blur(14px); flex-direction:column; align-items:center; justify-content:center; text-align:center;">
+            <div style="background:rgba(15, 23, 42, 0.96); border:1px solid rgba(56, 189, 248, 0.35); border-radius:24px; padding:2.8rem 3rem; max-width:520px; width:90%; box-shadow:0 25px 50px rgba(0,0,0,0.8); transition: all 0.3s ease;">
+                <div id="loader-icon-box" style="width:80px; height:80px; border-radius:50%; background:rgba(56,189,248,0.15); border:2px solid rgba(56,189,248,0.4); margin:0 auto 1.5rem auto; display:flex; align-items:center; justify-content:center; transition: all 0.3s ease;">
+                    <i id="loader-icon" class="fa-solid fa-cloud-arrow-down fa-bounce" style="font-size:2.4rem; color:#38bdf8;"></i>
                 </div>
-                <span class="badge" id="bkst-status-badge">Kapalı</span>
+                <h2 id="loader-title" style="font-family:var(--font-outfit); font-size:1.45rem; font-weight:800; color:#fff; margin:0 0 0.6rem 0;">
+                    Bakanlıktan Güncel Veriler Çekiliyor...
+                </h2>
+                <p id="loader-status" style="font-size:0.95rem; color:var(--text-muted); margin:0 0 1.6rem 0; line-height:1.6; transition: all 0.3s ease;">
+                    Lütfen bekleyin, BKST sunucusundan güncel stok ve karekod verileriniz otomatik çekiliyor.
+                </p>
+                <div style="background:rgba(255,255,255,0.06); height:6px; border-radius:10px; overflow:hidden; width:100%;">
+                    <div id="loader-progress-bar" style="background:linear-gradient(90deg, #38bdf8, #818cf8); height:100%; width:100%; transition: background 0.4s ease, width 0.4s ease;"></div>
+                </div>
             </div>
+        </div>
 
-            <div class="bkst-controls">
-                <button type="button" id="btn-bkst-open" class="btn btn-primary">
-                    <i class="fa-solid fa-window-restore"></i> 1. Bakanlık Ekranını Aç
-                </button>
-                <button type="button" id="btn-bkst-fetch" class="btn btn-success">
-                    <i class="fa-solid fa-cloud-arrow-down"></i> 2. Açık Sayfadaki Verileri Çek
-                </button>
-                <button type="button" id="btn-bkst-fetch-api" class="btn btn-purple" style="background: linear-gradient(135deg, #8b5cf6, #6d28d9); border-color: #8b5cf6;">
-                    <i class="fa-solid fa-bolt"></i> ⚡ 3. API ile Hızlı Veri Çek (2 Saniye)
-                </button>
-                <a href="/api/bkst/download_api_data" id="btn-bkst-download-excel" class="btn btn-outline hidden" download style="color: #6ee7b7; border-color: rgba(16, 185, 129, 0.4);">
-                    <i class="fa-solid fa-file-excel"></i> 📥 Çekilen Stok Verisini İndir (Excel)
-                </a>
-                <button type="button" id="btn-bkst-close" class="btn btn-outline hidden">
-                    <i class="fa-solid fa-circle-xmark"></i> Kapat
-                </button>
-            </div>
-            
-            <div id="bkst-message-box" class="status-msg hidden"></div>
-        </section>
-
-        <!-- MAIN DASHBOARD: 2. BÖLÜM -->
-        <main class="dashboard-grid">
-            
-            <!-- DOSYA YÜKLEME PANELİ -->
-            <section class="panel glass-card upload-panel">
-                <h2><i class="fa-solid fa-file-import icon-blue"></i> 2. Bölüm: Dosya Yükleme Paneli</h2>
-                <p class="panel-subtitle">Depo ve Satış listenizi yükleyip eşleşmeyenleri tespit edin.</p>
-                
-                <div class="upload-zone-wrapper">
-                    <label class="zone-label"><i class="fa-solid fa-warehouse"></i> 1. Sistem Depo Listesi (Excel)</label>
-                    <div class="upload-area" id="drop-zone-system">
-                        <input type="file" id="system-file" accept=".xlsx,.xls" hidden>
-                        <i class="fa-solid fa-cloud-arrow-up upload-icon color-blue"></i>
-                        <h3>Depo Dosyası Seçin</h3>
-                        <button class="btn btn-outline btn-sm" type="button" onclick="document.getElementById('system-file').click()">Dosya Seç</button>
-                    </div>
-                    
-                    <div class="file-info hidden" id="file-info-system">
-                        <i class="fa-solid fa-file-excel file-icon-selected color-blue"></i>
-                        <div class="file-details">
-                            <span class="file-name" id="name-system">depo.xlsx</span>
-                            <span class="file-size" id="size-system">0 KB</span>
-                        </div>
-                        <button class="btn-clear" type="button" id="btn-clear-system"><i class="fa-solid fa-xmark"></i></button>
-                    </div>
-                </div>
-
-                <div class="upload-zone-wrapper margin-top-sm">
-                    <label class="zone-label"><i class="fa-solid fa-receipt"></i> 2. Satış Listesi (Txt / Excel)</label>
-                    <div class="upload-area" id="drop-zone-sales">
-                        <input type="file" id="sales-file" accept=".txt,.xlsx,.xls" hidden>
-                        <i class="fa-solid fa-cloud-arrow-up upload-icon color-green"></i>
-                        <h3>Satış Dosyası Seçin</h3>
-                        <button class="btn btn-outline btn-sm" type="button" onclick="document.getElementById('sales-file').click()">Dosya Seç</button>
-                    </div>
-
-                    <div class="file-info hidden" id="file-info-sales">
-                        <i class="fa-solid fa-file-lines file-icon-selected color-green"></i>
-                        <div class="file-details">
-                            <span class="file-name" id="name-sales">satis.txt</span>
-                            <span class="file-size" id="size-sales">0 KB</span>
-                        </div>
-                        <button class="btn-clear" type="button" id="btn-clear-sales"><i class="fa-solid fa-xmark"></i></button>
-                    </div>
-                </div>
-
-                <button class="btn btn-primary btn-block margin-top-md" id="btn-compare">
-                    <i class="fa-solid fa-bolt"></i> Karşılaştır ve Analiz Et
-                </button>
-            </section>
-
-            <!-- ANALİZ & RAPOR SONUÇLARI PANELİ -->
-            <section class="panel glass-card results-panel">
-                <h2><i class="fa-solid fa-chart-pie icon-purple"></i> Analiz & Rapor Sonuçları</h2>
-                <p class="panel-subtitle">Yüklenen verilerin anlık stok eşleşme oranları.</p>
-                
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-icon color-blue"><i class="fa-solid fa-boxes-stacked"></i></div>
-                        <div class="stat-data">
-                            <span class="stat-value" id="val-total-system">0</span>
-                            <span class="stat-label">Sistem Depo</span>
-                        </div>
-                    </div>
-
-                    <div class="stat-card">
-                        <div class="stat-icon color-purple"><i class="fa-solid fa-tags"></i></div>
-                        <div class="stat-data">
-                            <span class="stat-value" id="val-total-sales">0</span>
-                            <span class="stat-label">Satılan Ürün</span>
-                        </div>
-                    </div>
-
-                    <div class="stat-card stat-success">
-                        <div class="stat-icon color-green"><i class="fa-solid fa-circle-check"></i></div>
-                        <div class="stat-data">
-                            <span class="stat-value" id="val-matched">0</span>
-                            <span class="stat-label">Düşülecek Stok</span>
-                        </div>
-                    </div>
-
-                    <div class="stat-card stat-amber">
-                        <div class="stat-icon color-amber"><i class="fa-solid fa-box-open"></i></div>
-                        <div class="stat-data">
-                            <span class="stat-value" id="val-remaining">0</span>
-                            <span class="stat-label">Kalan Envanter</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="action-buttons-group">
-                    <a href="/api/download/sales" class="btn btn-primary btn-block hidden" id="btn-dl-sales">
-                        <i class="fa-solid fa-file-excel"></i> 📥 Düşülecek Satışlar Listesi (Excel)
-                    </a>
-                    
-                    <a href="/api/download/remaining" class="btn btn-success btn-block hidden" id="btn-dl-remaining">
-                        <i class="fa-solid fa-file-excel"></i> 📥 Güncel Kalan Envanter Listesi (Excel)
-                    </a>
-                    
-                    <a href="/api/download/full_report" class="btn btn-outline btn-block hidden" id="btn-dl-report">
-                        <i class="fa-solid fa-file-invoice"></i> 📥 Detaylı Karşılaştırma Raporu
-                    </a>
-                </div>
-
-                <!-- KARŞILAŞTIRMA SONUÇ TABLOSU -->
-                <div id="compare-table-wrapper" class="hidden compare-results-box">
-                    <div class="compare-table-header">
-                        <div>
-                            <h3><i class="fa-solid fa-list-check color-blue"></i> Sistemden Düşülecek Ürünler</h3>
-                        </div>
-                        <span id="compare-table-count" class="badge">0 Ürün</span>
-                    </div>
-
-                    <div class="table-scroll-container">
-                        <table class="data-table">
-                            <thead>
-                                <tr>
-                                    <th>#</th>
-                                    <th>Ürün Adı</th>
-                                    <th>Karekod</th>
-                                    <th>Koli No</th>
-                                    <th>Seri No</th>
-                                    <th>Parti No</th>
-                                    <th>Palet No</th>
-                                    <th>Koli Durumu</th>
-                                    <th>Açıklama</th>
-                                </tr>
-                            </thead>
-                            <tbody id="compare-tbody"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </section>
-        </main>
-
-        <!-- 3. BÖLÜM: Terek (Raf) QR Okutma & Stok Eşitleme -->
+        <!-- Terek (Raf) QR Sayım & Stok Eşitleme Paneli -->
         <section class="panel glass-card audit-panel">
             <div class="panel-head-flex">
                 <div class="panel-title-group">
                     <i class="fa-solid fa-box-archive icon-green"></i>
                     <div>
-                        <h2>3. Bölüm: Terek (Raf) QR Sayım & Stok Eşitleme</h2>
+                        <h2>Terek (Raf) QR Sayım & Stok Eşitleme</h2>
                         <p class="panel-subtitle">Koli veya ürün QR okutun. Bakanlık stoğundaki eksik ürünler otomatik tespit edilir.</p>
                     </div>
                 </div>
@@ -330,6 +212,9 @@
                     <button class="btn btn-purple btn-sm" id="btn-audit-toggle-mode" type="button">
                         <i class="fa-solid fa-layer-group"></i> 📊 Okutulan Kalemleri Tüm Depoyla Karşılaştır
                     </button>
+                    <button class="btn btn-danger btn-sm" id="btn-audit-send-cikis" type="button" onclick="transferMissingToCikis()">
+                        <i class="fa-solid fa-box-open"></i> 🔴 Tereğimde Olmayanları Çıkış Listesine Aktar
+                    </button>
                     <button class="btn btn-success btn-sm" id="btn-dl-audit-excel" type="button">
                         <i class="fa-solid fa-file-excel"></i> 📥 Tereğümde Olmayan Ürünleri İndir (Excel)
                     </button>
@@ -363,6 +248,7 @@
         <footer class="app-footer-bottom">
             <p>&copy; 2026 QR Compare - Akıllı Stok & Karekod Eşitleme</p>
         </footer>
+        </main>
     </div>
 
     <script src="/static/app.js?v=20261005_v3000"></script>

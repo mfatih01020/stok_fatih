@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Compare</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
+    <link rel="shortcut icon" href="/static/favicon.ico">
+    <!-- Google Fonts Outfit & Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .satis-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 1.6rem;
+            margin-top: 1.2rem;
+        }
+
+        .satis-card {
+            background: rgba(15, 23, 42, 0.75);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 20px;
+            padding: 1.8rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            gap: 1.4rem;
+            backdrop-filter: blur(16px);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .satis-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
+        }
+
+        .card-prescribed:hover { border-color: rgba(56, 189, 248, 0.45); box-shadow: 0 10px 30px rgba(56, 189, 248, 0.2); }
+        .card-non-prescribed { border-color: rgba(52, 211, 153, 0.3); background: linear-gradient(145deg, rgba(15, 23, 42, 0.85), rgba(6, 78, 59, 0.25)); }
+        .card-non-prescribed:hover { border-color: rgba(52, 211, 153, 0.55); box-shadow: 0 12px 32px rgba(52, 211, 153, 0.25); }
+        .card-contracted:hover { border-color: rgba(167, 139, 250, 0.45); box-shadow: 0 10px 30px rgba(167, 139, 250, 0.2); }
+        .card-out-of-scope:hover { border-color: rgba(251, 191, 36, 0.45); box-shadow: 0 10px 30px rgba(251, 191, 36, 0.2); }
+
+        .satis-card-header {
+            display: flex;
+            align-items: center;
+            gap: 1.2rem;
+        }
+
+        .satis-card-icon {
+            width: 60px;
+            height: 60px;
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.8rem;
+            flex-shrink: 0;
+        }
+
+        .icon-blue-glow { background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); }
+        .icon-green-glow { background: rgba(52, 211, 153, 0.18); color: #34d399; border: 1px solid rgba(52, 211, 153, 0.35); filter: drop-shadow(0 0 10px rgba(52, 211, 153, 0.3)); }
+        .icon-purple-glow { background: rgba(167, 139, 250, 0.15); color: #a78bfa; border: 1px solid rgba(167, 139, 250, 0.3); }
+        .icon-amber-glow { background: rgba(251, 191, 36, 0.15); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.3); }
+
+        .satis-card-title {
+            font-family: var(--font-outfit);
+            font-size: 1.25rem;
+            font-weight: 800;
+            color: #ffffff;
+            margin: 0 0 4px 0;
+        }
+
+        .satis-card-desc {
+            font-size: 0.88rem;
+            color: var(--text-muted);
+            line-height: 1.5;
+            margin: 0;
+        }
+
+        .btn-satis-action {
+            width: 100%;
+            padding: 0.85rem 1.2rem;
+            border-radius: 12px;
+            font-weight: 700;
+            font-size: 0.9rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.6rem;
+            text-decoration: none;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s ease;
+        }
+
+        .btn-blue { background: linear-gradient(135deg, #0284c7, #38bdf8); color: #fff; box-shadow: 0 4px 14px rgba(2, 132, 199, 0.3); }
+        .btn-blue:hover { background: linear-gradient(135deg, #0369a1, #0284c7); transform: translateY(-1px); }
+
+        .btn-green { background: linear-gradient(135deg, #059669, #10b981); color: #fff; box-shadow: 0 4px 16px rgba(16, 185, 129, 0.35); }
+        .btn-green:hover { background: linear-gradient(135deg, #047857, #059669); transform: translateY(-1px); }
+
+        .btn-purple { background: linear-gradient(135deg, #7c3aed, #a78bfa); color: #fff; box-shadow: 0 4px 14px rgba(124, 58, 237, 0.3); }
+        .btn-purple:hover { background: linear-gradient(135deg, #6d28d9, #7c3aed); transform: translateY(-1px); }
+
+        .btn-amber { background: linear-gradient(135deg, #d97706, #fbbf24); color: #fff; box-shadow: 0 4px 14px rgba(217, 119, 6, 0.3); }
+        .btn-amber:hover { background: linear-gradient(135deg, #b45309, #d97706); transform: translateY(-1px); }
+
+        .bkst-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.76rem;
+            color: #cbd5e1;
+            font-weight: 600;
+        }
+
+        .modal-input-field {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 10px;
+            color: #fff;
+            font-family: var(--font-inter);
+            font-size: 0.92rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .modal-input-field:focus {
+            border-color: #10b981;
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.25);
+        }
+
+        .step-pill {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.1);
+            color: #94a3b8;
+            font-weight: 800;
+            font-size: 0.8rem;
+        }
+
+        .step-pill.active {
+            background: #10b981;
+            color: #fff;
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+        }
+    </style>
+</head>
+<body class="sidebar-layout">
+    <div class="glass-bg-decor1"></div>
+    <div class="glass-bg-decor2"></div>
+
+    <div class="app-wrapper">
+        <!-- SOL DİKİNE SIDEBAR NAVİGASYON -->
+        <aside class="sidebar">
+            <div class="sidebar-brand">
+                <i class="fa-solid fa-qrcode logo-icon"></i>
+                <div>
+                    <h2>QR Compare</h2>
+                    <p>Akıllı Stok Sistemi</p>
+                </div>
+            </div>
+
+            <nav class="sidebar-menu">
+                <a href="/cikis" class="sidebar-link">
+                    <i class="fa-solid fa-box-open"></i>
+                    <span>Barkod Okut & Çıkış</span>
+                </a>
+                <a href="/cikis-listesi" class="sidebar-link">
+                    <i class="fa-solid fa-list-check"></i>
+                    <span>Çıkış Listesi</span>
+                </a>
+                <a href="/stok-esitleme" class="sidebar-link">
+                    <i class="fa-solid fa-chart-line"></i>
+                    <span>Stok & Eşitleme</span>
+                </a>
+                <a href="/depo_stoklari" class="sidebar-link">
+                    <i class="fa-solid fa-warehouse"></i>
+                    <span>Depomdaki Stoklar</span>
+                </a>
+                <a href="/depo_kabul" class="sidebar-link">
+                    <i class="fa-solid fa-boxes-packing"></i>
+                    <span>Depoya Kabul Et</span>
+                </a>
+                <a href="/kullaniciya-satis" class="sidebar-link active">
+                    <i class="fa-solid fa-user-tag"></i>
+                    <span>Kullanıcıya Satış (Demo)</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="system-status-pill">
+                    <span class="status-indicator online"></span>
+                    <span>Sistem Aktif</span>
+                </div>
+                <div class="user-profile-card">
+                    <div class="user-profile-info">
+                        <i class="fa-solid fa-user-circle user-avatar-icon"></i>
+                        <span id="sidebar-user-name" class="user-name-title">Yükleniyor...</span>
+                    </div>
+                    <button type="button" class="btn-logout-icon" onclick="logoutUser()" title="Oturumdan Çıkış Yap">
+                        <i class="fa-solid fa-power-off"></i>
+                    </button>
+                </div>
+                <div class="version-pill" onclick="showVersionModal()" title="Sürüm Bilgisi">
+                    <i class="fa-solid fa-code-branch" style="color: #38bdf8;"></i>
+                    <span id="versionText">v3.0.0</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- SAĞ ANA İÇERİK ALANI -->
+        <main class="main-content">
+            <!-- HEADER BAR -->
+            <header class="content-header">
+                <div>
+                    <h1 class="page-title"><i class="fa-solid fa-user-tag icon-blue"></i> Kullanıcıya Satış İşlemleri</h1>
+                    <p class="page-subtitle">Bakanlık BKST sistemi üzerinden Reçeteli, Reçetesiz, Taahhütlü ve Kapsam Dışı ürün satış bildirimleri.</p>
+                </div>
+                <div class="header-actions">
+                    <a href="https://bkst.tarbil.gov.tr/Main/SellToProducer" target="_blank" class="btn btn-outline">
+                        <i class="fa-solid fa-arrow-up-right-from-square"></i> BKST Satış Paneline Git
+                    </a>
+                </div>
+            </header>
+
+            <!-- SATIŞ TÜRÜ SEÇİM KARTLARI -->
+            <section class="panel glass-card">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem; margin-bottom:0.8rem;">
+                    <div>
+                        <h2 style="font-family:var(--font-outfit); font-size:1.25rem; font-weight:700; color:#fff; margin:0;">
+                            <i class="fa-solid fa-layer-group color-blue"></i> Satış Bildirim Türünü Seçin
+                        </h2>
+                        <p style="font-size:0.85rem; color:var(--text-muted); margin:4px 0 0 0;">
+                            Aşağıdaki butonları kullanarak Reçetesiz Satış bildirimini SMS doğrulaması dahil uygulama içinden API ile yapabilirsiniz.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="satis-grid">
+                    <!-- 1. Reçeteli Satış -->
+                    <div class="satis-card card-prescribed">
+                        <div class="satis-card-header">
+                            <div class="satis-card-icon icon-blue-glow">
+                                <i class="fa-solid fa-file-prescription"></i>
+                            </div>
+                            <div>
+                                <h3 class="satis-card-title">Reçeteli Satış</h3>
+                                <span class="bkst-badge"><i class="fa-solid fa-shield-halved"></i> BKST Reçete Modülü</span>
+                            </div>
+                        </div>
+                        <p class="satis-card-desc">
+                            Reçeteye bağlı bitki koruma ürünleri ve ilaçların üreticiye / kullanıcıya reçeteli satış bildirimini gerçekleştirin.
+                        </p>
+                        <button class="btn-satis-action btn-blue" onclick="openBkstPage('SellToProducerPrescribed')">
+                            <i class="fa-solid fa-arrow-right-to-bracket"></i> BKST Reçeteli Satış Ekranını Aç
+                        </button>
+                    </div>
+
+                    <!-- 2. Reçetesiz Satış (SMS & API ENTEGRELİ) -->
+                    <div class="satis-card card-non-prescribed">
+                        <div class="satis-card-header">
+                            <div class="satis-card-icon icon-green-glow">
+                                <i class="fa-solid fa-cart-shopping"></i>
+                            </div>
+                            <div>
+                                <h3 class="satis-card-title">Reçetesiz Satış</h3>
+                                <span class="bkst-badge" style="background:rgba(16, 185, 129, 0.2); color:#6ee7b7; border-color:rgba(16, 185, 129, 0.4);">
+                                    <i class="fa-solid fa-mobile-screen-button"></i> 📲 SMS + API Destekli
+                                </span>
+                            </div>
+                        </div>
+                        <p class="satis-card-desc">
+                            Müşteri telefonuna <b>SMS doğrulama kodu göndererek</b> Reçetesiz Satış bildirimini uygulama içinden doğrudan tamamlayın.
+                        </p>
+                        <div style="display:flex; flex-direction:column; gap:0.6rem;">
+                            <button class="btn-satis-action btn-green" onclick="openRecetesizModal()">
+                                <i class="fa-solid fa-mobile-screen-button"></i> 📲 SMS Doğrulamalı Satış Yap (API)
+                            </button>
+                            <button onclick="openBkstPage('SellToProducerNonPrescribed')" style="background:transparent; color:#94a3b8; border:none; font-size:0.8rem; cursor:pointer; text-decoration:underline;">
+                                🌐 Bakanlık BKST Sayfasında Aç
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 3. Taahhütlü Satış -->
+                    <div class="satis-card card-contracted">
+                        <div class="satis-card-header">
+                            <div class="satis-card-icon icon-purple-glow">
+                                <i class="fa-solid fa-file-signature"></i>
+                            </div>
+                            <div>
+                                <h3 class="satis-card-title">Taahhütlü Satış</h3>
+                                <span class="bkst-badge"><i class="fa-solid fa-file-contract"></i> Taahhüt Sözleşmeli</span>
+                            </div>
+                        </div>
+                        <p class="satis-card-desc">
+                            Taahhüt belgesi veya özel protokoller kapsamında üreticiye gerçekleştirilen ürün satış bildirimlerini yapın.
+                        </p>
+                        <button class="btn-satis-action btn-purple" onclick="openBkstPage('SellToProducerContracted')">
+                            <i class="fa-solid fa-arrow-right-to-bracket"></i> BKST Taahhütlü Satış Ekranını Aç
+                        </button>
+                    </div>
+
+                    <!-- 4. Kapsam Dışı Satış -->
+                    <div class="satis-card card-out-of-scope">
+                        <div class="satis-card-header">
+                            <div class="satis-card-icon icon-amber-glow">
+                                <i class="fa-solid fa-box-archive"></i>
+                            </div>
+                            <div>
+                                <h3 class="satis-card-title">Kapsam Dışı Satış</h3>
+                                <span class="bkst-badge"><i class="fa-solid fa-circle-exclamation"></i> Kapsam Dışı</span>
+                            </div>
+                        </div>
+                        <p class="satis-card-desc">
+                            BKST takip sistemi standart kapsamı dışında kalan istisnai veya özel ürün satış bildirimi işlemlerini yürütün.
+                        </p>
+                        <button class="btn-satis-action btn-amber" onclick="openBkstPage('SellToProducerOutOfScope')">
+                            <i class="fa-solid fa-arrow-right-to-bracket"></i> BKST Kapsam Dışı Satış Ekranını Aç
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- ⚡ REÇETESİZ SATIŞ (SMS + API) MODALI -->
+    <div id="recetesizSatisModal" class="modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.85); backdrop-filter:blur(8px);">
+        <div style="background:#1e293b; color:#fff; max-width:720px; width:92%; margin:3% auto; padding:28px; border-radius:24px; border:1px solid rgba(52,211,153,0.35); box-shadow:0 25px 50px rgba(0,0,0,0.85); max-height:92vh; display:flex; flex-direction:column;">
+            
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:14px; margin-bottom:16px;">
+                <h3 style="margin:0; font-size:1.3rem; color:#34d399; display:flex; align-items:center; gap:10px;">
+                    <i class="fa-solid fa-cart-shopping"></i> Reçetesiz Satış Bildirimi (SMS + API)
+                </h3>
+                <span onclick="closeRecetesizModal()" style="cursor:pointer; font-size:1.6rem; color:#94a3b8; line-height:1;">&times;</span>
+            </div>
+
+            <!-- ADIM GÖSTERGESİ -->
+            <div style="display:flex; align-items:center; gap:1.5rem; background:rgba(15,23,42,0.6); padding:10px 16px; border-radius:12px; margin-bottom:1.2rem; border:1px solid rgba(255,255,255,0.06);">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span id="step-pill-1" class="step-pill active">1</span>
+                    <span style="font-size:0.85rem; font-weight:600; color:#fff;">T.C. & SMS İste</span>
+                </div>
+                <i class="fa-solid fa-chevron-right" style="color:var(--text-muted); font-size:0.75rem;"></i>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span id="step-pill-2" class="step-pill">2</span>
+                    <span style="font-size:0.85rem; font-weight:600; color:var(--text-muted);" id="lbl-step-2">SMS Kodu Doğrula</span>
+                </div>
+                <i class="fa-solid fa-chevron-right" style="color:var(--text-muted); font-size:0.75rem;"></i>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span id="step-pill-3" class="step-pill">3</span>
+                    <span style="font-size:0.85rem; font-weight:600; color:var(--text-muted);" id="lbl-step-3">Ürün QR Okut & Gönder</span>
+                </div>
+            </div>
+
+            <!-- FORM GİRDİLERİ -->
+            <div style="display:flex; flex-direction:column; gap:1rem; margin-bottom:1rem;">
+                
+                <!-- ADIM 1: T.C. Kimlik & SMS Gönderme -->
+                <div style="display:grid; grid-template-columns: 1fr auto; gap:0.8rem; align-items:end;">
+                    <div>
+                        <label style="font-size:0.85rem; font-weight:700; color:#cbd5e1; display:block; margin-bottom:6px;">
+                            <i class="fa-solid fa-id-card" style="color:#34d399;"></i> Müşteri T.C. / Vergi No <span style="color:#ef4444;">*</span>
+                        </label>
+                        <input type="text" id="api-tc-no" class="modal-input-field" placeholder="Müşteri T.C. veya Vergi No girin..." autocomplete="off">
+                    </div>
+                    <button id="btn-send-sms" onclick="sendSmsCode()" class="btn btn-primary" style="height:43px; padding:0 20px; font-size:0.88rem; font-weight:700; white-space:nowrap;">
+                        <i class="fa-solid fa-paper-plane"></i> 📲 SMS Kodu Gönder
+                    </button>
+                </div>
+
+                <!-- BİLDİRİM BANNER'I -->
+                <div id="sms-status-banner" style="display:none; padding:10px 14px; border-radius:10px; font-size:0.88rem; font-weight:600;"></div>
+
+                <!-- ADIM 2: SMS Kodu Girme (Varsayılan Gizli) -->
+                <div id="step-sms-verify-box" style="display:none; background:rgba(52, 211, 153, 0.08); border:1px solid rgba(52, 211, 153, 0.25); padding:14px; border-radius:14px;">
+                    <div style="display:grid; grid-template-columns: 1fr auto; gap:0.8rem; align-items:end;">
+                        <div>
+                            <label style="font-size:0.85rem; font-weight:700; color:#34d399; display:block; margin-bottom:6px;">
+                                <i class="fa-solid fa-key"></i> Telefondaki 6 Haneli SMS Doğrulama Kodu <span style="color:#ef4444;">*</span>
+                            </label>
+                            <input type="text" id="api-sms-code" class="modal-input-field" placeholder="SMS kodunu buraya yazın..." autocomplete="off" style="border-color:rgba(52,211,153,0.4);">
+                        </div>
+                        <button id="btn-verify-sms" onclick="verifySmsCode()" class="btn btn-green" style="height:43px; padding:0 22px; font-size:0.88rem; font-weight:700;">
+                            <i class="fa-solid fa-circle-check"></i> ✅ Kodu Doğrula
+                        </button>
+                    </div>
+                </div>
+
+                <!-- ADIM 3: Barkod Okutma & Opsiyonel Belge No (Kilitli/Açılabilir) -->
+                <div id="step-products-box" style="display:none; flex-direction:column; gap:1rem;">
+                    <div style="display:grid; grid-template-columns: 1fr; gap:0.8rem;">
+                        <div>
+                            <label style="font-size:0.85rem; font-weight:700; color:#cbd5e1; display:block; margin-bottom:6px;">
+                                <i class="fa-solid fa-file-invoice" style="color:#38bdf8;"></i> Fatura / Belge No (Opsiyonel)
+                            </label>
+                            <input type="text" id="api-belge-no" class="modal-input-field" placeholder="İrsaliye / Belge No (Opsiyonel)" autocomplete="off">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label style="font-size:0.85rem; font-weight:700; color:#cbd5e1; display:block; margin-bottom:6px;">
+                            <i class="fa-solid fa-barcode" style="color:#fbbf24;"></i> Satılacak İlaç QR Okutun (Enter'a basın)
+                        </label>
+                        <input type="text" id="api-barcode-input" class="modal-input-field" placeholder="Barkod veya Karekod okutun..." autocomplete="off">
+                    </div>
+
+                    <!-- OKUTULAN ÜRÜNLER TABLOSU -->
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
+                        <span style="font-size:0.88rem; font-weight:700; color:#fff;">
+                            <i class="fa-solid fa-list-check color-blue"></i> Satılacak Ürün Listesi
+                        </span>
+                        <span id="api-item-count-badge" class="badge" style="background:rgba(52,211,153,0.18); color:#34d399; border:1px solid rgba(52,211,153,0.3); padding:4px 12px; border-radius:8px; font-weight:700;">
+                            0 Adet Ürün
+                        </span>
+                    </div>
+
+                    <div class="data-table-wrapper" style="max-height: 180px; overflow-y: auto; border-radius:12px; border:1px solid rgba(255,255,255,0.08);">
+                        <table class="kabul-table" style="width:100%; border-collapse:collapse; font-size:0.84rem;">
+                            <thead style="position:sticky; top:0; background:#0f172a; z-index:5;">
+                                <tr>
+                                    <th style="width:40px; text-align:center;">#</th>
+                                    <th>Karekod</th>
+                                    <th style="text-align:center; width:60px;">İşlem</th>
+                                </tr>
+                            </thead>
+                            <tbody id="api-scanned-tbody">
+                                <tr>
+                                    <td colspan="3" style="text-align:center; color:var(--text-muted); padding:1.5rem;">
+                                        Henüz karekod okutulmadı. Yukarıdaki kutuya okutun.
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:1rem; margin-top:auto;">
+                <button onclick="closeRecetesizModal()" class="btn btn-outline" style="padding:10px 20px;">Kapat</button>
+                <button id="btn-submit-api-satis" onclick="submitRecetesizSatisApi()" class="btn btn-green" style="display:none; padding:10px 28px; font-size:0.95rem;">
+                    <i class="fa-solid fa-paper-plane"></i> ⚡ BKST'ye Bildirimi Tamamla (API)
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SÜRÜM MODALI -->
+    <div id="versionModal" class="modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px);">
+        <div style="background:#1e293b; color:#fff; max-width:450px; margin:10% auto; padding:24px; border-radius:16px; border:1px solid rgba(255,255,255,0.1); box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:12px; margin-bottom:16px;">
+                <h3 style="margin:0; font-size:1.15rem; color:#38bdf8; display:flex; align-items:center; gap:8px;">
+                    <i class="fa-solid fa-circle-info"></i> Uygulama Sürüm Bilgisi
+                </h3>
+                <span onclick="document.getElementById('versionModal').style.display='none'" style="cursor:pointer; font-size:1.2rem; color:#94a3b8;">&times;</span>
+            </div>
+            <p style="font-size:0.95rem; color:#cbd5e1;">QR Stok & Kullanıcıya Satış Sistemi v2.5</p>
+            <div style="margin-top:16px; text-align:right;">
+                <button onclick="document.getElementById('versionModal').style.display='none'" class="btn btn-outline" style="padding:6px 16px;">Kapat</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let apiScannedQRs = [];
+        let currentVerificationToken = '';
+        let isSmsVerified = false;
+
+        function openBkstPage(targetAction) {
+            const baseUrl = 'https://bkst.tarbil.gov.tr/Main/';
+            window.open(baseUrl + targetAction, '_blank');
+        }
+
+        function openRecetesizModal() {
+            document.getElementById('recetesizSatisModal').style.display = 'block';
+            setTimeout(() => {
+                const inp = document.getElementById('api-tc-no');
+                if (inp) inp.focus();
+            }, 200);
+        }
+
+        function closeRecetesizModal() {
+            document.getElementById('recetesizSatisModal').style.display = 'none';
+        }
+
+        // ADIM 1: SMS KODU İSTE
+        async function sendSmsCode() {
+            const tcNo = document.getElementById('api-tc-no').value.trim();
+            const btnSms = document.getElementById('btn-send-sms');
+            const banner = document.getElementById('sms-status-banner');
+
+            if (!tcNo) {
+                alert('⚠️ Lütfen Müşteri T.C. veya Vergi No giriniz!');
+                document.getElementById('api-tc-no').focus();
+                return;
+            }
+
+            btnSms.disabled = true;
+            btnSms.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Gönderiliyor...';
+            banner.style.display = 'none';
+
+            try {
+                const res = await fetch('/api/bkst/recetesiz_satis/sms_gonder', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tc_no: tcNo })
+                });
+
+                const data = await res.json();
+                if (data.success) {
+                    currentVerificationToken = data.verification_token;
+                    banner.style.display = 'block';
+                    banner.style.background = 'rgba(56, 189, 248, 0.15)';
+                    banner.style.border = '1px solid rgba(56, 189, 248, 0.35)';
+                    banner.style.color = '#38bdf8';
+                    banner.innerHTML = `<i class="fa-solid fa-mobile-screen"></i> ${esc(data.message)}`;
+
+                    document.getElementById('step-sms-verify-box').style.display = 'block';
+                    document.getElementById('step-pill-2').classList.add('active');
+                    document.getElementById('lbl-step-2').style.color = '#fff';
+
+                    setTimeout(() => {
+                        document.getElementById('api-sms-code').focus();
+                    }, 200);
+                } else {
+                    banner.style.display = 'block';
+                    banner.style.background = 'rgba(239, 68, 68, 0.15)';
+                    banner.style.border = '1px solid rgba(239, 68, 68, 0.35)';
+                    banner.style.color = '#f87171';
+                    banner.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> Hata: ${esc(data.error)}`;
+                }
+            } catch (err) {
+                alert('❌ Bağlantı hatası: ' + err.message);
+            } finally {
+                btnSms.disabled = false;
+                btnSms.innerHTML = '<i class="fa-solid fa-paper-plane"></i> 📲 SMS Kodu Gönder';
+            }
+        }
+
+        // ADIM 2: SMS KODUNU DOĞRULA
+        async function verifySmsCode() {
+            const tcNo = document.getElementById('api-tc-no').value.trim();
+            const smsCode = document.getElementById('api-sms-code').value.trim();
+            const btnVerify = document.getElementById('btn-verify-sms');
+            const banner = document.getElementById('sms-status-banner');
+
+            if (!smsCode) {
+                alert('⚠️ Lütfen telefona gelen 6 haneli SMS kodunu giriniz!');
+                document.getElementById('api-sms-code').focus();
+                return;
+            }
+
+            btnVerify.disabled = true;
+            btnVerify.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Doğrulanıyor...';
+
+            try {
+                const res = await fetch('/api/bkst/recetesiz_satis/sms_dogrula', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        tc_no: tcNo,
+                        sms_code: smsCode,
+                        verification_token: currentVerificationToken
+                    })
+                });
+
+                const data = await res.json();
+                if (data.success) {
+                    isSmsVerified = true;
+                    if (data.verified_token) {
+                        currentVerificationToken = data.verified_token;
+                    }
+
+                    banner.style.display = 'block';
+                    banner.style.background = 'rgba(34, 197, 94, 0.18)';
+                    banner.style.border = '1px solid rgba(34, 197, 94, 0.4)';
+                    banner.style.color = '#4ade80';
+                    banner.innerHTML = `<i class="fa-solid fa-circle-check"></i> ${esc(data.message)}`;
+
+                    document.getElementById('api-tc-no').disabled = true;
+                    document.getElementById('api-sms-code').disabled = true;
+                    btnVerify.disabled = true;
+                    document.getElementById('btn-send-sms').disabled = true;
+
+                    // Step 3 unlock
+                    document.getElementById('step-products-box').style.display = 'flex';
+                    document.getElementById('btn-submit-api-satis').style.display = 'inline-flex';
+                    document.getElementById('step-pill-3').classList.add('active');
+                    document.getElementById('lbl-step-3').style.color = '#fff';
+
+                    setTimeout(() => {
+                        document.getElementById('api-barcode-input').focus();
+                    }, 200);
+                } else {
+                    banner.style.display = 'block';
+                    banner.style.background = 'rgba(239, 68, 68, 0.15)';
+                    banner.style.border = '1px solid rgba(239, 68, 68, 0.35)';
+                    banner.style.color = '#f87171';
+                    banner.innerHTML = `<i class="fa-solid fa-circle-xmark"></i> ${esc(data.error)}`;
+                }
+            } catch (err) {
+                alert('❌ Bağlantı hatası: ' + err.message);
+            } finally {
+                if (!isSmsVerified) {
+                    btnVerify.disabled = false;
+                    btnVerify.innerHTML = '<i class="fa-solid fa-circle-check"></i> ✅ Kodu Doğrula';
+                }
+            }
+        }
+
+        // Barkod okutma listener
+        document.getElementById('api-barcode-input').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' || e.keyCode === 13) {
+                e.preventDefault();
+                const code = this.value.trim();
+                this.value = '';
+                if (code) {
+                    if (apiScannedQRs.includes(code)) {
+                        alert('⚠️ Bu karekod zaten listeye eklenmiş!');
+                        return;
+                    }
+                    apiScannedQRs.push(code);
+                    renderApiScannedTable();
+                }
+            }
+        });
+
+        function removeApiItem(idx) {
+            apiScannedQRs.splice(idx, 1);
+            renderApiScannedTable();
+        }
+
+        function renderApiScannedTable() {
+            const tbody = document.getElementById('api-scanned-tbody');
+            const badge = document.getElementById('api-item-count-badge');
+            badge.textContent = apiScannedQRs.length + ' Adet Ürün';
+
+            if (apiScannedQRs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; color:var(--text-muted); padding:1.5rem;">Henüz karekod okutulmadı. Yukarıdaki kutuya okutun.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = apiScannedQRs.map((qr, i) => `
+                <tr>
+                    <td style="text-align:center; font-weight:700; color:#64748b;">${i + 1}</td>
+                    <td style="font-family:monospace; color:#38bdf8; font-size:0.82rem;">${esc(qr)}</td>
+                    <td style="text-align:center;">
+                        <button onclick="removeApiItem(${i})" style="background:rgba(239,68,68,0.2); color:#f87171; border:1px solid rgba(239,68,68,0.4); padding:3px 8px; border-radius:6px; cursor:pointer;">
+                            <i class="fa-solid fa-trash-can"></i>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        // ADIM 3: SATIŞ BİLDİRİMİNİ TAMAMLA
+        async function submitRecetesizSatisApi() {
+            const tcNo = document.getElementById('api-tc-no').value.trim();
+            const belgeNo = document.getElementById('api-belge-no').value.trim();
+            const btn = document.getElementById('btn-submit-api-satis');
+
+            if (!isSmsVerified || !currentVerificationToken) {
+                alert('⚠️ Lütfen önce SMS doğrulama adımı tamamlayın!');
+                return;
+            }
+
+            if (apiScannedQRs.length === 0) {
+                alert('⚠️ Lütfen en az 1 adet satılacak ürün / karekod okutun!');
+                document.getElementById('api-barcode-input').focus();
+                return;
+            }
+
+            btn.disabled = true;
+            const originalHTML = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> BKST Sunucusuna Bildiriliyor...';
+
+            try {
+                const res = await fetch('/api/bkst/recetesiz_satis', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        tc_no: tcNo,
+                        verification_token: currentVerificationToken,
+                        belge_no: belgeNo,
+                        karekods: apiScannedQRs
+                    })
+                });
+
+                const data = await res.json();
+                if (data.success) {
+                    alert(data.message || '🟢 Reçetesiz Satış bildirimi başarıyla tamamlandı!');
+                    apiScannedQRs = [];
+                    renderApiScannedTable();
+                    closeRecetesizModal();
+                    location.reload();
+                } else {
+                    alert(data.error || '❌ Satış bildirimi yapılırken hata oluştu.');
+                }
+            } catch (err) {
+                alert('❌ Bağlantı hatası: ' + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalHTML;
+            }
+        }
+
+        function esc(str) {
+            return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        function showVersionModal() {
+            document.getElementById('versionModal').style.display = 'block';
+        }
+
+    </script>
+    <script src="/static/app.js?v=20261005_v3000"></script>
+</body>
+</html>

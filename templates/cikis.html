@@ -3,7 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistemden Çıkış — QR Compare</title>
+    <title>QR Compare</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
+    <link rel="shortcut icon" href="/static/favicon.ico">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -207,48 +210,92 @@
         }
     </style>
 </head>
-<body>
+<body class="sidebar-layout">
     <div class="glass-bg-decor1"></div>
     <div class="glass-bg-decor2"></div>
 
-    <div class="container">
-        <!-- Header -->
-        <header class="app-header">
-            <div class="logo">
+    <div class="app-wrapper">
+        <!-- SOL DİKİNE SIDEBAR NAVİGASYON -->
+        <aside class="sidebar">
+            <div class="sidebar-brand">
                 <i class="fa-solid fa-qrcode logo-icon"></i>
                 <div>
-                    <h1>QR Compare</h1>
-                    <p>Akıllı Karekod Karşılaştırma ve Stok Düşüm Sistemi</p>
+                    <h2>QR Compare</h2>
+                    <p>Akıllı Stok Sistemi</p>
                 </div>
             </div>
-            <div class="system-status">
-                <div class="pulse-dot"></div>
-                <span>Sistem Aktif</span>
-            </div>
-        </header>
 
-                <!-- 60+ YAŞ REHBER BİLGİLENDİRME KUTUSU -->
-        <div style="background: rgba(88, 101, 242, 0.12); border: 2px solid rgba(88, 101, 242, 0.4); border-radius: 14px; padding: 1.2rem 1.5rem; margin-bottom: 1.5rem;">
-            <div style="display: flex; align-items: center; gap: 0.8rem; margin-bottom: 0.6rem;">
-                <i class="fa-solid fa-lightbulb" style="font-size: 1.6rem; color: #fcd34d;"></i>
-                <h3 style="font-family: var(--font-outfit); font-size: 1.25rem; font-weight: 800; color: #fff; margin: 0;">
-                    📦 Barkod Okutarak Ürün Çıkış Rehberi (Ne Yapmalıyım?)
+            <nav class="sidebar-menu">
+                <a href="/cikis" class="sidebar-link active">
+                    <i class="fa-solid fa-box-open"></i>
+                    <span>Barkod Okut & Çıkış</span>
+                </a>
+                <a href="/cikis-listesi" class="sidebar-link">
+                    <i class="fa-solid fa-list-check"></i>
+                    <span>Çıkış Listesi</span>
+                </a>
+                <a href="/stok-esitleme" class="sidebar-link">
+                    <i class="fa-solid fa-chart-line"></i>
+                    <span>Stok & Eşitleme</span>
+                </a>
+                <a href="/depo_stoklari" class="sidebar-link">
+                    <i class="fa-solid fa-warehouse"></i>
+                    <span>Depomdaki Stoklar</span>
+                </a>
+                <a href="/depo_kabul" class="sidebar-link">
+                    <i class="fa-solid fa-boxes-packing"></i>
+                    <span>Depoya Kabul Et</span>
+                </a>
+                <a href="/kullaniciya-satis" class="sidebar-link">
+                    <i class="fa-solid fa-user-tag"></i>
+                    <span>Kullanıcıya Satış (Demo)</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="system-status-pill">
+                    <span class="status-indicator online"></span>
+                    <span>Sistem Aktif</span>
+                </div>
+                <div class="user-profile-card">
+                    <div class="user-profile-info">
+                        <i class="fa-solid fa-user-circle user-avatar-icon"></i>
+                        <span id="sidebar-user-name" class="user-name-title">Yükleniyor...</span>
+                    </div>
+                    <button type="button" class="btn-logout-icon" onclick="logoutUser()" title="Oturumdan Çıkış Yap">
+                        <i class="fa-solid fa-power-off"></i>
+                    </button>
+                </div>
+                <div class="version-pill" onclick="showVersionModal()" title="Sürüm Bilgisi">
+                    <i class="fa-solid fa-code-branch" style="color: #38bdf8;"></i>
+                    <span id="versionText">v3.0.0</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- SAĞ ANA İÇERİK ALANI -->
+        <main class="main-content">
+            <header class="content-header">
+                <div>
+                    <h1 class="page-title"><i class="fa-solid fa-box-open icon-purple"></i> Barkod Okut & Sistemden Çıkış</h1>
+                    <p class="page-subtitle">Elden satılan ürünlerinizi hızlıca okutarak stoktan düşün.</p>
+                </div>
+            </header>
+
+        <!-- REHBER BİLGİLENDİRME KUTUSU -->
+        <div style="background: rgba(88, 101, 242, 0.08); border: 1px solid rgba(88, 101, 242, 0.25); border-radius: 14px; padding: 1rem 1.4rem; margin-bottom: 1rem;">
+            <div style="display: flex; align-items: center; gap: 0.8rem; margin-bottom: 0.5rem;">
+                <i class="fa-solid fa-circle-question" style="font-size: 1.3rem; color: #a5b4fc;"></i>
+                <h3 style="font-family: var(--font-outfit); font-size: 1.1rem; font-weight: 700; color: #fff; margin: 0;">
+                    📦 Barkod Okutarak Ürün Çıkış Rehberi (Hızlı Adımlar)
                 </h3>
             </div>
-            <div style="font-size: 0.92rem; color: var(--text-main); line-height: 1.6;">
-                <b>👉 Nasıl Kullanılır?</b><br>
-                <b>1.</b> Elinizdeki barkod okuyucuyu aşağıdaki <b>mor çerçeveli kutuya</b> getirin ve ilacın üzerindeki karekodu okutun.<br>
-                <b>2.</b> Ürün depoda kayıtlıysa 🟢 <b>Kayıt Başarılı</b> olarak yeşil kartta görünür ve otomatik olarak kaydedilir.<br>
-                <b>3.</b> Aynı ilacı yanlışlıkla 2. kez okutursanız sistem uyarır ve çift çıkış yapılmasını engeller.<br>
-                <b>4.</b> Yanlış bir ilacı okuttuysanız sağdaki listeden ilgili satırın yanındaki 🔴 <b>"Geri Al"</b> (Çöp Kovası) butonuna basarak silebilirsiniz.
+            <div style="font-size: 0.88rem; color: var(--text-muted); line-height: 1.6;">
+                <b>1.</b> Barkod okuyucuyu mor kutuya getirin ve karekodu okutun.<br>
+                <b>2.</b> Ürün depoda kayıtlıysa 🟢 <b>Kayıt Başarılı</b> olarak düşer.<br>
+                <b>3.</b> Çift okutmalarda sistem sizi uyarır.<br>
+                <b>4.</b> Hatalı okutmaları sağdaki listeden 🔴 <b>"Geri Al"</b> butonuyla silebilirsiniz.
             </div>
-        </div>
-
-        <!-- Breadcrumb -->
-        <div class="nav-strip">
-            <a href="/"><i class="fa-solid fa-house"></i> Ana Sayfa</a>
-            <span class="nav-sep">/</span>
-            <span class="nav-current"><i class="fa-solid fa-box-open"></i> Sistemden Çıkış</span>
         </div>
 
         <!-- Page Title Row -->
@@ -351,6 +398,7 @@
         <footer class="app-footer-bottom" style="margin-top:2rem;">
             <p>&copy; 2026 QR Compare - Tüm Hakları Saklıdır.</p>
         </footer>
+        </main>
     </div>
 
 <script>
@@ -505,13 +553,7 @@ document.getElementById('btn-temizle-son').addEventListener('click', async () =>
 function esc(str) {
     return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
-
-// ── Heartbeat Auto-Shutdown Monitor ──────────────────────────────────────────
-(function startHeartbeat() {
-    function sendPing() { fetch('/api/system/heartbeat', { method: 'POST' }).catch(() => {}); }
-    sendPing();
-    setInterval(sendPing, 3000);
-})();
-</script>
+    </script>
+    <script src="/static/app.js?v=20261005_v3000"></script>
 </body>
 </html>

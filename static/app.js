@@ -1,6 +1,29 @@
 // ── QR COMPARE APP.JS ──────────────────────────────────────────────────────
 console.log("QR Compare app.js loading...");
 
+(function initAppWindowControl() {
+    if (window.outerWidth < screen.availWidth || window.outerHeight < screen.availHeight) {
+        try {
+            window.moveTo(0, 0);
+            window.resizeTo(screen.availWidth, screen.availHeight);
+        } catch (e) {}
+    }
+
+    const sendHeartbeat = () => {
+        fetch('/api/heartbeat', { method: 'POST' }).catch(() => {});
+    };
+
+    setInterval(sendHeartbeat, 2500);
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            sendHeartbeat();
+        }
+    });
+
+    window.addEventListener('focus', sendHeartbeat);
+})();
+
 // Global state
 window.shelfKoliMap = window.shelfKoliMap || new Map();
 window.shelfItems = window.shelfItems || [];
@@ -558,6 +581,58 @@ window.downloadAuditExcel = async function() {
     }
 };
 
+window.transferMissingToCikis = async function() {
+    const activeList = window.isAuditAllMode ? window.allWarehouseItems : window.shelfItems;
+    if (!activeList || activeList.length === 0) {
+        alert("⚠️ Henüz terek sayımı yapılmadı. Lütfen önce koli veya ürün QR okutun.");
+        return;
+    }
+
+    const missingItems = activeList.filter(i => !isItemScanned(i));
+
+    if (missingItems.length === 0) {
+        alert("🟢 Tereğinizdeki tüm ürünler tam! Çıkış listesine aktarılacak eksik ürün bulunmamaktadır.");
+        return;
+    }
+
+    const count = missingItems.length;
+    const confirmMsg = `🔴 EMİN MİSİNİZ?\n\nTereğinizde bulunmayan (eksik) ${count} adet ürünü Çıkış Listesine aktarmak istediğinize emin misiniz?`;
+    
+    if (!confirm(confirmMsg)) {
+        return;
+    }
+
+    const qrList = missingItems.map(i => i.qr || i.Karekod || i.ham_karekod).filter(Boolean);
+
+    const btn = document.getElementById('btn-audit-send-cikis');
+    const originalHTML = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Aktarılıyor...';
+    }
+
+    try {
+        const res = await fetch('/api/cikis/toplu_ekle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ items: qrList })
+        });
+        const data = await res.json();
+        if (data.success) {
+            alert(`✅ BAŞARILI!\n\n${data.added_count} adet eksik ürün Çıkış Listesine aktarıldı.${data.already_count > 0 ? ` (${data.already_count} ürün zaten listedeydi)` : ''}`);
+        } else {
+            alert(`❌ Hata: ${data.error || 'Aktarım gerçekleştirilemedi.'}`);
+        }
+    } catch (err) {
+        alert(`❌ Bağlantı hatası: ${err.message}`);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalHTML;
+        }
+    }
+};
+
 function formatBytes(bytes, decimals = 2) {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
@@ -786,15 +861,17 @@ function loadSystemVersion() {
         .then(r => r.json())
         .then(data => {
             if (data.success) {
-                const vText = document.getElementById('versionText');
-                if (vText) vText.textContent = data.version || ('v2.5 (' + data.commit_hash + ')');
+                const verStr = data.version || 'v3.0.0';
+                document.querySelectorAll('#versionText, .version-text').forEach(el => {
+                    el.textContent = verStr;
+                });
                 
                 const h = document.getElementById('modalCommitHash');
                 const d = document.getElementById('modalCommitDate');
                 const m = document.getElementById('modalCommitMsg');
-                if (h) h.textContent = data.commit_hash || '-';
+                if (h) h.textContent = data.commit_hash || verStr;
                 if (d) d.textContent = data.commit_date || '-';
-                if (m) m.textContent = data.commit_msg || '-';
+                if (m) m.textContent = data.commit_msg || 'QR Compare Canlı Sürüm';
             }
         })
         .catch(e => console.warn('Version check error:', e));
@@ -817,5 +894,235 @@ window.closeVersionModal = function() {
     }
     sendPing();
     setInterval(sendPing, 3000);
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            sendPing();
+        }
+    });
 })();
+
+function cleanUserName(name) {
+    if (!name) return "";
+    let cleaned = String(name).trim().replace(/^\d+[\s\-]+/, "");
+    if (cleaned.includes(" (")) {
+        cleaned = cleaned.split(" (")[0].trim();
+    }
+    return cleaned || String(name).trim();
+}
+
+// ── Kullanıcı Bilgisi ve Oturum Kapatma (Logout) ──────────────────────────────────────────
+async function loadUserInfo() {
+    try {
+        const res = await fetch('/api/system/user_info');
+        const data = await res.json();
+        if (data.unauthenticated) {
+            if (window.location.pathname !== '/login') {
+                window.location.href = '/login';
+            }
+            return;
+        }
+        if (data.success && data.user_name) {
+            const userNameEl = document.getElementById('sidebar-user-name');
+            if (userNameEl) {
+                const displayName = cleanUserName(data.user_name);
+                userNameEl.textContent = displayName;
+                userNameEl.title = displayName;
+            }
+        }
+    } catch (e) {
+        console.error("User info error:", e);
+    }
+}
+
+async function logoutUser() {
+    if (!confirm("Oturumu kapatmak ve bakanlık giriş bilgilerinizi silmek istediğinize emin misiniz?")) {
+        return;
+    }
+    try {
+        sessionStorage.removeItem('bkst_auto_synced');
+        const res = await fetch('/api/system/logout', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            window.location.href = '/login';
+        } else {
+            alert(data.error || "Oturum kapatılamadı.");
+        }
+    } catch (e) {
+        alert("Bağlantı hatası: " + e.message);
+    }
+}
+
+window.logoutUser = logoutUser;
+
+// ── Otomatik Bakanlık Veri Senkronizasyonu (Uygulama Açıldığında) ──────────────────────────
+async function runAutoBkstSync() {
+    if (window.location.pathname === '/login') return;
+
+    if (sessionStorage.getItem('app_launch_synced')) {
+        return;
+    }
+    sessionStorage.setItem('app_launch_synced', 'true');
+
+    let loader = document.getElementById('auto-sync-loader');
+    if (!loader) {
+        loader = document.createElement('div');
+        loader.id = 'auto-sync-loader';
+        loader.style.cssText = 'display:flex; position:fixed; z-index:99999; left:0; top:0; width:100%; height:100%; background:rgba(10, 11, 16, 0.94); backdrop-filter:blur(14px); flex-direction:column; align-items:center; justify-content:center; text-align:center;';
+        loader.innerHTML = `
+            <div style="background:rgba(15, 23, 42, 0.96); border:1px solid rgba(56, 189, 248, 0.35); border-radius:24px; padding:2.8rem 3rem; max-width:520px; width:90%; box-shadow:0 25px 50px rgba(0,0,0,0.8); transition: all 0.3s ease;">
+                <div id="loader-icon-box" style="width:80px; height:80px; border-radius:50%; background:rgba(56,189,248,0.15); border:2px solid rgba(56,189,248,0.4); margin:0 auto 1.5rem auto; display:flex; align-items:center; justify-content:center; transition: all 0.3s ease;">
+                    <i id="loader-icon" class="fa-solid fa-cloud-arrow-down fa-bounce" style="font-size:2.4rem; color:#38bdf8;"></i>
+                </div>
+                <h2 id="loader-title" style="font-family:var(--font-outfit, sans-serif); font-size:1.45rem; font-weight:800; color:#fff; margin:0 0 0.6rem 0;">
+                    Bakanlıktan Güncel Veriler Çekiliyor...
+                </h2>
+                <p id="loader-status" style="font-size:0.95rem; color:#94a3b8; margin:0 0 1.6rem 0; line-height:1.6; transition: all 0.3s ease;">
+                    Lütfen bekleyin, BKST sunucusundan güncel stok ve karekod verileriniz otomatik çekiliyor.
+                </p>
+                <div style="background:rgba(255,255,255,0.06); height:6px; border-radius:10px; overflow:hidden; width:100%;">
+                    <div id="loader-progress-bar" style="background:linear-gradient(90deg, #38bdf8, #818cf8); height:100%; width:100%; transition: background 0.4s ease, width 0.4s ease;"></div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(loader);
+    } else {
+        loader.style.display = 'flex';
+    }
+
+    const title = document.getElementById('loader-title');
+    const status = document.getElementById('loader-status');
+    const iconBox = document.getElementById('loader-icon-box');
+    const icon = document.getElementById('loader-icon');
+    const progressBar = document.getElementById('loader-progress-bar');
+
+    try {
+        const res = await fetch('/api/bkst/fetch_api', { method: 'POST' });
+        const data = await res.json();
+
+        if (data.unauthenticated) {
+            if (loader) loader.style.display = 'none';
+            if (window.location.pathname !== '/login') {
+                window.location.href = '/login';
+            }
+            return;
+        }
+
+        if (data.success) {
+            const count = data.item_count !== undefined ? data.item_count : 0;
+            if (title) title.textContent = "✅ Veriler Başarıyla Çekildi!";
+            if (status) {
+                status.style.color = "#4ade80";
+                status.style.fontWeight = "700";
+                status.style.fontSize = "1.05rem";
+                status.textContent = `Bakanlıktan Toplam ${count} Adet Stok Verisi Çekildi. Sisteme Aktarılıyor...`;
+            }
+            if (iconBox) {
+                iconBox.style.background = "rgba(34, 197, 94, 0.2)";
+                iconBox.style.borderColor = "rgba(34, 197, 94, 0.5)";
+            }
+            if (icon) {
+                icon.className = "fa-solid fa-circle-check";
+                icon.style.color = "#4ade80";
+            }
+            if (progressBar) {
+                progressBar.style.background = "#22c55e";
+            }
+        } else {
+            if (title) title.textContent = "⚠️ Veri Çekilirken Uyarı";
+            if (status) {
+                status.style.color = "#f87171";
+                status.textContent = data.error || "Bakanlık API'sine bağlanılamadı.";
+            }
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 2500));
+    } catch (err) {
+        console.error('Otomatik BKST veri çekme hatası:', err);
+        if (title) title.textContent = "❌ Bağlantı Hatası";
+        if (status) status.textContent = "Sunucu ile bağlantı kurulamadı.";
+        await new Promise(resolve => setTimeout(resolve, 2000));
+    } finally {
+        if (loader) loader.style.display = 'none';
+        if (typeof window.loadWarehouseStock === 'function') {
+            window.loadWarehouseStock();
+        }
+    }
+}
+
+async function checkWebSystemUpdate() {
+    if (sessionStorage.getItem('update_checked')) return;
+    sessionStorage.setItem('update_checked', 'true');
+    try {
+        const res = await fetch('/api/system/check_update');
+        const data = await res.json();
+        if (data && data.has_update) {
+            showUpdateOverlay(data.remote_version || "Yeni Sürüm", data.message || "Sistem güncelleniyor...");
+            await applyWebSystemUpdate();
+        }
+    } catch (e) {
+        console.log("Check update error:", e);
+    }
+}
+
+function showUpdateOverlay(version, message) {
+    let overlay = document.getElementById('web-update-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'web-update-overlay';
+        overlay.style.cssText = `
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(15, 23, 42, 0.96); backdrop-filter: blur(12px);
+            z-index: 999999; display: flex; align-items: center; justify-content: center;
+            font-family: 'Inter', sans-serif; color: #fff;
+        `;
+        overlay.innerHTML = `
+            <div style="background: rgba(30, 41, 59, 0.9); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 16px; padding: 2.5rem 3rem; text-align: center; max-width: 480px; width: 90%; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);">
+                <div style="font-size: 3rem; margin-bottom: 1rem;">🔄</div>
+                <h2 style="font-size: 1.3rem; font-weight: 700; margin-bottom: 0.5rem; color: #38bdf8;">SİSTEM GÜNCELLEMESİ YÜKLENİYOR</h2>
+                <p id="web-update-ver" style="font-size: 0.95rem; color: #94a3b8; margin-bottom: 1.5rem;">Sürüm ${version} indiriliyor. Lütfen bekleyin...</p>
+                <div style="width: 100%; height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden;">
+                    <div id="web-update-bar" style="width: 40%; height: 100%; background: linear-gradient(90deg, #38bdf8, #818cf8); border-radius: 4px; transition: width 0.4s ease;"></div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+    }
+}
+
+async function applyWebSystemUpdate() {
+    const bar = document.getElementById('web-update-bar');
+    const ver = document.getElementById('web-update-ver');
+    if (bar) bar.style.width = '75%';
+    try {
+        const res = await fetch('/api/system/apply_update', { method: 'POST' });
+        const data = await res.json();
+        if (bar) bar.style.width = '100%';
+        if (ver) ver.textContent = "Güncelleme tamamlandı. Yeniden başlatılıyor...";
+        
+        for (let i = 0; i < 30; i++) {
+            await new Promise(r => setTimeout(r, 1000));
+            try {
+                const checkRes = await fetch('/api/system/version');
+                if (checkRes.ok) {
+                    break;
+                }
+            } catch (e) {}
+        }
+        window.location.reload();
+    } catch (e) {
+        console.error("Apply update error:", e);
+    }
+}
+
+function initApp() {
+    loadUserInfo();
+    checkWebSystemUpdate();
+    runAutoBkstSync();
+}
+
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initApp);
+} else {
+    initApp();
+}
 

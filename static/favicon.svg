@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+    <linearGradient id="indigoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#818cf8"/>
+      <stop offset="100%" stop-color="#4f46e5"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="110" fill="url(#bgGrad)"/>
+  <rect x="70" y="70" width="130" height="130" rx="28" fill="none" stroke="url(#cyanGrad)" stroke-width="24"/>
+  <rect x="108" y="108" width="54" height="54" rx="14" fill="url(#cyanGrad)"/>
+  <rect x="312" y="70" width="130" height="130" rx="28" fill="none" stroke="url(#cyanGrad)" stroke-width="24"/>
+  <rect x="350" y="108" width="54" height="54" rx="14" fill="url(#cyanGrad)"/>
+  <rect x="70" y="312" width="130" height="130" rx="28" fill="none" stroke="url(#cyanGrad)" stroke-width="24"/>
+  <rect x="108" y="350" width="54" height="54" rx="14" fill="url(#cyanGrad)"/>
+  <rect x="312" y="312" width="44" height="44" rx="12" fill="url(#cyanGrad)"/>
+  <rect x="398" y="312" width="44" height="44" rx="12" fill="url(#cyanGrad)"/>
+  <rect x="312" y="398" width="44" height="44" rx="12" fill="url(#cyanGrad)"/>
+  <rect x="398" y="398" width="44" height="44" rx="12" fill="url(#cyanGrad)"/>
+  <rect x="355" y="355" width="44" height="44" rx="12" fill="url(#indigoGrad)"/>
+  <rect x="236" y="70" width="40" height="130" rx="14" fill="url(#cyanGrad)"/>
+  <rect x="70" y="236" width="130" height="40" rx="14" fill="url(#cyanGrad)"/>
+  <rect x="236" y="312" width="40" height="130" rx="14" fill="url(#indigoGrad)"/>
+  <rect x="312" y="236" width="130" height="40" rx="14" fill="url(#cyanGrad)"/>
+</svg>

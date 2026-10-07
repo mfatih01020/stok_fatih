@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Compare</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
+    <link rel="shortcut icon" href="/static/favicon.ico">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .page-container {
+            max-width: 1440px;
+            margin: 0 auto;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+        .nav-strip {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: .2rem;
+            flex-wrap: wrap;
+        }
+        .nav-strip a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: .85rem;
+            display: flex;
+            align-items: center;
+            gap: .4rem;
+            padding: .4rem .8rem;
+            border-radius: 8px;
+            background: rgba(255,255,255,.03);
+            border: 1px solid rgba(255,255,255,.07);
+            transition: all .2s;
+        }
+        .nav-strip a:hover, .nav-strip a.active {
+            color: var(--text-main);
+            background: rgba(88,101,242,.2);
+            border-color: rgba(88,101,242,.4);
+        }
+        .nav-strip a.active-green {
+            color: #6ee7b7;
+            background: rgba(16,185,129,.2);
+            border-color: rgba(16,185,129,.4);
+        }
+
+        .kabul-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+        @media (max-width: 1024px) {
+            .kabul-grid { grid-template-columns: 1fr; }
+        }
+
+        .data-table-wrapper {
+            overflow-x: auto;
+            max-height: 420px;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.08);
+            background: rgba(15, 23, 42, 0.6);
+        }
+        .kabul-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: .85rem;
+        }
+        .kabul-table th {
+            background: rgba(30, 41, 59, 0.9);
+            color: var(--text-muted);
+            font-weight: 600;
+            text-align: left;
+            padding: .75rem .9rem;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+            position: sticky;
+            top: 0;
+            z-index: 2;
+        }
+        .kabul-table td {
+            padding: .7rem .9rem;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            color: var(--text-main);
+        }
+        .kabul-table tbody tr {
+            cursor: pointer;
+            transition: background .15s;
+        }
+        .kabul-table tbody tr:hover {
+            background: rgba(88,101,242,0.12);
+        }
+        .kabul-table tbody tr.selected-row {
+            background: rgba(16, 185, 129, 0.18) !important;
+            border-left: 3px solid #10b981;
+        }
+
+        .btn-kabul-big {
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: #fff;
+            font-size: 1.1rem;
+            font-weight: 700;
+            padding: 0.95rem 1.6rem;
+            border-radius: 14px;
+            border: none;
+            cursor: pointer;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.7rem;
+            box-shadow: 0 6px 20px rgba(16,185,129,0.35);
+            transition: all .2s ease;
+        }
+        .btn-kabul-big:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(16,185,129,0.5);
+        }
+        .btn-kabul-big:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            box-shadow: none;
+            transform: none;
+        }
+
+        .badge-type {
+            background: rgba(139, 92, 246, 0.2);
+            color: #c084fc;
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body class="sidebar-layout">
+    <div class="glass-bg-decor1"></div>
+    <div class="glass-bg-decor2"></div>
+
+    <div class="app-wrapper">
+        <!-- SOL DİKİNE SIDEBAR NAVİGASYON -->
+        <aside class="sidebar">
+            <div class="sidebar-brand">
+                <i class="fa-solid fa-qrcode logo-icon"></i>
+                <div>
+                    <h2>QR Compare</h2>
+                    <p>Akıllı Stok Sistemi</p>
+                </div>
+            </div>
+
+            <nav class="sidebar-menu">
+                <a href="/cikis" class="sidebar-link">
+                    <i class="fa-solid fa-box-open"></i>
+                    <span>Barkod Okut & Çıkış</span>
+                </a>
+                <a href="/cikis-listesi" class="sidebar-link">
+                    <i class="fa-solid fa-list-check"></i>
+                    <span>Çıkış Listesi</span>
+                </a>
+                <a href="/stok-esitleme" class="sidebar-link">
+                    <i class="fa-solid fa-chart-line"></i>
+                    <span>Stok & Eşitleme</span>
+                </a>
+                <a href="/depo_stoklari" class="sidebar-link">
+                    <i class="fa-solid fa-warehouse"></i>
+                    <span>Depomdaki Stoklar</span>
+                </a>
+                <a href="/depo_kabul" class="sidebar-link active">
+                    <i class="fa-solid fa-boxes-packing"></i>
+                    <span>Depoya Kabul Et</span>
+                </a>
+                <a href="/kullaniciya-satis" class="sidebar-link">
+                    <i class="fa-solid fa-user-tag"></i>
+                    <span>Kullanıcıya Satış (Demo)</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="system-status-pill">
+                    <span class="status-indicator online"></span>
+                    <span>Sistem Aktif</span>
+                </div>
+                <div class="user-profile-card">
+                    <div class="user-profile-info">
+                        <i class="fa-solid fa-user-circle user-avatar-icon"></i>
+                        <span id="sidebar-user-name" class="user-name-title">Yükleniyor...</span>
+                    </div>
+                    <button type="button" class="btn-logout-icon" onclick="logoutUser()" title="Oturumdan Çıkış Yap">
+                        <i class="fa-solid fa-power-off"></i>
+                    </button>
+                </div>
+                <div class="version-pill" onclick="showVersionModal()" title="Sürüm Bilgisi">
+                    <i class="fa-solid fa-code-branch" style="color: #38bdf8;"></i>
+                    <span id="versionText">v3.0.0</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- SAĞ ANA İÇERİK ALANI -->
+        <main class="main-content">
+            <header class="content-header">
+                <div>
+                    <h1 class="page-title"><i class="fa-solid fa-boxes-packing icon-green"></i> Depoya Kabul Et & Gelen Bildirimler</h1>
+                    <p class="page-subtitle">Toptancı ve üreticilerden size kesilen gelen faturaları görüntüleyin ve depoya kabul edin.</p>
+                </div>
+            </header>
+
+        <!-- ÜÇLÜ PANEL LAYOUT -->
+        <div class="kabul-grid">
+            
+            <!-- PANEL 1: GELEN BİLDİRİMLER (BKST) -->
+            <section class="panel glass-card">
+                <div class="panel-head-flex">
+                    <div class="panel-title-group">
+                        <i class="fa-solid fa-inbox icon-primary"></i>
+                        <div>
+                            <h2>1. Bölüm: Gelen / Bekleyen Bildirimler</h2>
+                            <p class="panel-subtitle">Toptancı veya üreticilerden size kesilen gelen irsaliye/faturalar.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="background:rgba(16, 185, 129, 0.1); border:1px solid rgba(16, 185, 129, 0.3); border-radius:10px; padding:0.75rem 1rem; margin-top:0.8rem; font-size:0.82rem; color:#6ee7b7; display:flex; align-items:center; gap:0.6rem;">
+                    <i class="fa-solid fa-shield-halved" style="font-size:1.2rem; color:#10b981;"></i>
+                    <div>
+                        <b>Güvenlik Filtresi Aktif:</b> Sadece tedarikçilerden size kesilen <b>"MAL ALIM" (Gelen)</b> bildirimleri listelenir. Satış veya çıkış bildirimleriniz buraya düşmez.
+                    </div>
+                </div>
+
+                <div class="bkst-controls margin-top-sm" style="display:flex; gap:0.8rem; flex-wrap:wrap;">
+                    <button type="button" id="btn-fetch-incoming" class="btn btn-primary" style="flex:1;">
+                        <i class="fa-solid fa-cloud-arrow-down"></i> 📥 1. Gelen Mal Alım Bildirimlerini Çek (BKST)
+                    </button>
+                </div>
+
+                <div id="incoming-msg-box" class="status-msg hidden margin-top-sm"></div>
+
+                <div class="data-table-wrapper margin-top-md">
+                    <table class="kabul-table" id="table-incoming">
+                        <thead>
+                            <tr>
+                                <th style="width:40px;">Seç</th>
+                                <th>Gönderici Firma / GLN</th>
+                                <th>Belge No</th>
+                                <th>Tarih</th>
+                                <th>Tip</th>
+                                <th>Adet</th>
+                                <th>Durum</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbody-incoming">
+                            <tr>
+                                <td colspan="7" style="text-align:center; color:var(--text-muted); padding:2.5rem;">
+                                    Henüz bildirim çekilmedi. <b>"Gelen Bildirimleri Çek"</b> butonuna basarak BKST üzerindeki faturaları listeleyebilirsiniz.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- PANEL 2: SEÇİLEN BİLDİRİM DETAYLARI & KABUL ET -->
+            <section class="panel glass-card">
+                <div class="panel-head-flex">
+                    <div class="panel-title-group">
+                        <i class="fa-solid fa-boxes-packing icon-green"></i>
+                        <div>
+                            <h2>2. Bölüm: Bildirim Detayı & Depoya Kabul</h2>
+                            <p class="panel-subtitle">Seçilen belgedeki karekodlar ve depoya ekleme işlemi.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); padding:0.9rem 1.1rem; border-radius:12px; display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <span style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Seçilen Belge No:</span>
+                        <h3 id="lbl-selected-doc" style="margin-top:2px; font-family:var(--font-outfit); font-size:1.15rem; color:#38bdf8;">Henüz Belge Seçilmedi</h3>
+                    </div>
+                    <div style="text-align:right;">
+                        <span style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Ürün Sayısı:</span>
+                        <h3 id="lbl-selected-count" style="margin-top:2px; font-family:var(--font-outfit); font-size:1.15rem; color:#10b981;">0 Adet</h3>
+                    </div>
+                </div>
+
+                <!-- TEK TUŞLA DEPOYA KABUL ET BUTONU -->
+                <button type="button" id="btn-accept-warehouse" class="btn-kabul-big margin-top-md" disabled>
+                    <i class="fa-solid fa-circle-check"></i> 🟢 Tek Tuşla Depoya Kabul Et (MALALIM)
+                </button>
+
+                <div id="accept-msg-box" class="status-msg hidden margin-top-sm"></div>
+
+                <!-- DETAY ÜRÜN TABLOSU -->
+                <div class="data-table-wrapper margin-top-md" style="max-height: 280px;">
+                    <table class="kabul-table" id="table-details">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Karekod</th>
+                                <th>Ürün Adı</th>
+                                <th>GTIN / Barkod</th>
+                                <th>Seri No</th>
+                                <th>SKT</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbody-details">
+                            <tr>
+                                <td colspan="6" style="text-align:center; color:var(--text-muted); padding:2rem;">
+                                    Lütfen sol taraftan detaylarını görmek istediğiniz bir bildirime tıklayın.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+        </div>
+        </main>
+    </div>
+
+    <!-- SÜRÜM MODALI -->
+    <div id="versionModal" class="modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px);">
+        <div style="background:#1e293b; color:#fff; max-width:450px; margin:10% auto; padding:24px; border-radius:16px; border:1px solid rgba(255,255,255,0.1); box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:12px; margin-bottom:16px;">
+                <h3 style="margin:0; font-size:1.15rem; color:#38bdf8; display:flex; align-items:center; gap:8px;">
+                    <i class="fa-solid fa-circle-info"></i> Uygulama Sürüm Bilgisi
+                </h3>
+                <span onclick="document.getElementById('versionModal').style.display='none'" style="cursor:pointer; font-size:1.2rem; color:#94a3b8;">&times;</span>
+            </div>
+            <p style="font-size:0.95rem; color:#cbd5e1;">QR Stok & Bakanlık Kontrol Sistemi v1.0</p>
+            <div style="margin-top:16px; text-align:right;">
+                <button onclick="document.getElementById('versionModal').style.display='none'" class="btn btn-outline" style="padding:6px 16px;">Kapat</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let selectedNotificationData = null;
+
+        const btnFetchIncoming = document.getElementById('btn-fetch-incoming');
+        const btnAcceptWarehouse = document.getElementById('btn-accept-warehouse');
+        const incomingMsgBox = document.getElementById('incoming-msg-box');
+        const acceptMsgBox = document.getElementById('accept-msg-box');
+        const tbodyIncoming = document.getElementById('tbody-incoming');
+        const tbodyDetails = document.getElementById('tbody-details');
+        const lblSelectedDoc = document.getElementById('lbl-selected-doc');
+        const lblSelectedCount = document.getElementById('lbl-selected-count');
+
+        // Gelen Bildirimleri Çek
+        btnFetchIncoming.addEventListener('click', async () => {
+            btnFetchIncoming.disabled = true;
+            btnFetchIncoming.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> BKST Sunucusuna Bağlanılıyor...';
+            showMsg(incomingMsgBox, 'loading', 'Bakanlık gelen bildirim listesi sorgulanıyor, lütfen bekleyin...');
+
+            try {
+                const res = await fetch('/api/depo_kabul/gelen_listesi', { method: 'POST' });
+                const data = await res.json();
+
+                if (data.success) {
+                    showMsg(incomingMsgBox, 'success', data.message || 'Gelen bildirimler başarıyla çekildi.');
+                    renderIncomingTable(data.notifications || []);
+                } else {
+                    showMsg(incomingMsgBox, 'error', data.error || 'Gelen bildirimler çekilemedi.');
+                }
+            } catch (err) {
+                showMsg(incomingMsgBox, 'error', 'Bağlantı hatası: ' + err.message);
+            } finally {
+                btnFetchIncoming.disabled = false;
+                btnFetchIncoming.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> 📥 1. Gelen Bildirimleri Çek (BKST)';
+            }
+        });
+
+        // Bildirim Tablosunu Bas
+        function renderIncomingTable(items) {
+            // Güvenlik Önlemi: Satış veya Çıkış türündeki tüm bildirimleri kesin olarak süz
+            const validItems = (items || []).filter(item => {
+                const op = String(item.OPERATION || item.OperationName || '').toUpperCase();
+                return !op.includes('SATIS') && !op.includes('SATIŞ') && !op.includes('CIKIS') && !op.includes('ÇIKIŞ') && !op.includes('GİDEN');
+            });
+
+            if (!validItems || validItems.length === 0) {
+                tbodyIncoming.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:2rem;">Tipi "MAL ALIM" olan gelen/bekleyen bildirim bulunamadı.</td></tr>';
+                return;
+            }
+
+            tbodyIncoming.innerHTML = validItems.map((item, index) => `
+                <tr onclick="selectNotification(${index}, this)" id="row-incoming-${index}">
+                    <td style="text-align:center;"><i class="fa-regular fa-circle radio-icon"></i></td>
+                    <td><b>${esc(item.CompanyTitle || item.SENDER || 'Bilinmiyor')}</b></td>
+                    <td><span style="font-family:monospace; color:#38bdf8;">${esc(item.WAYBILLNUMBER || '-')}</span></td>
+                    <td>${esc(item.WAYBILLDATE || item.OPERATIONDATE || '-')}</td>
+                    <td><span class="badge-type" style="background:rgba(16,185,129,0.2); color:#6ee7b7; border:1px solid rgba(16,185,129,0.4); padding:2px 8px; border-radius:6px; font-weight:700;">MAL ALIM</span></td>
+                    <td><b>${item.PRODUCTCOUNT || 0}</b></td>
+                    <td><span style="color:#10b981;">${esc(item.HEADERSTATE || 'Bekliyor')}</span></td>
+                </tr>
+            `).join('');
+
+            window.incomingItems = validItems;
+        }
+
+        // Satır Seçimi ve Detay Getirme
+        window.selectNotification = async function(index, trEl) {
+            document.querySelectorAll('#tbody-incoming tr').forEach(r => {
+                r.classList.remove('selected-row');
+                const ic = r.querySelector('.radio-icon');
+                if (ic) ic.className = 'fa-regular fa-circle radio-icon';
+            });
+
+            trEl.classList.add('selected-row');
+            const icon = trEl.querySelector('.radio-icon');
+            if (icon) icon.className = 'fa-solid fa-circle-dot radio-icon';
+
+            const item = window.incomingItems[index];
+            selectedNotificationData = item;
+
+            lblSelectedDoc.textContent = item.WAYBILLNUMBER || 'Belge #' + (index+1);
+            lblSelectedCount.textContent = (item.PRODUCTCOUNT || 0) + ' Adet';
+            btnAcceptWarehouse.disabled = false;
+
+            // Detayları Yükle
+            tbodyDetails.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:2rem;"><i class="fa-solid fa-spinner fa-spin"></i> Ürün detayları getiriliyor...</td></tr>';
+
+            try {
+                const res = await fetch('/api/depo_kabul/detay/' + encodeURIComponent(item.HEADERID || item.WAYBILLNUMBER || index));
+                const data = await res.json();
+                if (data.success && data.products) {
+                    renderDetailsTable(data.products);
+                } else {
+                    renderDetailsTable(item.products || []);
+                }
+            } catch (err) {
+                renderDetailsTable(item.products || []);
+            }
+        };
+
+        function renderDetailsTable(prods) {
+            if (!prods || prods.length === 0) {
+                tbodyDetails.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:1.5rem;">Bu bildirime ait karekod detayı bulunamadı.</td></tr>';
+                return;
+            }
+
+            tbodyDetails.innerHTML = prods.map((p, i) => `
+                <tr>
+                    <td>${i+1}</td>
+                    <td style="font-family:monospace; font-size:0.78rem; color:#6ee7b7;">${esc(p.Karekod || p.KAREKOD || '-')}</td>
+                    <td><b>${esc(p['Ürün Adı'] || p.STOCKNAME || '-')}</b></td>
+                    <td>${esc(p['Gtin / Barkod'] || p.BARCODE || '-')}</td>
+                    <td>${esc(p['Seri Numarası'] || p.SERIALNUMBER || '-')}</td>
+                    <td>${esc(p['Son Kullanma Tarihi'] || p.SKT || '-')}</td>
+                </tr>
+            `).join('');
+        }
+
+        // Tek Tuşla Depoya Kabul Et
+        btnAcceptWarehouse.addEventListener('click', async () => {
+            if (!selectedNotificationData) return;
+
+            btnAcceptWarehouse.disabled = true;
+            btnAcceptWarehouse.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Depoya Kabul Ediliyor (MALALIM)...';
+            showMsg(acceptMsgBox, 'loading', 'Mal alım bildirimi yapılıyor ve ürünler deponuza ekleniyor...');
+
+            try {
+                const res = await fetch('/api/depo_kabul/onayla', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        header_id: selectedNotificationData.HEADERID,
+                        waybill_number: selectedNotificationData.WAYBILLNUMBER,
+                        product_count: selectedNotificationData.PRODUCTCOUNT,
+                        products: selectedNotificationData.products || []
+                    })
+                });
+
+                const data = await res.json();
+                if (data.success) {
+                    showMsg(acceptMsgBox, 'success', data.message || '🟢 Bildirim deponuza başarıyla kabul edildi!');
+                    btnAcceptWarehouse.innerHTML = '<i class="fa-solid fa-check-double"></i> 🟢 Depoya Kabul Edildi!';
+                    btnAcceptWarehouse.style.background = '#059669';
+                } else {
+                    showMsg(acceptMsgBox, 'error', data.error || 'Depoya kabul edilemedi.');
+                    btnAcceptWarehouse.disabled = false;
+                    btnAcceptWarehouse.innerHTML = '<i class="fa-solid fa-circle-check"></i> 🟢 Tek Tuşla Depoya Kabul Et (MALALIM)';
+                }
+            } catch (err) {
+                showMsg(acceptMsgBox, 'error', 'Hata: ' + err.message);
+                btnAcceptWarehouse.disabled = false;
+                btnAcceptWarehouse.innerHTML = '<i class="fa-solid fa-circle-check"></i> 🟢 Tek Tuşla Depoya Kabul Et (MALALIM)';
+            }
+        });
+
+        function showMsg(box, type, txt) {
+            box.className = 'status-msg ' + (type === 'loading' ? 'msg-loading' : type === 'success' ? 'msg-success' : 'msg-error');
+            box.innerHTML = txt;
+            box.classList.remove('hidden');
+        }
+
+        function esc(str) {
+            return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+    </script>
+    <script src="/static/app.js?v=20261005_v3000"></script>
+</body>
+</html>

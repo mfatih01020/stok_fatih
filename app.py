@@ -7,7 +7,7 @@ import sqlite3
 import json
 from datetime import datetime
 import pandas as pd
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, jsonify, send_file, redirect
 import io
 
 app = Flask(__name__)
@@ -24,43 +24,31 @@ def add_header(response):
 import subprocess
 import json
 
+NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
+APP_VERSION = "v3.0.0"
+
 def get_version_info():
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    h, d, m = "", "", ""
-    try:
-        env = os.environ.copy()
-        env["GIT_TERMINAL_PROMPT"] = "0"
-        h = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, env=env, timeout=2, cwd=base_dir).stdout.strip()
-        d = subprocess.run(["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%cd", "--date=format:%d.%m.%Y %H:%M", "HEAD"], capture_output=True, text=True, env=env, timeout=2, cwd=base_dir).stdout.strip()
-        m = subprocess.run(["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%s", "HEAD"], capture_output=True, text=True, env=env, timeout=2, cwd=base_dir).stdout.strip()
-    except Exception:
-        pass
-
-    if not h or h == "Bilinmiyor":
-        v_path = os.path.join(base_dir, "version.json")
-        if os.path.exists(v_path):
-            try:
-                with open(v_path, "r", encoding="utf-8") as f:
-                    v_data = json.load(f)
-                    v_code = v_data.get("version", "v3.3")
-                    v_commit = v_data.get("commit", "3.3.0")
-                    d = v_data.get("date", "05.10.2026")
-                    m = v_data.get("message", "Dual-Engine Güncelleme Motoru")
-                    h = f"{v_code} ({v_commit})"
-            except Exception:
-                pass
-
-    if not h:
-        h = "v3.3"
-        d = "05.10.2026"
-        m = "v3.3 Canlı Sürüm"
+    v_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.json")
+    if os.path.exists(v_path):
+        try:
+            with open(v_path, "r", encoding="utf-8") as f:
+                v_data = json.load(f)
+                return {
+                    "success": True,
+                    "version": v_data.get("version", APP_VERSION),
+                    "commit_hash": v_data.get("commit", APP_VERSION),
+                    "commit_date": v_data.get("date", "07.10.2026"),
+                    "commit_msg": v_data.get("message", f"QR Compare {APP_VERSION} Canlı Sürüm")
+                }
+        except Exception:
+            pass
 
     return {
         "success": True,
-        "version": f"v1.0 ({h})",
-        "commit_hash": h,
-        "commit_date": d,
-        "commit_msg": m
+        "version": APP_VERSION,
+        "commit_hash": APP_VERSION,
+        "commit_date": "07.10.2026",
+        "commit_msg": f"QR Compare {APP_VERSION} Canlı Sürüm"
     }
 
 import time
@@ -77,11 +65,11 @@ def system_heartbeat():
 
 def auto_shutdown_monitor():
     while True:
-        time.sleep(4)
+        time.sleep(5)
         now = time.time()
-        if now - server_start_time < 25:
+        if now - server_start_time < 30:
             continue
-        if now - last_heartbeat_time > 10:
+        if now - last_heartbeat_time > 60:
             print("[OTOMATİK KAPANMA] Tüm tarayıcı sekmeleri kapatıldı. Sunucu sonlandırılıyor...")
             os._exit(0)
 
@@ -94,6 +82,45 @@ def system_version_api():
 
 # ── SQLite Veritabanı ────────────────────────────────────────────────────────
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cikis_kayitlari.db')
+
+def save_bkst_data_to_db(df, username=""):
+    if df is None or df.empty:
+        return
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("PRAGMA journal_mode=WAL")
+    c.execute("PRAGMA synchronous=NORMAL")
+    
+    if username:
+        c.execute("DELETE FROM bkst_depo_verileri WHERE kullanici_adi = ?", (username,))
+    else:
+        c.execute("DELETE FROM bkst_depo_verileri")
+        
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    koli_col = find_koli_column(df.columns)
+    
+    for _, row in df.iterrows():
+        r = row.to_dict()
+        qr_val = normalize_qr(str(r.get("Karekod", r.get("tam_karekod", r.get("QR", "")))))
+        gtin_val = str(r.get("Gtin Numarası", r.get("gtin", r.get("BARKOD", "")))).strip()
+        urun_val = str(r.get("Ürün Adı", r.get("urun_adi", r.get("URUNADI", "")))).strip()
+        seri_val = str(r.get("Seri Numarası", r.get("seri_no", r.get("SERIALNUMBER", "")))).strip()
+        parti_val = str(r.get("Parti Numarası", r.get("parti_no", r.get("SARJNO", "")))).strip()
+        koli_val = str(r.get(koli_col, r.get("koli_no", r.get("KOLINO", "")))).strip().upper() if koli_col and pd.notna(r.get(koli_col)) else str(r.get("koli_no", "")).strip().upper()
+        if koli_val == "NAN":
+            koli_val = ""
+        palet_val = str(r.get("Palet Numarası", r.get("palet_no", "")))
+        uretim_val = str(r.get("Üretim Tarihi", r.get("uretim_tarihi", "")))
+        skt_val = str(r.get("Son Kullanma Tarihi", r.get("skt", r.get("SKT", ""))))
+        
+        c.execute('''INSERT INTO bkst_depo_verileri
+            (gtin, urun_adi, seri_no, parti_no, koli_no, palet_no, uretim_tarihi, skt, tam_karekod, kullanici_adi, guncelleme_tarihi)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            (gtin_val, urun_val, seri_val, parti_val, koli_val, palet_val, uretim_val, skt_val, qr_val, username, now_str))
+            
+    conn.commit()
+    conn.close()
+
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -112,13 +139,101 @@ def init_db():
         uretim_tarihi TEXT,
         skt          TEXT,
         ham_karekod  TEXT,
-        tekrar_uyari INTEGER DEFAULT 0
+        tekrar_uyari INTEGER DEFAULT 0,
+        kullanici_adi TEXT
     )''')
+    c.execute("PRAGMA table_info(cikis_kayitlari)")
+    cols = [row[1] for row in c.fetchall()]
+    if "kullanici_adi" not in cols:
+        c.execute("ALTER TABLE cikis_kayitlari ADD COLUMN kullanici_adi TEXT")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ham_karekod ON cikis_kayitlari(ham_karekod)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_kullanici_adi ON cikis_kayitlari(kullanici_adi)")
+
+    c.execute('''CREATE TABLE IF NOT EXISTS bkst_depo_verileri (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        gtin             TEXT,
+        urun_adi         TEXT,
+        seri_no          TEXT,
+        parti_no         TEXT,
+        koli_no          TEXT,
+        palet_no         TEXT,
+        uretim_tarihi    TEXT,
+        skt              TEXT,
+        tam_karekod      TEXT,
+        gln              TEXT,
+        adres_id         TEXT,
+        kullanici_adi    TEXT,
+        guncelleme_tarihi TEXT
+    )''')
+    c.execute("CREATE INDEX IF NOT EXISTS idx_bkst_karekod ON bkst_depo_verileri(tam_karekod)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_bkst_gtin ON bkst_depo_verileri(gtin)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_bkst_kullanici ON bkst_depo_verileri(kullanici_adi)")
+
     conn.commit()
     conn.close()
 
-init_db()
+def read_bkst_credentials():
+    cred_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bakanlik_giris_bilgileri.txt")
+    
+    username = ""
+    password = ""
+    address_id = ""
+    api_key = ""
+    
+    if os.path.exists(cred_file):
+        with open(cred_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("KULLANICI_ADI="):
+                    username = line.split("=", 1)[1].strip()
+                elif line.startswith("SIFRE="):
+                    password = line.split("=", 1)[1].strip()
+                elif line.startswith("ADRES_ID="):
+                    raw_id = line.split("=", 1)[1].strip()
+                    if "-" in raw_id:
+                        address_id = raw_id.split("-")[0].strip()
+                    else:
+                        address_id = raw_id
+                elif line.startswith("KEY=") or line.startswith("API_KEY="):
+                    api_key = line.split("=", 1)[1].strip()
+                    
+    return username, password, address_id, api_key
+
+_last_client_heartbeat = time.time()
+
+@app.route('/api/heartbeat', methods=['POST', 'GET'])
+def api_heartbeat():
+    global _last_client_heartbeat
+    _last_client_heartbeat = time.time()
+    return jsonify({'status': 'ok'})
+
+@app.route('/api/shutdown', methods=['POST'])
+def api_shutdown():
+    def _do_shutdown():
+        time.sleep(0.3)
+        os._exit(0)
+    threading.Thread(target=_do_shutdown, daemon=True).start()
+    return jsonify({'status': 'shutting_down'})
+
+def _heartbeat_checker():
+    time.sleep(12)
+    last_loop_time = time.time()
+    while True:
+        time.sleep(3)
+        now = time.time()
+        loop_duration = now - last_loop_time
+        last_loop_time = now
+
+        # System sleep/hibernation detection
+        if loop_duration > 7:
+            global _last_client_heartbeat
+            _last_client_heartbeat = now
+            continue
+
+        if now - _last_client_heartbeat > 35:
+            os._exit(0)
+
+threading.Thread(target=_heartbeat_checker, daemon=True).start()
 
 @app.after_request
 def add_no_cache_headers(response):
@@ -126,6 +241,14 @@ def add_no_cache_headers(response):
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'
     return response
+
+def clean_user_name(name):
+    if not name:
+        return ""
+    name = str(name).strip()
+    cleaned = re.sub(r'^\d+[\s\-]+', '', name)
+    cleaned = cleaned.split(" (")[0].strip()
+    return cleaned if cleaned else name
 
 def normalize_qr(qr):
     if pd.isna(qr):
@@ -230,47 +353,33 @@ def find_koli_column(cols):
     return None
 
 def get_bkst_cache():
-    global _bkst_df_cache, _bkst_mtime_cache, _bkst_koli_dict, _bkst_qr_dict, _bkst_gtin_dict
+    global _bkst_df_cache, _bkst_koli_dict, _bkst_qr_dict, _bkst_gtin_dict
 
-    filepath = os.path.join(os.getcwd(), "bkst_depo_verileri.xlsx")
-    
-    if not os.path.exists(filepath):
-        excels = glob.glob(os.path.join(os.getcwd(), "*.xlsx"))
-        if excels:
-            filepath = excels[0]
-
-    df = None
-    if os.path.exists(filepath):
-        try:
-            current_mtime = os.path.getmtime(filepath)
-            if _bkst_df_cache is not None and current_mtime == _bkst_mtime_cache:
-                return _bkst_df_cache, _bkst_qr_dict, _bkst_gtin_dict, _bkst_koli_dict
-                
-            xl = pd.ExcelFile(filepath)
-            sheet = "Tüm Ürünler (QR)" if "Tüm Ürünler (QR)" in xl.sheet_names else xl.sheet_names[0]
-            df = pd.read_excel(filepath, sheet_name=sheet)
-            _bkst_mtime_cache = current_mtime
-        except Exception as e:
-            print(f"Excel read error: {e}")
-            df = None
-
-    if (df is None or df.empty) and 'cached_results' in globals() and cached_results:
-        inv = cached_results.get("matched_sales", []) + cached_results.get("remaining_inventory", [])
-        if inv:
-            rows = []
-            for item in inv:
-                r = {"Ürün Adı": item.get("product_name", ""), "Karekod": item.get("qr", "")}
-                r.update(item.get("metadata", {}))
-                rows.append(r)
-            df = pd.DataFrame(rows)
+    username, _, _, _ = read_bkst_credentials()
+    conn = sqlite3.connect(DB_PATH)
+    if username:
+        df = pd.read_sql_query("SELECT * FROM bkst_depo_verileri WHERE kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = ''", conn, params=(username,))
+    else:
+        df = pd.read_sql_query("SELECT * FROM bkst_depo_verileri", conn)
+    conn.close()
 
     if df is None or df.empty:
         return None, {}, {}, {}
 
+    df = df.rename(columns={
+        'gtin': 'Gtin Numarası',
+        'urun_adi': 'Ürün Adı',
+        'seri_no': 'Seri Numarası',
+        'parti_no': 'Parti Numarası',
+        'koli_no': 'Koli Numarası',
+        'palet_no': 'Palet Numarası',
+        'uretim_tarihi': 'Üretim Tarihi',
+        'skt': 'Son Kullanma Tarihi',
+        'tam_karekod': 'Karekod'
+    })
+
     if 'Karekod' in df.columns:
         df = df.drop_duplicates(subset=['Karekod'])
-
-    koli_col = find_koli_column(df.columns)
 
     koli_dict = {}
     qr_dict = {}
@@ -278,9 +387,9 @@ def get_bkst_cache():
 
     for _, row in df.iterrows():
         r = row.to_dict()
-        qr_val = normalize_qr(str(r.get("Karekod", r.get("QR", ""))))
-        gtin_val = normalize_qr(str(r.get("Gtin Numarası", r.get("BARKOD", ""))))
-        koli_val = str(r.get(koli_col, "")).strip().upper() if koli_col and pd.notna(r.get(koli_col)) else ""
+        qr_val = normalize_qr(str(r.get("Karekod", "")))
+        gtin_val = normalize_qr(str(r.get("Gtin Numarası", "")))
+        koli_val = str(r.get("Koli Numarası", "")).strip().upper()
 
         if qr_val:
             qr_dict[qr_val] = r
@@ -297,27 +406,47 @@ def get_bkst_cache():
     _bkst_gtin_dict = gtin_dict
     _bkst_koli_dict = koli_dict
 
+    _bkst_df_cache = df
+    _bkst_qr_dict = qr_dict
+    _bkst_gtin_dict = gtin_dict
+    _bkst_koli_dict = koli_dict
+
     return _bkst_df_cache, _bkst_qr_dict, _bkst_gtin_dict, _bkst_koli_dict
+
+init_db()
+
+# Migrate legacy bkst_depo_verileri.xlsx if present
+excel_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bkst_depo_verileri.xlsx")
+if os.path.exists(excel_file):
+    try:
+        username, _, _, _ = read_bkst_credentials()
+        df_old = pd.read_excel(excel_file)
+        if not df_old.empty:
+            save_bkst_data_to_db(df_old, username)
+        os.remove(excel_file)
+        print("bkst_depo_verileri.xlsx successfully migrated to SQLite DB and removed!")
+    except Exception as e:
+        print(f"Migration error: {e}")
 
 # ── Global browser session ──────────────────────────────────────────────────
 bkst_driver = None
 bkst_status = "closed"
 bkst_message = ""
 cached_results = {}
+_app_bkst_synced = False
 
 def build_gtin_name_map():
     mapping = {}
-    xlsx_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bkst_depo_verileri.xlsx')
-    if os.path.exists(xlsx_path):
-        try:
-            df = pd.read_excel(xlsx_path, sheet_name='Tüm Ürünler (QR)')
+    try:
+        df, _, _, _ = get_bkst_cache()
+        if df is not None and not df.empty:
             for _, row in df.iterrows():
-                gtin = normalize_qr(str(row.get('Gtin Numarası', '')))
-                name = str(row.get('Ürün Adı', '')).strip()
+                gtin = normalize_qr(str(row.get('gtin', row.get('Gtin Numarası', ''))))
+                name = str(row.get('urun_adi', row.get('Ürün Adı', ''))).strip()
                 if gtin and name:
                     mapping[gtin] = name
-        except Exception:
-            pass
+    except Exception:
+        pass
     return mapping
 
 def parse_system_file(file_or_path, gtin_map=None):
@@ -449,11 +578,31 @@ def parse_sales_file(file):
                 
     return sales_qrs
 
+@app.before_request
+def check_authentication():
+    if request.path.startswith('/static') or request.path.startswith('/api/') or request.path == '/login':
+        return None
+
+    username, password, address_id, api_key = read_bkst_credentials()
+    if not username or not password:
+        return redirect('/login')
+
+
 # ── MAIN ROUTES ────────────────────────────────────────────────────────────
 
 @app.route('/')
 def index():
+    return redirect('/cikis')
+
+
+@app.route('/stok-esitleme')
+def stok_esitleme_page():
     return render_template('index.html')
+
+
+@app.route('/login')
+def login_page():
+    return render_template('login.html')
 
 
 @app.route('/api/compare', methods=['POST'])
@@ -998,10 +1147,19 @@ def _find_edge_path():
 
 def _auto_update_driver():
     try:
-        import subprocess
-        script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "indir_driver.ps1")
-        if os.path.exists(script_path):
-            subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-File", script_path], check=False)
+        import urllib.request
+        import zipfile
+        import tempfile
+
+        edge_ver = "120.0.2210.133"
+        url = f"https://msedgedriver.microsoft.com/{edge_ver}/edgedriver_win64.zip"
+        temp_dir = tempfile.gettempdir()
+        zip_path = os.path.join(temp_dir, "edgedriver.zip")
+
+        urllib.request.urlretrieve(url, zip_path)
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extract("msedgedriver.exe", os.path.dirname(os.path.abspath(__file__)))
+        print(f"msedgedriver.exe ({edge_ver}) updated via pure Python!")
     except Exception as e:
         print(f"Auto driver update error: {e}")
 
@@ -1023,6 +1181,7 @@ def _do_open():
     driver = None
     from selenium import webdriver
     from selenium.webdriver.edge.service import Service as EdgeService
+    from selenium.webdriver.chrome.service import Service as ChromeService
 
     local_driver = os.path.join(os.path.dirname(os.path.abspath(__file__)), "msedgedriver.exe")
     edge_path = _find_edge_path()
@@ -1031,6 +1190,7 @@ def _do_open():
         if os.path.exists(drv_path):
             try:
                 service = EdgeService(executable_path=drv_path)
+                service.creation_flags = NO_WINDOW
                 options = webdriver.EdgeOptions()
                 if edge_path:
                     options.binary_location = edge_path
@@ -1057,6 +1217,8 @@ def _do_open():
     # 3. Standard Edge launch fallback (Selenium Manager auto-driver)
     if driver is None:
         try:
+            service = EdgeService()
+            service.creation_flags = NO_WINDOW
             options = webdriver.EdgeOptions()
             if edge_path:
                 options.binary_location = edge_path
@@ -1064,7 +1226,7 @@ def _do_open():
             options.add_argument("--no-sandbox")
             options.add_argument("--disable-dev-shm-usage")
             options.add_experimental_option("detach", True)
-            driver = webdriver.Edge(options=options)
+            driver = webdriver.Edge(service=service, options=options)
             print("Successfully launched Edge via Selenium Manager!")
         except Exception as e1:
             print(f"Edge standard launch error: {e1}")
@@ -1073,6 +1235,8 @@ def _do_open():
     if driver is None:
         chrome_path = _find_chrome_path()
         try:
+            service = ChromeService()
+            service.creation_flags = NO_WINDOW
             options = webdriver.ChromeOptions()
             if chrome_path:
                 options.binary_location = chrome_path
@@ -1080,7 +1244,7 @@ def _do_open():
             options.add_argument("--no-sandbox")
             options.add_argument("--disable-dev-shm-usage")
             options.add_experimental_option("detach", True)
-            driver = webdriver.Chrome(options=options)
+            driver = webdriver.Chrome(service=service, options=options)
             print("Successfully launched Chrome!")
         except Exception as e2:
             print(f"Chrome launch error: {e2}")
@@ -1104,8 +1268,6 @@ def _do_open():
 
 def read_bkst_credentials():
     cred_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bakanlik_giris_bilgileri.txt")
-    if not os.path.exists(cred_file):
-        cred_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bakanlik_giris_bilgileri.template.txt")
     
     username = ""
     password = ""
@@ -1140,7 +1302,7 @@ def bkst_fetch_api():
     if not username or not password or username == "" or password == "":
         bkst_status = "error"
         bkst_message = "❌ HATA: 'bakanlik_giris_bilgileri.txt' dosyasında KULLANICI_ADI veya SIFRE bulunamadı! Lütfen bilgilerinizi doldurup kaydedin."
-        return jsonify({"success": False, "error": bkst_message})
+        return jsonify({"success": False, "unauthenticated": True, "error": bkst_message})
         
     try:
         import requests
@@ -1225,8 +1387,7 @@ def bkst_fetch_api():
                     pass
 
         df = pd.DataFrame(all_rows)
-        out_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bkst_depo_verileri.xlsx")
-        df.to_excel(out_file, index=False)
+        save_bkst_data_to_db(df, username)
 
         bkst_cache_df = None
         bkst_cache_qr = None
@@ -1235,6 +1396,9 @@ def bkst_fetch_api():
 
         df_cache, _, _, _ = get_bkst_cache()
         item_count = len(df_cache) if df_cache is not None else len(all_rows)
+
+        global _app_bkst_synced
+        _app_bkst_synced = True
 
         if item_count == 0:
             bkst_status = "done"
@@ -1559,8 +1723,38 @@ def cikis_page():
     return render_template('cikis.html')
 
 @app.route('/cikis-listesi')
+@app.route('/cikis_listesi')
 def cikis_listesi_page():
     return render_template('cikis_listesi.html')
+
+@app.route('/depo_stoklari')
+@app.route('/depo-stoklari')
+def depo_stoklari_page():
+    return render_template('depo_stoklari.html')
+
+@app.route('/api/depo_stoklari', methods=['GET'])
+def api_depo_stoklari():
+    df, _, _, _ = get_bkst_cache()
+    if df is None or df.empty:
+        excel_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bkst_depo_verileri.xlsx")
+        if os.path.exists(excel_path):
+            try:
+                df = pd.read_excel(excel_path)
+            except Exception:
+                df = pd.DataFrame()
+        else:
+            df = pd.DataFrame()
+
+    rows = []
+    if df is not None and not df.empty:
+        df_clean = df.fillna("")
+        rows = df_clean.to_dict(orient="records")
+
+    return jsonify({
+        "success": True,
+        "products": rows,
+        "total": len(rows)
+    })
 
 
 @app.route('/api/cikis/okut', methods=['POST'])
@@ -1571,10 +1765,14 @@ def cikis_okut():
         return jsonify({'success': False, 'error': 'Barkod boş olamaz.'})
 
     barkod_norm = normalize_qr(barkod_raw)
+    username, _, _, _ = read_bkst_credentials()
 
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute('SELECT id, tarih, urun_adi FROM cikis_kayitlari WHERE ham_karekod = ?', (barkod_norm,))
+    if username:
+        c.execute('SELECT id, tarih, urun_adi FROM cikis_kayitlari WHERE ham_karekod = ? AND (kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = "")', (barkod_norm, username))
+    else:
+        c.execute('SELECT id, tarih, urun_adi FROM cikis_kayitlari WHERE ham_karekod = ?', (barkod_norm,))
     existing = c.fetchone()
     conn.close()
 
@@ -1625,10 +1823,10 @@ def cikis_okut():
     c.execute("PRAGMA synchronous=NORMAL")
     c.execute('''INSERT INTO cikis_kayitlari
         (tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no,
-         uretim_tarihi, skt, ham_karekod, tekrar_uyari)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)''',
+         uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)''',
         (tarih, urun_adi, barkod_col, koli_no, seri_no, parti_no, palet_no,
-         uretim_tarihi, skt, barkod_norm))
+         uretim_tarihi, skt, barkod_norm, username))
     new_id = c.lastrowid
     conn.commit()
     conn.close()
@@ -1652,12 +1850,98 @@ def cikis_okut():
     })
 
 
+@app.route('/api/cikis/toplu_ekle', methods=['POST'])
+def cikis_toplu_ekle():
+    data = request.json or {}
+    items = data.get('items', [])
+    if not items or not isinstance(items, list):
+        return jsonify({'success': False, 'error': 'Aktarılacak karekod listesi bulunamadı.'})
+
+    df, qr_map, gtin_map, koli_map = get_bkst_cache()
+    if df is None or df.empty:
+        return jsonify({
+            'success': False,
+            'error': 'Bakanlık depo verisi bulunamadı. Lütfen önce güncel stok verilerini çekin.'
+        })
+
+    username, _, _, _ = read_bkst_credentials()
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("PRAGMA journal_mode=WAL")
+    c.execute("PRAGMA synchronous=NORMAL")
+
+    added_count = 0
+    already_count = 0
+    tarih = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    for barkod_raw in items:
+        barkod_norm = normalize_qr(str(barkod_raw).strip())
+        if not barkod_norm:
+            continue
+
+        if username:
+            c.execute('SELECT id FROM cikis_kayitlari WHERE ham_karekod = ? AND (kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = "")', (barkod_norm, username))
+        else:
+            c.execute('SELECT id FROM cikis_kayitlari WHERE ham_karekod = ?', (barkod_norm,))
+        if c.fetchone():
+            already_count += 1
+            continue
+
+        match_row = qr_map.get(barkod_norm) or gtin_map.get(barkod_norm)
+        if match_row is None:
+            for k_qr, r_dict in qr_map.items():
+                if barkod_norm in k_qr or k_qr in barkod_norm:
+                    match_row = r_dict
+                    break
+
+        if match_row is None:
+            urun_adi = "Tanımsız Ürün"
+            barkod_col = ""
+            koli_no = ""
+            seri_no = ""
+            parti_no = ""
+            palet_no = ""
+            uretim_tarihi = ""
+            skt = ""
+        else:
+            urun_adi      = str(match_row.get('Ürün Adı', '')).strip()
+            barkod_col    = str(match_row.get('Gtin Numarası', '')).strip()
+            koli_no       = str(match_row.get('Koli Numarası', '')).strip()
+            seri_no       = str(match_row.get('Seri Numarası', '')).strip()
+            parti_no      = str(match_row.get('Parti Numarası', '')).strip()
+            palet_no      = str(match_row.get('Palet Numarası', '')).strip()
+            uretim_tarihi = str(match_row.get('Üretim Tarihi', '')).strip()
+            skt           = str(match_row.get('Son Kullanma Tarihi', '')).strip()
+
+        c.execute('''INSERT INTO cikis_kayitlari
+            (tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no,
+             uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)''',
+            (tarih, urun_adi, barkod_col, koli_no, seri_no, parti_no, palet_no,
+             uretim_tarihi, skt, barkod_norm, username))
+        added_count += 1
+
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        'success': True,
+        'added_count': added_count,
+        'already_count': already_count,
+        'message': f'{added_count} adet ürün Çıkış Listesine aktarıldı.'
+    })
+
+
 @app.route('/api/cikis/listesi', methods=['GET'])
 def cikis_listesi_api():
+    username, _, _, _ = read_bkst_credentials()
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
-    c.execute('SELECT * FROM cikis_kayitlari ORDER BY id DESC')
+    if username:
+        c.execute('SELECT * FROM cikis_kayitlari WHERE kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = "" ORDER BY id DESC', (username,))
+    else:
+        c.execute('SELECT * FROM cikis_kayitlari ORDER BY id DESC')
     rows = [dict(r) for r in c.fetchall()]
     conn.close()
     return jsonify({'success': True, 'kayitlar': rows, 'toplam': len(rows)})
@@ -1665,9 +1949,13 @@ def cikis_listesi_api():
 
 @app.route('/api/cikis/sil/<int:kayit_id>', methods=['DELETE'])
 def cikis_sil(kayit_id):
+    username, _, _, _ = read_bkst_credentials()
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute('DELETE FROM cikis_kayitlari WHERE id = ?', (kayit_id,))
+    if username:
+        c.execute('DELETE FROM cikis_kayitlari WHERE id = ? AND (kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = "")', (kayit_id, username))
+    else:
+        c.execute('DELETE FROM cikis_kayitlari WHERE id = ?', (kayit_id,))
     conn.commit()
     conn.close()
     return jsonify({'success': True})
@@ -1675,9 +1963,13 @@ def cikis_sil(kayit_id):
 
 @app.route('/api/cikis/temizle', methods=['POST'])
 def cikis_temizle():
+    username, _, _, _ = read_bkst_credentials()
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute('DELETE FROM cikis_kayitlari')
+    if username:
+        c.execute('DELETE FROM cikis_kayitlari WHERE kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = ""', (username,))
+    else:
+        c.execute('DELETE FROM cikis_kayitlari')
     conn.commit()
     conn.close()
     return jsonify({'success': True, 'mesaj': 'Tüm çıkış kayıtları silindi.'})
@@ -1685,9 +1977,16 @@ def cikis_temizle():
 
 @app.route('/api/cikis/indir', methods=['GET'])
 def cikis_indir():
+    username, _, _, _ = read_bkst_credentials()
     conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query('SELECT * FROM cikis_kayitlari ORDER BY id DESC', conn)
+    if username:
+        df = pd.read_sql_query('SELECT * FROM cikis_kayitlari WHERE kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = "" ORDER BY id DESC', conn, params=(username,))
+    else:
+        df = pd.read_sql_query('SELECT * FROM cikis_kayitlari ORDER BY id DESC', conn)
     conn.close()
+
+    if 'kullanici_adi' in df.columns:
+        df = df.drop(columns=['kullanici_adi'])
 
     df = df.rename(columns={
         'id':            'ID',
@@ -1712,6 +2011,696 @@ def cikis_indir():
     fname = f'cikis_listesi_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
     return send_file(output, as_attachment=True, download_name=fname,
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
+# ── Depoya Kabul Et & Gelen Bildirimler API ────────────────────────────────
+def get_bkst_authenticated_session():
+    username, password, address_id, api_key = read_bkst_credentials()
+    if not username or not password:
+        return None, None, None, "Kullanıcı adı veya şifre bulunamadı."
+    
+    import requests
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "*/*",
+        "X-Requested-With": "XMLHttpRequest"
+    })
+    if api_key:
+        session.headers.update({"Authorization": f"Bearer {api_key}", "Key": api_key})
+
+    r_home = session.get("https://bkst.tarbil.gov.tr/", verify=False, timeout=10)
+    token_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', r_home.text)
+    token1 = token_match.group(1) if token_match else ""
+
+    login_payload = {"tcNo": username, "sifre": password, "__RequestVerificationToken": token1}
+    res_login = session.post("https://bkst.tarbil.gov.tr/UserOperation/GetUserInf", data=login_payload, verify=False, timeout=15)
+    if "0" not in res_login.text:
+        return None, None, None, "Bakanlık kullanıcı adı veya şifreniz hatalı."
+
+    r_stock_page = session.get("https://bkst.tarbil.gov.tr/Main/StockList", verify=False, timeout=10)
+    token2_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', r_stock_page.text)
+    token2 = token2_match.group(1) if token2_match else token1
+
+    r_gln = session.post("https://bkst.tarbil.gov.tr/Partial/GetGLN", data={"FirmType": "0", "__RequestVerificationToken": token2}, verify=False, timeout=10)
+    gln_guid = address_id
+    if r_gln.status_code == 200:
+        try:
+            gln_data = r_gln.json()
+            if isinstance(gln_data, list) and len(gln_data) > 0:
+                gln_guid = str(gln_data[0].get("Value") or "").strip()
+        except Exception:
+            pass
+
+    return session, gln_guid, token2, None
+
+
+@app.route('/depo_kabul')
+def depo_kabul_page():
+    return render_template('depo_kabul.html')
+
+
+@app.route('/kullaniciya-satis')
+@app.route('/kullaniciya_satis')
+def kullaniciya_satis_page():
+    return render_template('kullaniciya_satis.html')
+
+
+@app.route('/api/bkst/recetesiz_satis/sms_gonder', methods=['POST'])
+def bkst_sms_gonder():
+    data = request.json or {}
+    tc_no = str(data.get('tc_no', '')).strip()
+    if not tc_no:
+        return jsonify({'success': False, 'error': 'T.C. Kimlik veya Vergi No giriniz.'})
+
+    session, gln_guid, token2, err = get_bkst_authenticated_session()
+    if err or not session:
+        return jsonify({'success': False, 'error': err or 'BKST oturumu açılamadı.'})
+
+    try:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+        r_page = session.get('https://bkst.tarbil.gov.tr/Main/SellToProducerNonPrescribed', verify=False, timeout=10)
+        token_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', r_page.text)
+        token = token_match.group(1) if token_match else token2
+
+        payload = {
+            'IdTaxNo': tc_no,
+            'PrescriptionNumber': '',
+            'OperationType': 1,
+            '__RequestVerificationToken': token
+        }
+
+        res = session.post('https://bkst.tarbil.gov.tr/Main/SendSmsVerificationCode', data=payload, verify=False, timeout=15)
+        if res.status_code == 200:
+            res_json = res.json()
+            if res_json.get('IsSuccess') is True:
+                return jsonify({
+                    'success': True,
+                    'phone_hidden': res_json.get('MobilePhoneHidden', ''),
+                    'verification_token': res_json.get('VerificationCode', ''),
+                    'message': f"📲 SMS doğrulama kodu {res_json.get('MobilePhoneHidden', '')} numaralı telefona gönderildi."
+                })
+            else:
+                return jsonify({'success': False, 'error': res_json.get('Message') or 'SMS gönderilemedi.'})
+        else:
+            return jsonify({'success': False, 'error': f"BKST Sunucu Hatası ({res.status_code})"})
+    except Exception as e:
+        return jsonify({'success': False, 'error': f"SMS Gönderme Hatası: {str(e)}"})
+
+
+@app.route('/api/bkst/recetesiz_satis/sms_dogrula', methods=['POST'])
+def bkst_sms_dogrula():
+    data = request.json or {}
+    tc_no = str(data.get('tc_no', '')).strip()
+    sms_code = str(data.get('sms_code', '')).strip()
+    verification_token = str(data.get('verification_token', '')).strip()
+
+    if not tc_no or not sms_code or not verification_token:
+        return jsonify({'success': False, 'error': 'Eksik parametre. T.C. No ve SMS kodu gereklidir.'})
+
+    session, gln_guid, token2, err = get_bkst_authenticated_session()
+    if err or not session:
+        return jsonify({'success': False, 'error': err or 'BKST oturumu açılamadı.'})
+
+    try:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+        r_page = session.get('https://bkst.tarbil.gov.tr/Main/SellToProducerNonPrescribed', verify=False, timeout=10)
+        token_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', r_page.text)
+        token = token_match.group(1) if token_match else token2
+
+        payload = {
+            'IdTaxNo': tc_no,
+            'PrescriptionNumber': '',
+            'VerificationCode': verification_token,
+            'Code': sms_code,
+            '__RequestVerificationToken': token
+        }
+
+        res = session.post('https://bkst.tarbil.gov.tr/Main/CheckSmsVerificationCode', data=payload, verify=False, timeout=15)
+        if res.status_code == 200:
+            res_str = res.text.strip().replace('"', '')
+            if res_str and res_str != "00000000-0000-0000-0000-000000000000":
+                return jsonify({
+                    'success': True,
+                    'verified_token': res_str,
+                    'message': '🟢 SMS doğrulaması başarıyla onaylandı!'
+                })
+            else:
+                return jsonify({'success': False, 'error': '❌ Girilen SMS doğrulama kodu hatalı veya süresi dolmuş.'})
+        else:
+            return jsonify({'success': False, 'error': f"BKST Sunucu Hatası ({res.status_code})"})
+    except Exception as e:
+        return jsonify({'success': False, 'error': f"SMS Doğrulama Hatası: {str(e)}"})
+
+
+@app.route('/api/bkst/recetesiz_satis', methods=['POST'])
+def bkst_recetesiz_satis():
+    data = request.json or {}
+    tc_no = str(data.get('tc_no', '')).strip()
+    verification_token = str(data.get('verification_token', '')).strip()
+    karekods = data.get('karekods', [])
+    belge_no = str(data.get('belge_no', '')).strip()
+    aciklama = str(data.get('aciklama', 'Reçetesiz Satış')).strip()
+
+    if not tc_no:
+        return jsonify({'success': False, 'error': 'T.C. Kimlik veya Vergi No boş olamaz.'})
+    if not karekods or not isinstance(karekods, list):
+        return jsonify({'success': False, 'error': 'Satış yapılacak ürün/karekod bulunamadı.'})
+
+    session, gln_guid, token2, err = get_bkst_authenticated_session()
+    if err or not session:
+        return jsonify({'success': False, 'error': err or 'BKST oturumu açılamadı.'})
+
+    try:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+        r_page = session.get('https://bkst.tarbil.gov.tr/Main/SellToProducerNonPrescribed', verify=False, timeout=10)
+        token_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', r_page.text)
+        token = token_match.group(1) if token_match else token2
+
+        df_cache, qr_map, gtin_map, koli_map = get_bkst_cache()
+
+        datasource_items = []
+        for raw_qr in karekods:
+            norm_qr = normalize_qr(str(raw_qr).strip())
+            if not norm_qr:
+                continue
+
+            match_row = qr_map.get(norm_qr) or gtin_map.get(norm_qr) if qr_map else None
+            if match_row is None and qr_map:
+                for k_qr, r_dict in qr_map.items():
+                    if norm_qr in k_qr or k_qr in norm_qr:
+                        match_row = r_dict
+                        break
+
+            gtin = str(match_row.get('Gtin Numarası', '')).strip() if match_row else ""
+            seri = str(match_row.get('Seri Numarası', '')).strip() if match_row else ""
+            parti = str(match_row.get('Parti Numarası', '')).strip() if match_row else ""
+            koli = str(match_row.get('Koli Numarası', '')).strip() if match_row else ""
+            urun = str(match_row.get('Ürün Adı', '')).strip() if match_row else "Bitki Koruma Ürünü"
+            skt = str(match_row.get('Son Kullanma Tarihi', '')).strip() if match_row else ""
+
+            datasource_items.append({
+                "BARKOD": gtin,
+                "KAREKOD": norm_qr,
+                "SERIALNUMBER": seri,
+                "SARJNO": parti,
+                "KOLINO": koli,
+                "URUNADI": urun,
+                "SKT": skt,
+                "QUANTITY": 1
+            })
+
+        today_str = datetime.now().strftime("%Y.%m.%d")
+        payload = {
+            'SenderAddress': gln_guid,
+            'IdTaxNo': tc_no,
+            'DocumentNo': belge_no or f"SATIS-{datetime.now().strftime('%Y%m%d%H%M')}",
+            'DocumentDate': today_str,
+            'Desc': aciklama,
+            'DataSource': json.dumps(datasource_items),
+            'ParcelList': '',
+            'HarmfulChoice': '',
+            'Province': '',
+            'VerificationCode': verification_token,
+            '__RequestVerificationToken': token
+        }
+
+        res = session.post('https://bkst.tarbil.gov.tr/Main/NewCheckOutNotificationForProducerNonPrescribed', data=payload, verify=False, timeout=20)
+
+        if res.status_code == 200:
+            try:
+                res_data = res.json()
+                if res_data.get('Result') is True or res_data == 1:
+                    username_cur, _, _, _ = read_bkst_credentials()
+                    conn = sqlite3.connect(DB_PATH)
+                    c = conn.cursor()
+                    tarih_now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    for item in datasource_items:
+                        c.execute('''INSERT INTO cikis_kayitlari
+                            (tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no,
+                             uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)''',
+                            (tarih_now, item['URUNADI'], item['BARKOD'], item['KOLINO'], item['SERIALNUMBER'], item['SARJNO'], '', '', item['SKT'], item['KAREKOD'], username_cur))
+                    conn.commit()
+                    conn.close()
+
+                    return jsonify({
+                        'success': True,
+                        'message': f"🟢 BAŞARILI! Bakanlık BKST sistemine {len(datasource_items)} adet ürünün Reçetesiz Satış bildirimi API ile tamamlandı!"
+                    })
+                else:
+                    err_msgs = []
+                    data_errs = res_data.get('Data', [])
+                    if isinstance(data_errs, list):
+                        for e in data_errs:
+                            if isinstance(e, dict) and e.get('Message'):
+                                err_msgs.append(e.get('Message'))
+                    err_text = " - ".join(err_msgs) if err_msgs else str(res_data)
+                    return jsonify({'success': False, 'error': f"BKST Hata Bildirimi: {err_text}"})
+            except Exception:
+                return jsonify({'success': False, 'error': f"Bakanlık Yanıtı: {res.text[:300]}"})
+        else:
+            return jsonify({'success': False, 'error': f"BKST Sunucu Hatası ({res.status_code})"})
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': f"API Bağlantı Hatası: {str(e)}"})
+
+
+@app.route('/api/depo_kabul/gelen_listesi', methods=['POST', 'GET'])
+def api_depo_kabul_gelen_listesi():
+    session, gln_guid, token2, err = get_bkst_authenticated_session()
+    if err:
+        return jsonify({"success": False, "error": err})
+
+    notifications = []
+    try:
+        endpoints = [
+            "https://bkst.tarbil.gov.tr/Main/GetReceivedNotificationList",
+            "https://bkst.tarbil.gov.tr/Main/GetNotificationList",
+            "https://bkst.tarbil.gov.tr/Main/ReceivedNotificationList"
+        ]
+        
+        for ep in endpoints:
+            try:
+                res = session.post(ep, data={
+                    "CompanyAddressId": gln_guid,
+                    "NotificationType": "1",
+                    "NotificationDirection": "1",
+                    "HeaderState": "0",
+                    "__RequestVerificationToken": token2
+                }, verify=False, timeout=12)
+                
+                if res.status_code == 200:
+                    try:
+                        jdata = res.json()
+                        raw_list = jdata.get("Data") if isinstance(jdata, dict) else (jdata if isinstance(jdata, list) else [])
+                        if isinstance(raw_list, list) and len(raw_list) > 0:
+                            for item in raw_list:
+                                op = str(item.get("OPERATION") or item.get("OperationName") or item.get("ISLEMTIPI") or item.get("NotificationType") or item.get("DESCR") or item.get("Operation") or "").upper()
+                                direction = str(item.get("NotificationDirection") or item.get("DIRECTION") or item.get("YON") or "").upper()
+
+                                # Satış, Çıkış veya Giden bildirimleri KESİNLİKLE FİLTRELE!
+                                if any(x in op for x in ["SATIS", "SATIŞ", "CIKIS", "ÇIKIŞ", "DEVR", "GÖNDER", "SATIŞA"]):
+                                    continue
+                                if direction in ["2", "OUT", "OUTGOING", "GİDEN", "GIDEN"]:
+                                    continue
+
+                                notifications.append({
+                                    "HEADERID": item.get("HEADERID") or item.get("Id") or item.get("ID") or str(item.get("WAYBILLNUMBER", "")),
+                                    "WAYBILLNUMBER": item.get("WAYBILLNUMBER") or item.get("WaybillNumber") or item.get("BELGENO") or "-",
+                                    "WAYBILLDATE": format_date_val(item.get("WAYBILLDATE") or item.get("WaybillDate") or item.get("TARIH")),
+                                    "SENDER": item.get("CompanyTitle") or item.get("SENDER") or item.get("GonderenFirma") or item.get("FIRMA") or "Tedarikçi / Üretici",
+                                    "PRODUCTCOUNT": item.get("PRODUCTCOUNT") or item.get("ProductCount") or item.get("ADET") or 0,
+                                    "HEADERSTATE": item.get("HEADERSTATE") or item.get("StateDescription") or "Bekliyor",
+                                    "OPERATION": "MALALIM",
+                                    "products": item.get("products") or []
+                                })
+                            break
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"BKST gelen bildirim hatası: {e}")
+
+    return jsonify({
+        "success": True,
+        "notifications": notifications,
+        "message": f"Sadece Tipi 'MAL ALIM' (Gelen) olan {len(notifications)} adet bildirim filtreler ile listelendi." if notifications else "Gelen/bekleyen MAL ALIM bildirimi bulunamadı."
+    })
+
+
+@app.route('/api/depo_kabul/detay/<header_id>', methods=['GET'])
+def api_depo_kabul_detay(header_id):
+    session, gln_guid, token2, err = get_bkst_authenticated_session()
+    if err:
+        return jsonify({"success": False, "error": err, "products": []})
+
+    products = []
+    try:
+        endpoints = [
+            "https://bkst.tarbil.gov.tr/Main/GetReceivedNotificationDetailList",
+            "https://bkst.tarbil.gov.tr/Main/GetNotificationDetailList",
+            "https://bkst.tarbil.gov.tr/Main/GetNotificationDetail"
+        ]
+        for ep in endpoints:
+            try:
+                res = session.post(ep, data={"HeaderId": header_id, "CompanyAddressId": gln_guid, "__RequestVerificationToken": token2}, verify=False, timeout=12)
+                if res.status_code == 200:
+                    jdata = res.json()
+                    raw_list = jdata.get("Data") if isinstance(jdata, dict) else (jdata if isinstance(jdata, list) else [])
+                    if isinstance(raw_list, list) and len(raw_list) > 0:
+                        for item in raw_list:
+                            products.append({
+                                "Koli Numarası": item.get("PAKETNO") or item.get("KOLINO") or item.get("PALETNO") or "",
+                                "Ürün Adı": item.get("STOCKNAME") or item.get("URUNADI") or item.get("ProductName") or "",
+                                "Karekod": item.get("KAREKOD") or item.get("HAMKAREKOD") or item.get("Barcode") or "",
+                                "Gtin / Barkod": item.get("BARCODE") or item.get("GTIN") or item.get("Gtin") or "",
+                                "Seri Numarası": item.get("SERIALNUMBER") or item.get("SERINO") or item.get("SerialNumber") or "",
+                                "Parti Numarası": item.get("SARJNO") or item.get("LOT") or item.get("BatchNumber") or "",
+                                "Palet Numarası": item.get("PALETNO") or "",
+                                "Üretim Tarihi": format_date_val(item.get("URETIMTARIHI") or item.get("ProductionDate")),
+                                "Son Kullanma Tarihi": format_date_val(item.get("SKT") or item.get("ExpirationDate"))
+                            })
+                        break
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"Detail fetch error: {e}")
+
+    return jsonify({
+        "success": True,
+        "products": products
+    })
+
+
+@app.route('/api/depo_kabul/onayla', methods=['POST'])
+def api_depo_kabul_onayla():
+    req_data = request.get_json() or {}
+    header_id = req_data.get('header_id')
+    waybill_number = req_data.get('waybill_number')
+    incoming_products = req_data.get('products') or []
+
+    session, gln_guid, token2, err = get_bkst_authenticated_session()
+    bkst_accepted = False
+    bkst_msg = ""
+    if session and gln_guid and token2:
+        accept_endpoints = [
+            "https://bkst.tarbil.gov.tr/Main/NotificationAccept",
+            "https://bkst.tarbil.gov.tr/Main/SaveNotificationAccept",
+            "https://bkst.tarbil.gov.tr/Main/ConfirmNotification",
+            "https://bkst.tarbil.gov.tr/Main/SaveMalAlim"
+        ]
+        for ep in accept_endpoints:
+            try:
+                res = session.post(ep, data={"HeaderId": header_id, "CompanyAddressId": gln_guid, "__RequestVerificationToken": token2}, verify=False, timeout=12)
+                if res.status_code == 200:
+                    bkst_accepted = True
+                    bkst_msg = "Bakanlık (BKST) mal alım bildirimi onaylandı."
+                    break
+            except Exception:
+                pass
+
+    excel_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bkst_depo_verileri.xlsx")
+    cols = ["Koli Numarası", "Ürün Adı", "Karekod", "Gtin / Barkod", "Seri Numarası", "Parti Numarası", "Palet Numarası", "Üretim Tarihi", "Son Kullanma Tarihi"]
+    
+    existing_df = pd.DataFrame(columns=cols)
+    if os.path.exists(excel_path):
+        try:
+            existing_df = pd.read_excel(excel_path)
+            for c in cols:
+                if c not in existing_df.columns:
+                    existing_df[c] = ""
+        except Exception:
+            existing_df = pd.DataFrame(columns=cols)
+
+    existing_karekods = set(existing_df['Karekod'].dropna().astype(str).str.strip())
+    
+    new_rows = []
+    added_count = 0
+    for p in incoming_products:
+        qr = str(p.get("Karekod") or p.get("KAREKOD") or "").strip()
+        if qr and qr in existing_karekods:
+            continue
+        
+        row = {
+            "Koli Numarası": p.get("Koli Numarası") or p.get("PAKETNO") or p.get("KOLINO") or "",
+            "Ürün Adı": p.get("Ürün Adı") or p.get("STOCKNAME") or p.get("URUNADI") or "",
+            "Karekod": qr,
+            "Gtin / Barkod": p.get("Gtin / Barkod") or p.get("BARCODE") or p.get("GTIN") or "",
+            "Seri Numarası": p.get("Seri Numarası") or p.get("SERIALNUMBER") or p.get("SERINO") or "",
+            "Parti Numarası": p.get("Parti Numarası") or p.get("SARJNO") or p.get("LOT") or "",
+            "Palet Numarası": p.get("Palet Numarası") or p.get("PALETNO") or "",
+            "Üretim Tarihi": format_date_val(p.get("Üretim Tarihi") or p.get("URETIMTARIHI")),
+            "Son Kullanma Tarihi": format_date_val(p.get("Son Kullanma Tarihi") or p.get("SKT"))
+        }
+        new_rows.append(row)
+        if qr:
+            existing_karekods.add(qr)
+        added_count += 1
+
+    if new_rows:
+        new_df = pd.DataFrame(new_rows)
+        updated_df = pd.concat([existing_df, new_df], ignore_index=True)
+    else:
+        updated_df = existing_df
+
+    updated_df.to_excel(excel_path, index=False)
+
+    global bkst_cache_df, bkst_cache_qr, bkst_cache_gtin, bkst_cache_koli
+    bkst_cache_df = None
+    bkst_cache_qr = None
+    bkst_cache_gtin = None
+    bkst_cache_koli = None
+
+    msg = f"🟢 Mal Alım bildirimi kabul edildi ve {added_count} adet ürün yerel deponuza (Excel) eklendi."
+    if bkst_msg:
+        msg += f" ({bkst_msg})"
+
+    return jsonify({
+        "success": True,
+        "message": msg,
+        "added_count": added_count
+    })
+
+
+@app.route('/api/system/login', methods=['POST'])
+def api_system_login():
+    global _app_bkst_synced
+    _app_bkst_synced = False
+
+    data = request.json or {}
+    username = str(data.get('username', '')).strip()
+    password = str(data.get('password', '')).strip()
+    address_id = str(data.get('address_id', '')).strip()
+
+    if not username or not password:
+        return jsonify({'success': False, 'error': 'Kullanıcı adı ve şifre giriniz.'})
+
+    try:
+        import requests
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+        session = requests.Session()
+        session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "*/*",
+            "X-Requested-With": "XMLHttpRequest"
+        })
+
+        r_home = session.get("https://bkst.tarbil.gov.tr/", verify=False, timeout=10)
+        token_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', r_home.text)
+        token1 = token_match.group(1) if token_match else ""
+
+        login_payload = {"tcNo": username, "sifre": password, "__RequestVerificationToken": token1}
+        res_login = session.post("https://bkst.tarbil.gov.tr/UserOperation/GetUserInf", data=login_payload, verify=False, timeout=15)
+        
+        if "0" not in res_login.text:
+            return jsonify({'success': False, 'error': 'Bakanlık kullanıcı adı veya şifreniz hatalı.'})
+
+        user_name = username
+        try:
+            jdata = res_login.json()
+            if isinstance(jdata, dict):
+                user_name = jdata.get("NameSurname") or jdata.get("UserName") or jdata.get("Name") or username
+        except Exception:
+            pass
+
+        try:
+            r_stock = session.get("https://bkst.tarbil.gov.tr/Main/StockList", verify=False, timeout=8)
+            token2_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', r_stock.text)
+            token2 = token2_match.group(1) if token2_match else token1
+
+            r_gln = session.post("https://bkst.tarbil.gov.tr/Partial/GetGLN", data={"FirmType": "0", "__RequestVerificationToken": token2}, verify=False, timeout=8)
+            if r_gln.status_code == 200:
+                gln_data = r_gln.json()
+                if isinstance(gln_data, list) and len(gln_data) > 0:
+                    if not address_id:
+                        address_id = str(gln_data[0].get("Value") or "").strip()
+                    raw_text = str(gln_data[0].get("Text") or "").strip()
+                    if raw_text:
+                        clean_name = clean_user_name(raw_text)
+                        if clean_name and not clean_name.isdigit():
+                            user_name = clean_name
+        except Exception as e_gln:
+            print(f"GLN fetch error during login: {e_gln}")
+
+        user_name = clean_user_name(user_name)
+
+        cred_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bakanlik_giris_bilgileri.txt")
+        lines = [
+            "# ==============================================================================",
+            "# BAKANLIK BKST GİRİŞ BİLGİLERİ",
+            "# ==============================================================================",
+            f"KULLANICI_ADI={username}",
+            f"SIFRE={password}",
+            f"ADRES_ID={address_id}",
+            f"KULLANICI_ISIM={user_name}",
+            ""
+        ]
+        with open(cred_file, 'w', encoding='utf-8') as f:
+            f.write("\n".join(lines))
+
+        return jsonify({'success': True, 'message': 'Giriş başarılı ve kaydedildi.', 'user_name': user_name})
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Bağlantı hatası: {str(e)}'})
+
+
+@app.route('/api/system/user_info', methods=['GET'])
+def api_system_user_info():
+    cred_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bakanlik_giris_bilgileri.txt")
+    username, password, address_id, api_key = read_bkst_credentials()
+    if not username or not password:
+        return jsonify({'success': False, 'error': 'Oturum açılmamış.'})
+
+    user_name = username
+    if os.path.exists(cred_file):
+        with open(cred_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                if line.strip().startswith("KULLANICI_ISIM="):
+                    val = line.strip().split("=", 1)[1].strip()
+                    if val and val != username:
+                        user_name = val
+
+    if user_name == username:
+        session, gln_guid, token2, err = get_bkst_authenticated_session()
+        if session:
+            try:
+                r_user = session.get("https://bkst.tarbil.gov.tr/UserOperation/GetUserInf", verify=False, timeout=5)
+                if r_user.status_code == 200:
+                    try:
+                        j = r_user.json()
+                        if isinstance(j, dict):
+                            fetched_name = j.get("NameSurname") or j.get("UserName") or j.get("Name")
+                            if fetched_name:
+                                user_name = fetched_name
+                    except Exception:
+                        pass
+                
+                if user_name == username:
+                    r_stock = session.get("https://bkst.tarbil.gov.tr/Main/StockList", verify=False, timeout=5)
+                    match = re.search(r'class="[^"]*(?:user-name|profile-name|user|account)[^"]*"[^>]*>\s*([A-Za-zÇĞİÖŞÜçğiöşü\s]{3,40})\s*<', r_stock.text)
+                    if match:
+                        user_name = match.group(1).strip()
+
+                user_name = clean_user_name(user_name)
+
+                if user_name and user_name != username:
+                    lines = []
+                    with open(cred_file, 'r', encoding='utf-8') as f:
+                        lines = [l.strip() for l in f.readlines()]
+                    has_isim = False
+                    for i, l in enumerate(lines):
+                        if l.startswith("KULLANICI_ISIM="):
+                            lines[i] = f"KULLANICI_ISIM={user_name}"
+                            has_isim = True
+                            break
+                    if not has_isim:
+                        lines.append(f"KULLANICI_ISIM={user_name}")
+                    with open(cred_file, 'w', encoding='utf-8') as f:
+                        f.write("\n".join(lines) + "\n")
+            except Exception:
+                pass
+
+    user_name = clean_user_name(user_name)
+
+    return jsonify({
+        'success': True,
+        'username': username,
+        'user_name': user_name
+    })
+
+
+@app.route('/api/system/sync_status', methods=['GET'])
+def api_system_sync_status():
+    return jsonify({"synced": _app_bkst_synced})
+
+
+@app.route('/api/system/check_update', methods=['GET'])
+def api_system_check_update():
+    try:
+        from guncelleme_kontrol import get_unified_version_info, get_latest_remote_commit_sha
+        import requests
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+        cur_code, cur_date, cur_msg = get_unified_version_info()
+        local_vpath = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.json")
+        local_commit = ""
+        if os.path.exists(local_vpath):
+            with open(local_vpath, "r", encoding="utf-8") as f:
+                local_commit = str(json.load(f).get("commit", "")).strip()
+
+        latest_sha = get_latest_remote_commit_sha(requests)
+        if not latest_sha or latest_sha == "main":
+            return jsonify({'has_update': False, 'current_version': cur_code})
+
+        headers = {"User-Agent": "Mozilla/5.0", "Cache-Control": "no-cache"}
+        remote_vurl = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/{latest_sha}/version.json?t={time.time_ns()}"
+        resp = requests.get(remote_vurl, verify=False, timeout=5, headers=headers)
+        if resp.status_code == 200:
+            rdata = resp.json()
+            remote_commit = str(rdata.get("commit", "")).strip()
+            remote_version = str(rdata.get("version", "v1.0")).strip()
+            if remote_commit and remote_commit != local_commit:
+                return jsonify({
+                    'has_update': True,
+                    'current_version': cur_code,
+                    'remote_version': remote_version,
+                    'remote_commit': remote_commit,
+                    'message': rdata.get("message", "Yeni sistem güncellemesi mevcut.")
+                })
+    except Exception as e:
+        print(f"Check update error: {e}")
+
+    return jsonify({'has_update': False})
+
+
+@app.route('/api/system/apply_update', methods=['POST'])
+def api_system_apply_update():
+    try:
+        from guncelleme_kontrol import force_update
+        updated = force_update()
+        if updated:
+            def _restart():
+                time.sleep(1)
+                os.execv(sys.executable, [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.py")])
+            threading.Thread(target=_restart, daemon=True).start()
+            return jsonify({'success': True, 'updated': True, 'message': 'Güncelleme başarıyla yüklendi! Sistem otomatik yeniden başlatılıyor...'})
+        return jsonify({'success': True, 'updated': False, 'message': 'Sistem zaten güncel.'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Güncelleme hatası: {str(e)}'})
+
+
+@app.route('/api/system/logout', methods=['POST'])
+def api_system_logout():
+    global _app_bkst_synced
+    _app_bkst_synced = False
+
+    cred_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bakanlik_giris_bilgileri.txt")
+    lines = [
+        "# ==============================================================================",
+        "# BAKANLIK BKST GİRİŞ BİLGİLERİ",
+        "# ==============================================================================",
+        "KULLANICI_ADI=",
+        "SIFRE=",
+        "ADRES_ID=",
+        ""
+    ]
+    with open(cred_file, 'w', encoding='utf-8') as f:
+        f.write("\n".join(lines))
+
+    return jsonify({'success': True, 'message': 'Oturum kapatıldı.'})
 
 
 if __name__ == '__main__':

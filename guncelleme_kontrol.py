@@ -11,13 +11,7 @@ from datetime import datetime
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
 
-# Consolu UTF-8 ve ANSI renklere ayarla
-os.system('chcp 65001 > nul 2>&1')
-if hasattr(sys.stdout, 'reconfigure'):
-    try:
-        sys.stdout.reconfigure(encoding='utf-8')
-    except Exception:
-        pass
+NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
 
 GREEN = '\033[92m'
 CYAN = '\033[96m'
@@ -30,7 +24,7 @@ RESET = '\033[0m'
 
 def is_git_installed():
     try:
-        res = subprocess.run(["git", "--version"], capture_output=True, text=True, timeout=2, cwd=BASE_DIR)
+        res = subprocess.run(["git", "--version"], capture_output=True, text=True, timeout=2, cwd=BASE_DIR, creationflags=NO_WINDOW)
         return res.returncode == 0
     except Exception:
         return False
@@ -91,10 +85,10 @@ def get_unified_version_info():
         env = os.environ.copy()
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["GIT_SSL_NO_VERIFY"] = "true"
-        subprocess.run(["git", "config", "--global", "--add", "safe.directory", "*"], capture_output=True, text=True, cwd=BASE_DIR)
-        h = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
-        d = subprocess.run(["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%cd", "--date=format:%d.%m.%Y %H:%M", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
-        m = subprocess.run(["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%s", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
+        subprocess.run(["git", "config", "--global", "--add", "safe.directory", "*"], capture_output=True, text=True, cwd=BASE_DIR, creationflags=NO_WINDOW)
+        h = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR, creationflags=NO_WINDOW).stdout.strip()
+        d = subprocess.run(["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%cd", "--date=format:%d.%m.%Y %H:%M", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR, creationflags=NO_WINDOW).stdout.strip()
+        m = subprocess.run(["git", "-c", "http.sslVerify=false", "log", "-1", "--format=%s", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR, creationflags=NO_WINDOW).stdout.strip()
         if h and h != "Bilinmiyor":
             return f"v1.0 ({h})", (d or "Canlı Sürüm"), (m or "Sistem Güncel")
     except Exception:
@@ -134,9 +128,11 @@ def http_fallback_update():
     try:
         import requests
         import urllib3
+        import zipfile
+        import io
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     except ImportError:
-        print(f"  {RED}[HATA] Güncelleme için 'requests' kütüphanesi bulunamadı.{RESET}")
+        print(f"  {RED}[HATA] Güncelleme için gerekli kütüphaneler bulunamadı.{RESET}")
         return False
 
     headers = {
@@ -160,7 +156,6 @@ def http_fallback_update():
         remote_version = str(remote_data.get("version", "v1.0")).strip()
         remote_date = str(remote_data.get("date", "")).strip()
         remote_msg = str(remote_data.get("message", "")).strip()
-        files_to_update = remote_data.get("files", [])
 
         local_vpath = os.path.join(BASE_DIR, "version.json")
         local_commit = ""
@@ -177,19 +172,35 @@ def http_fallback_update():
             print(f"{GREEN}{BOLD} =============================================================={RESET}\n")
             return False
 
-        print(f"\n  {YELLOW}{BOLD}[🔄 GÜNCELLEME BULUNDU] Sürüm {remote_version} indiriliyor...{RESET}")
+        print(f"\n  {YELLOW}{BOLD}[🔄 GÜNCELLEME BULUNDU] Sürüm {remote_version} paketi indiriliyor...{RESET}")
 
-        updated_count = 0
-        for rel_path in files_to_update:
-            raw_url = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/{latest_sha}/{rel_path}?t={timestamp}"
-            file_resp = requests.get(raw_url, verify=False, timeout=15, headers=headers)
+        zip_url = f"https://github.com/mfatih01020/stok_fatih/archive/refs/heads/main.zip?t={timestamp}"
+        zip_resp = requests.get(zip_url, verify=False, timeout=35, headers=headers)
 
-            if file_resp.status_code == 200:
-                dest_path = os.path.join(BASE_DIR, rel_path.replace("/", os.sep))
+        if zip_resp.status_code != 200:
+            print(f"  {RED}[HATA] Güncelleme paketi indirilemedi (HTTP {zip_resp.status_code}){RESET}")
+            return False
+
+        ignored_extensions = ('.db', '.sqlite', '.sqlite3')
+        ignored_filenames = ('cikis_kayitlari.db', 'stok_takip.db', 'bakanlik_giris_bilgileri.txt', 'msedgedriver.exe', 'chromedriver.exe')
+
+        with zipfile.ZipFile(io.BytesIO(zip_resp.content)) as zf:
+            for member in zf.infolist():
+                if member.is_dir():
+                    continue
+                parts = member.filename.split('/', 1)
+                if len(parts) < 2:
+                    continue
+                rel_path = parts[1]
+
+                filename = os.path.basename(rel_path)
+                if filename in ignored_filenames or filename.endswith(ignored_extensions) or rel_path.startswith('.git/'):
+                    continue
+
+                dest_path = os.path.join(BASE_DIR, rel_path.replace('/', os.sep))
                 os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-                with open(dest_path, "wb") as f:
-                    f.write(file_resp.content)
-                updated_count += 1
+                with zf.open(member) as source, open(dest_path, "wb") as target:
+                    target.write(source.read())
 
         with open(local_vpath, "w", encoding="utf-8") as f:
             json.dump(remote_data, f, ensure_ascii=False, indent=2)
@@ -197,7 +208,7 @@ def http_fallback_update():
         clear_pycache()
 
         print(f"\n{GREEN}{BOLD} =============================================================={RESET}")
-        print(f"{GREEN}{BOLD}  🟢 [BAŞARILI] Sistem {remote_version} sürümüne güncellendi.{RESET}")
+        print(f"{GREEN}{BOLD}  🟢 [BAŞARILI] Tüm yeni dosyalar entegre edilerek {remote_version} sürümüne güncellendi.{RESET}")
         print(f"{WHITE}{BOLD}  📦 Sürüm: {remote_version} ({remote_commit}) | {remote_date}{RESET}")
         print(f"{WHITE}  📝 Not  : {remote_msg}{RESET}")
         print(f"{GREEN}{BOLD} =============================================================={RESET}\n")
@@ -224,20 +235,20 @@ def force_update():
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["GIT_ASKPASS"] = "echo"
         env["GIT_SSL_NO_VERIFY"] = "true"
-        subprocess.run(["git", "config", "--global", "--add", "safe.directory", "*"], capture_output=True, text=True, cwd=BASE_DIR)
+        subprocess.run(["git", "config", "--global", "--add", "safe.directory", "*"], capture_output=True, text=True, cwd=BASE_DIR, creationflags=NO_WINDOW)
 
         print(f"  {CYAN}[1/2] Sunucu kontrol ediliyor...{RESET}")
         repo_url = "https://github.com/mfatih01020/stok_fatih.git"
-        fetch_res = subprocess.run(["git", "-c", "http.sslVerify=false", "fetch", repo_url, "main", "--force"], capture_output=True, text=True, timeout=20, env=env, cwd=BASE_DIR)
+        fetch_res = subprocess.run(["git", "-c", "http.sslVerify=false", "fetch", repo_url, "main", "--force"], capture_output=True, text=True, timeout=20, env=env, cwd=BASE_DIR, creationflags=NO_WINDOW)
 
         if fetch_res.returncode == 0:
-            local_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
-            remote_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "FETCH_HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR).stdout.strip()
+            local_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR, creationflags=NO_WINDOW).stdout.strip()
+            remote_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "FETCH_HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR, creationflags=NO_WINDOW).stdout.strip()
 
             if remote_hash and (local_hash != remote_hash or local_hash == "Bilinmiyor" or not local_hash):
                 print(f"\n  {YELLOW}{BOLD}[🔄 GÜNCELLEME BULUNDU] Yeni sürüm yükleniyor...{RESET}")
-                subprocess.run(["git", "-c", "http.sslVerify=false", "checkout", "-B", "main", "FETCH_HEAD", "--force"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
-                subprocess.run(["git", "-c", "http.sslVerify=false", "reset", "--hard", "FETCH_HEAD"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR)
+                subprocess.run(["git", "-c", "http.sslVerify=false", "checkout", "-B", "main", "FETCH_HEAD", "--force"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR, creationflags=NO_WINDOW)
+                subprocess.run(["git", "-c", "http.sslVerify=false", "reset", "--hard", "FETCH_HEAD"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR, creationflags=NO_WINDOW)
                 clear_pycache()
 
                 new_hash, new_date, new_msg = get_unified_version_info()
