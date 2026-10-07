@@ -21,8 +21,95 @@ console.log("QR Compare app.js loading...");
         }
     });
 
-    window.addEventListener('focus', sendHeartbeat);
+// ── Startup Auto Update Engine ──────────────────────────────────────────────
+(function checkStartupAutoUpdate() {
+    if (sessionStorage.getItem('app_update_checked')) return;
+    sessionStorage.setItem('app_update_checked', '1');
+
+    fetch('/api/system/check_update')
+        .then(res => res.json())
+        .then(data => {
+            if (data && data.has_update) {
+                showUpdateLoadingScreen(data);
+            }
+        })
+        .catch(err => console.warn("Startup update check error:", err));
 })();
+
+function showUpdateLoadingScreen(updateInfo) {
+    let overlay = document.getElementById('startupUpdateOverlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'startupUpdateOverlay';
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            background: #0f172a;
+            color: #ffffff;
+            z-index: 999999;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Outfit', 'Inter', sans-serif;
+            text-align: center;
+            padding: 20px;
+        `;
+        overlay.innerHTML = `
+            <div style="background: rgba(30, 41, 59, 0.95); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 24px; padding: 40px 30px; max-width: 480px; width: 90%; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.7); backdrop-filter: blur(10px);">
+                <div style="width: 80px; height: 80px; margin: 0 auto 24px; background: rgba(56, 189, 248, 0.1); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                    <i class="fa-solid fa-cloud-arrow-down fa-bounce" style="font-size: 38px; color: #38bdf8;"></i>
+                </div>
+                <h2 style="font-size: 1.6rem; font-weight: 700; margin-bottom: 12px; color: #f8fafc;">Uygulama Güncelleme Alıyor</h2>
+                <p id="updateStatusMsg" style="font-size: 0.95rem; color: #94a3b8; line-height: 1.6; margin-bottom: 24px;">
+                    Yeni sürüm (${updateInfo.remote_version || 'Gelişmiş Sürüm'}) algılandı. Güncelleme paketleri indiriliyor, lütfen bekleyin...
+                </p>
+                <div style="width: 100%; height: 8px; background: #334155; border-radius: 999px; overflow: hidden; position: relative;">
+                    <div id="updateProgressBar" style="width: 40%; height: 100%; background: linear-gradient(90deg, #38bdf8, #3b82f6); border-radius: 999px; transition: width 0.4s ease; animation: updateProgressAnim 1.8s infinite linear;"></div>
+                </div>
+                <p style="font-size: 0.8rem; color: #64748b; margin-top: 18px; font-weight: 500;">
+                    <i class="fa-solid fa-circle-info" style="color: #38bdf8; margin-right: 4px;"></i> İşlem tamamlanınca uygulama yeni sürümüyle yeniden başlayacaktır.
+                </p>
+            </div>
+            <style>
+                @keyframes updateProgressAnim {
+                    0% { transform: translateX(-100%); width: 30%; }
+                    50% { width: 60%; }
+                    100% { transform: translateX(350%); width: 30%; }
+                }
+            </style>
+        `;
+        document.body.appendChild(overlay);
+    }
+
+    fetch('/api/system/apply_update', { method: 'POST' })
+        .then(res => res.json())
+        .then(resData => {
+            const msgEl = document.getElementById('updateStatusMsg');
+            const barEl = document.getElementById('updateProgressBar');
+            if (barEl) {
+                barEl.style.animation = 'none';
+                barEl.style.width = '100%';
+            }
+            if (msgEl) {
+                msgEl.style.color = '#4ade80';
+                msgEl.innerHTML = '<strong>✅ Güncelleme başarıyla tamamlandı!</strong><br>Uygulama güncel haliyle otomatik yeniden başlatılıyor...';
+            }
+            setTimeout(() => {
+                window.location.reload(true);
+            }, 1800);
+        })
+        .catch(err => {
+            const msgEl = document.getElementById('updateStatusMsg');
+            if (msgEl) {
+                msgEl.style.color = '#f87171';
+                msgEl.textContent = "Güncelleme sırasında bir aksaklık oluştu, uygulama normal modda başlatılıyor...";
+            }
+            setTimeout(() => {
+                if (overlay) overlay.remove();
+            }, 2500);
+        });
+}
 
 // Global state
 window.shelfKoliMap = window.shelfKoliMap || new Map();
