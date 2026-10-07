@@ -1,8 +1,8 @@
 {
-  "version": "v3.1.1",
-  "commit": "3.1.1",
+  "version": "v3.1.2",
+  "commit": "3.1.2",
   "date": "08.10.2026",
-  "message": "v3.1.1: Waitress çoklu iş parçacığı mimarisi, arka plan asenkron BKST veri çekme, oturum güvenliği ve stabilite güncellemeleri",
+  "message": "v3.1.2: Otomatik açılış güncellemesi, güvenli oturum yönetimi ve kararlılık geliştirmeleri",
   "files": [
     ".gitignore",
     "Calistir.bat",

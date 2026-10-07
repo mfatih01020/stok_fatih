@@ -142,11 +142,11 @@ def get_version_info():
         try:
             with open(v_path, "r", encoding="utf-8") as f:
                 v_data = json.load(f)
-                v_code = v_data.get("version", "v3.1.1")
+                v_code = v_data.get("version", "v3.1.2")
                 return {
                     "success": True,
-                    "version": f"{v_code} ({v_data.get('commit', '3.1.1')})",
-                    "commit_hash": f"{v_code} ({v_data.get('commit', '3.1.1')})",
+                    "version": f"{v_code} ({v_data.get('commit', '3.1.2')})",
+                    "commit_hash": f"{v_code} ({v_data.get('commit', '3.1.2')})",
                     "commit_date": v_data.get("date", "08.10.2026"),
                     "commit_msg": v_data.get("message", f"{v_code} Sürümü")
                 }
@@ -155,10 +155,10 @@ def get_version_info():
 
     return {
         "success": True,
-        "version": "v3.1.1",
-        "commit_hash": "v3.1.1",
+        "version": "v3.1.2",
+        "commit_hash": "v3.1.2",
         "commit_date": "08.10.2026",
-        "commit_msg": "v3.1.1 Sürümü"
+        "commit_msg": "v3.1.2 Sürümü"
     }
 
 @app.route('/api/system/heartbeat', methods=['POST', 'GET'])
@@ -413,13 +413,13 @@ def inject_global_template_vars():
                 pass
         user_name = clean_user_name(user_name or username)
 
-    version_str = "v3.1.1"
+    version_str = "v3.1.2"
     v_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.json")
     if os.path.exists(v_path):
         try:
             with open(v_path, "r", encoding="utf-8") as f:
                 v_data = json.load(f)
-                v_code = v_data.get("version", "3.1.1")
+                v_code = v_data.get("version", "3.1.2")
                 if not str(v_code).startswith("v"):
                     version_str = f"v{v_code}"
                 else:

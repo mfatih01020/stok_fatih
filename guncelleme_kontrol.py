@@ -42,8 +42,8 @@ def get_unified_version_info():
     Sürüm bilgisini version.json dosyasından ve git geçmişinden birleştirerek sunar.
     Tek Gerçeklik Kaynağı: version.json
     """
-    v_code = "v3.1.1"
-    v_commit = "3.1.1"
+    v_code = "v3.1.2"
+    v_commit = "3.1.2"
     v_date = "08.10.2026"
     v_msg = "Sistem Güncel"
 
@@ -52,8 +52,8 @@ def get_unified_version_info():
         try:
             with open(v_path, "r", encoding="utf-8") as f:
                 v_data = json.load(f)
-                v_code = v_data.get("version", "v3.1.1")
-                v_commit = v_data.get("commit", "3.1.1")
+                v_code = v_data.get("version", "v3.1.2")
+                v_commit = v_data.get("commit", "3.1.2")
                 v_date = v_data.get("date", "08.10.2026")
                 v_msg = v_data.get("message", f"{v_code} Sürümü")
         except Exception:
