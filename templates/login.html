@@ -234,8 +234,107 @@
                 fetch('/api/system/heartbeat', { method: 'POST' }).catch(() => {});
             }
             sendPing();
-            setInterval(sendPing, 3000);
+            setInterval(sendPing, 10000);
         })();
+
+        // İlk Açılışta Arka Plan Güncelleme Kontrolü (Login Formu Öncesi)
+        (async function checkLoginStartupUpdate() {
+            try {
+                const res = await fetch('/api/system/check_update');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data && data.has_update) {
+                        showLoginUpdateOverlay(data);
+                    }
+                }
+            } catch (e) {
+                console.warn("Login update check error:", e);
+            }
+        })();
+
+        function showLoginUpdateOverlay(updateInfo) {
+            let overlay = document.getElementById('loginUpdateOverlay');
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'loginUpdateOverlay';
+                overlay.style.cssText = `
+                    position: fixed;
+                    top: 0; left: 0; width: 100vw; height: 100vh;
+                    background: #0f172a;
+                    color: #ffffff;
+                    z-index: 9999999;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    font-family: 'Outfit', 'Inter', sans-serif;
+                    text-align: center;
+                    padding: 20px;
+                `;
+                overlay.innerHTML = `
+                    <div style="background: rgba(30, 41, 59, 0.95); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 24px; padding: 40px 32px; max-width: 480px; width: 90%; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.8); backdrop-filter: blur(12px);">
+                        <div style="width: 80px; height: 80px; margin: 0 auto 20px; background: rgba(56, 189, 248, 0.12); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                            <i class="fa-solid fa-cloud-arrow-down fa-bounce" style="font-size: 38px; color: #38bdf8;"></i>
+                        </div>
+                        <h2 style="font-size: 1.55rem; font-weight: 800; margin-bottom: 10px; color: #f8fafc;">Uygulama Güncelleniyor</h2>
+                        <p id="loginUpdateMsg" style="font-size: 0.95rem; color: #94a3b8; line-height: 1.6; margin-bottom: 24px;">
+                            Yeni sürüm (${updateInfo.remote_version || 'v3.1.x'}) tespit edildi. Güncelleme paketleri indiriliyor ve sisteme entegre ediliyor...
+                        </p>
+                        <div style="width: 100%; height: 8px; background: #334155; border-radius: 999px; overflow: hidden; position: relative;">
+                            <div id="loginUpdateBar" style="width: 45%; height: 100%; background: linear-gradient(90deg, #38bdf8, #3b82f6); border-radius: 999px; transition: width 0.4s ease; animation: updateProgressAnim 1.8s infinite linear;"></div>
+                        </div>
+                        <p id="loginUpdateSub" style="font-size: 0.82rem; color: #64748b; margin-top: 18px; font-weight: 500;">
+                            <i class="fa-solid fa-circle-info" style="color: #38bdf8; margin-right: 4px;"></i> İşlem tamamlandığında program sıfırdan otomatik başlatılacaktır.
+                        </p>
+                    </div>
+                    <style>
+                        @keyframes updateProgressAnim {
+                            0% { transform: translateX(-100%); width: 30%; }
+                            50% { width: 60%; }
+                            100% { transform: translateX(350%); width: 30%; }
+                        }
+                    </style>
+                `;
+                document.body.appendChild(overlay);
+            }
+
+            fetch('/api/system/apply_update', { method: 'POST' })
+                .then(res => res.json())
+                .then(async data => {
+                    const msgEl = document.getElementById('loginUpdateMsg');
+                    const barEl = document.getElementById('loginUpdateBar');
+                    const subEl = document.getElementById('loginUpdateSub');
+
+                    if (data.success && data.updated) {
+                        if (barEl) {
+                            barEl.style.animation = 'none';
+                            barEl.style.width = '100%';
+                        }
+                        if (msgEl) {
+                            msgEl.style.color = '#4ade80';
+                            msgEl.innerHTML = '<strong>✅ Güncelleme Başarıyla Tamamlandı!</strong><br>Program sıfırdan yeniden başlatılıyor...';
+                        }
+                        if (subEl) subEl.textContent = 'Yeni sistem yükleniyor, lütfen bekleyin...';
+
+                        await new Promise(r => setTimeout(r, 2200));
+                        for (let i = 0; i < 30; i++) {
+                            await new Promise(r => setTimeout(r, 800));
+                            try {
+                                const ping = await fetch('/api/system/heartbeat', { method: 'POST' });
+                                if (ping.ok) break;
+                            } catch (_) {}
+                        }
+                        window.location.reload(true);
+                    } else {
+                        if (msgEl) msgEl.textContent = data.message || "Sistem zaten güncel.";
+                        setTimeout(() => { if (overlay) overlay.remove(); }, 1200);
+                    }
+                })
+                .catch(err => {
+                    console.error("Login apply update error:", err);
+                    setTimeout(() => { if (overlay) overlay.remove(); }, 2000);
+                });
+        }
     </script>
 </body>
 </html>

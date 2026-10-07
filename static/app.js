@@ -85,94 +85,119 @@ window.apiFetch = window.fetch;
     });
 })();
 
-// ── Startup Auto Update Engine ──────────────────────────────────────────────
-(function checkStartupAutoUpdate() {
-    if (sessionStorage.getItem('app_update_checked')) return;
-    sessionStorage.setItem('app_update_checked', '1');
-
-    fetch('/api/system/check_update')
-        .then(res => res.json())
-        .then(data => {
-            if (data && data.has_update) {
-                showUpdateLoadingScreen(data);
-            }
-        })
-        .catch(err => console.warn("Startup update check error:", err));
-})();
-
-function showUpdateLoadingScreen(updateInfo) {
-    let overlay = document.getElementById('startupUpdateOverlay');
-    if (!overlay) {
-        overlay = document.createElement('div');
-        overlay.id = 'startupUpdateOverlay';
-        overlay.style.cssText = `
-            position: fixed;
-            top: 0; left: 0; width: 100vw; height: 100vh;
-            background: #0f172a;
-            color: #ffffff;
-            z-index: 999999;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            font-family: 'Outfit', 'Inter', sans-serif;
-            text-align: center;
-            padding: 20px;
-        `;
-        overlay.innerHTML = `
-            <div style="background: rgba(30, 41, 59, 0.95); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 24px; padding: 40px 30px; max-width: 480px; width: 90%; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.7); backdrop-filter: blur(10px);">
-                <div style="width: 80px; height: 80px; margin: 0 auto 24px; background: rgba(56, 189, 248, 0.1); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
-                    <i class="fa-solid fa-cloud-arrow-down fa-bounce" style="font-size: 38px; color: #38bdf8;"></i>
-                </div>
-                <h2 style="font-size: 1.6rem; font-weight: 700; margin-bottom: 12px; color: #f8fafc;">Uygulama Güncelleme Alıyor</h2>
-                <p id="updateStatusMsg" style="font-size: 0.95rem; color: #94a3b8; line-height: 1.6; margin-bottom: 24px;">
-                    Yeni sürüm (${updateInfo.remote_version || 'Gelişmiş Sürüm'}) algılandı. Güncelleme paketleri indiriliyor, lütfen bekleyin...
-                </p>
-                <div style="width: 100%; height: 8px; background: #334155; border-radius: 999px; overflow: hidden; position: relative;">
-                    <div id="updateProgressBar" style="width: 40%; height: 100%; background: linear-gradient(90deg, #38bdf8, #3b82f6); border-radius: 999px; transition: width 0.4s ease; animation: updateProgressAnim 1.8s infinite linear;"></div>
-                </div>
-                <p style="font-size: 0.8rem; color: #64748b; margin-top: 18px; font-weight: 500;">
-                    <i class="fa-solid fa-circle-info" style="color: #38bdf8; margin-right: 4px;"></i> İşlem tamamlanınca uygulama yeni sürümüyle yeniden başlayacaktır.
-                </p>
-            </div>
-            <style>
-                @keyframes updateProgressAnim {
-                    0% { transform: translateX(-100%); width: 30%; }
-                    50% { width: 60%; }
-                    100% { transform: translateX(350%); width: 30%; }
-                }
-            </style>
-        `;
-        document.body.appendChild(overlay);
+// ── Unified Startup Auto Update Engine ───────────────────────────────────────
+async function performStartupUpdateCheck() {
+    try {
+        const res = await fetch('/api/system/check_update');
+        if (!res.ok) return false;
+        const data = await res.json();
+        if (data && data.has_update) {
+            console.log("Startup Update Found:", data);
+            await showUpdateScreenAndApply(data);
+            return true;
+        }
+    } catch (e) {
+        console.warn("Startup update check error:", e);
     }
+    return false;
+}
 
-    fetch('/api/system/apply_update', { method: 'POST' })
-        .then(res => res.json())
-        .then(resData => {
-            const msgEl = document.getElementById('updateStatusMsg');
-            const barEl = document.getElementById('updateProgressBar');
-            if (barEl) {
-                barEl.style.animation = 'none';
-                barEl.style.width = '100%';
-            }
-            if (msgEl) {
-                msgEl.style.color = '#4ade80';
-                msgEl.innerHTML = '<strong>✅ Güncelleme başarıyla tamamlandı!</strong><br>Uygulama güncel haliyle otomatik yeniden başlatılıyor...';
-            }
-            setTimeout(() => {
-                window.location.reload(true);
-            }, 1800);
-        })
-        .catch(err => {
-            const msgEl = document.getElementById('updateStatusMsg');
-            if (msgEl) {
-                msgEl.style.color = '#f87171';
-                msgEl.textContent = "Güncelleme sırasında bir aksaklık oluştu, uygulama normal modda başlatılıyor...";
-            }
-            setTimeout(() => {
-                if (overlay) overlay.remove();
-            }, 2500);
-        });
+function showUpdateScreenAndApply(updateInfo) {
+    return new Promise(resolve => {
+        let overlay = document.getElementById('startupUpdateOverlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'startupUpdateOverlay';
+            overlay.style.cssText = `
+                position: fixed;
+                top: 0; left: 0; width: 100vw; height: 100vh;
+                background: #0f172a;
+                color: #ffffff;
+                z-index: 9999999;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                font-family: 'Outfit', 'Inter', sans-serif;
+                text-align: center;
+                padding: 20px;
+            `;
+            overlay.innerHTML = `
+                <div style="background: rgba(30, 41, 59, 0.95); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 24px; padding: 40px 32px; max-width: 480px; width: 90%; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.8); backdrop-filter: blur(12px);">
+                    <div style="width: 80px; height: 80px; margin: 0 auto 20px; background: rgba(56, 189, 248, 0.12); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                        <i class="fa-solid fa-cloud-arrow-down fa-bounce" style="font-size: 38px; color: #38bdf8;"></i>
+                    </div>
+                    <h2 style="font-size: 1.55rem; font-weight: 800; margin-bottom: 10px; color: #f8fafc;">Uygulama Güncelleniyor</h2>
+                    <p id="updateStatusMsg" style="font-size: 0.95rem; color: #94a3b8; line-height: 1.6; margin-bottom: 24px;">
+                        Yeni sürüm (${updateInfo.remote_version || 'v3.1.x'}) tespit edildi. Güncelleme paketleri indiriliyor ve sisteme entegre ediliyor...
+                    </p>
+                    <div style="width: 100%; height: 8px; background: #334155; border-radius: 999px; overflow: hidden; position: relative;">
+                        <div id="updateProgressBar" style="width: 45%; height: 100%; background: linear-gradient(90deg, #38bdf8, #3b82f6); border-radius: 999px; transition: width 0.4s ease; animation: updateProgressAnim 1.8s infinite linear;"></div>
+                    </div>
+                    <p id="updateSubStatus" style="font-size: 0.82rem; color: #64748b; margin-top: 18px; font-weight: 500;">
+                        <i class="fa-solid fa-circle-info" style="color: #38bdf8; margin-right: 4px;"></i> İşlem tamamlandığında program sıfırdan otomatik başlatılacaktır.
+                    </p>
+                </div>
+                <style>
+                    @keyframes updateProgressAnim {
+                        0% { transform: translateX(-100%); width: 30%; }
+                        50% { width: 60%; }
+                        100% { transform: translateX(350%); width: 30%; }
+                    }
+                </style>
+            `;
+            document.body.appendChild(overlay);
+        }
+
+        fetch('/api/system/apply_update', { method: 'POST' })
+            .then(res => res.json())
+            .then(async resData => {
+                const msgEl = document.getElementById('updateStatusMsg');
+                const barEl = document.getElementById('updateProgressBar');
+                const subEl = document.getElementById('updateSubStatus');
+
+                if (resData.success && resData.updated) {
+                    if (barEl) {
+                        barEl.style.animation = 'none';
+                        barEl.style.width = '100%';
+                    }
+                    if (msgEl) {
+                        msgEl.style.color = '#4ade80';
+                        msgEl.innerHTML = '<strong>✅ Güncelleme Başarıyla Tamamlandı!</strong><br>Program sıfırdan yeniden başlatılıyor...';
+                    }
+                    if (subEl) subEl.textContent = 'Yeni sistem yükleniyor, lütfen bekleyin...';
+
+                    // Sunucunun yeni process ile ayağa kalkmasını bekle (Heartbeat Polling)
+                    await new Promise(r => setTimeout(r, 2200));
+                    for (let i = 0; i < 30; i++) {
+                        await new Promise(r => setTimeout(r, 800));
+                        try {
+                            const ping = await fetch('/api/system/heartbeat', { method: 'POST' });
+                            if (ping.ok) break;
+                        } catch (_) {}
+                    }
+                    window.location.reload(true);
+                } else {
+                    if (msgEl) msgEl.textContent = resData.message || "Sistem zaten güncel.";
+                    setTimeout(() => {
+                        if (overlay) overlay.remove();
+                        resolve();
+                    }, 1200);
+                }
+            })
+            .catch(err => {
+                console.error("Apply update error:", err);
+                const msgEl = document.getElementById('updateStatusMsg');
+                if (msgEl) {
+                    msgEl.style.color = '#f87171';
+                    msgEl.textContent = "Güncelleme sırasında bir aksaklık oluştu, normal modda başlatılıyor...";
+                }
+                setTimeout(() => {
+                    if (overlay) overlay.remove();
+                    resolve();
+                }, 2000);
+            });
+    });
 }
 
 // Global state
@@ -1289,72 +1314,20 @@ async function runAutoBkstSync() {
 }
 
 async function checkWebSystemUpdate() {
-    if (sessionStorage.getItem('update_checked')) return;
-    sessionStorage.setItem('update_checked', 'true');
-    try {
-        const res = await fetch('/api/system/check_update');
-        const data = await res.json();
-        if (data && data.has_update) {
-            showUpdateOverlay(data.remote_version || "Yeni Sürüm", data.message || "Sistem güncelleniyor...");
-            await applyWebSystemUpdate();
-        }
-    } catch (e) {
-        console.log("Check update error:", e);
-    }
+    return await performStartupUpdateCheck();
 }
 
-function showUpdateOverlay(version, message) {
-    let overlay = document.getElementById('web-update-overlay');
-    if (!overlay) {
-        overlay = document.createElement('div');
-        overlay.id = 'web-update-overlay';
-        overlay.style.cssText = `
-            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-            background: rgba(15, 23, 42, 0.96); backdrop-filter: blur(12px);
-            z-index: 999999; display: flex; align-items: center; justify-content: center;
-            font-family: 'Inter', sans-serif; color: #fff;
-        `;
-        overlay.innerHTML = `
-            <div style="background: rgba(30, 41, 59, 0.9); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 16px; padding: 2.5rem 3rem; text-align: center; max-width: 480px; width: 90%; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);">
-                <div style="font-size: 3rem; margin-bottom: 1rem;">🔄</div>
-                <h2 style="font-size: 1.3rem; font-weight: 700; margin-bottom: 0.5rem; color: #38bdf8;">SİSTEM GÜNCELLEMESİ YÜKLENİYOR</h2>
-                <p id="web-update-ver" style="font-size: 0.95rem; color: #94a3b8; margin-bottom: 1.5rem;">Sürüm ${version} indiriliyor. Lütfen bekleyin...</p>
-                <div style="width: 100%; height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden;">
-                    <div id="web-update-bar" style="width: 40%; height: 100%; background: linear-gradient(90deg, #38bdf8, #818cf8); border-radius: 4px; transition: width 0.4s ease;"></div>
-                </div>
-            </div>
-        `;
-        document.body.appendChild(overlay);
-    }
-}
-
-async function applyWebSystemUpdate() {
-    const bar = document.getElementById('web-update-bar');
-    const ver = document.getElementById('web-update-ver');
-    if (bar) bar.style.width = '75%';
-    try {
-        const res = await fetch('/api/system/apply_update', { method: 'POST' });
-        const data = await res.json();
-        if (bar) bar.style.width = '100%';
-        if (ver) ver.textContent = "Güncelleme tamamlandı. Yeniden başlatılıyor...";
-        
-        for (let i = 0; i < 30; i++) {
-            await new Promise(r => setTimeout(r, 1000));
-            try {
-                const checkRes = await fetch('/api/system/version');
-                if (checkRes.ok) {
-                    break;
-                }
-            } catch (e) {}
-        }
-        window.location.reload();
-    } catch (e) {
-        console.error("Apply update error:", e);
-    }
-}
-
-function initApp() {
+async function initApp() {
     loadUserInfo();
+
+    // 1. Önce Arka Planda Güncelleme Kontrolü Yap
+    // Eğer güncelleme varsa; Bakanlıktan Veri Çekme modalı ASLA açılmaz, doğrudan Güncelleme Ekranı gelir ve günceller
+    const hasUpdate = await performStartupUpdateCheck();
+    if (hasUpdate) {
+        return;
+    }
+
+    // 2. Güncelleme yoksa normal çalışma akışına geç ve Bakanlık senkronizasyonunu başlat
     runAutoBkstSync();
 }
 

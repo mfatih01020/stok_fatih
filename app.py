@@ -98,6 +98,9 @@ def check_authentication():
         path == '/login' or 
         path == '/api/system/login' or 
         path == '/api/system/user_info' or 
+        path == '/api/system/check_update' or 
+        path == '/api/system/apply_update' or 
+        path == '/api/system/version' or 
         path == '/api/system/heartbeat' or 
         path == '/api/heartbeat'):
         return None
@@ -2507,7 +2510,25 @@ def api_system_apply_update():
         from guncelleme_kontrol import force_update
         updated = force_update()
         if updated:
-            return jsonify({'success': True, 'updated': True, 'message': 'Güncelleme başarıyla yüklendi!'})
+            def _restart_process():
+                time.sleep(1.2)
+                try:
+                    logger.info("Restarting QR-Compare server process after update...")
+                    base_dir = os.path.dirname(os.path.abspath(__file__))
+                    py_dir = os.path.dirname(sys.executable)
+                    pythonw_cand = os.path.join(py_dir, "pythonw.exe")
+                    target_py = pythonw_cand if os.path.exists(pythonw_cand) else sys.executable
+                    flags = 0x08000000 if os.name == 'nt' else 0
+                    if os.name == 'nt':
+                        flags |= 0x00000008
+                    subprocess.Popen([target_py, "app.py"], cwd=base_dir, creationflags=flags)
+                except Exception as ex:
+                    logger.error(f"Restart error: {ex}")
+                finally:
+                    os._exit(0)
+
+            threading.Thread(target=_restart_process, daemon=True).start()
+            return jsonify({'success': True, 'updated': True, 'message': 'Güncelleme başarıyla yüklendi! Program yeniden başlatılıyor...'})
         return jsonify({'success': True, 'updated': False, 'message': 'Sistem zaten güncel.'})
     except Exception as e:
         logger.error(f"Apply update error: {e}", exc_info=True)
