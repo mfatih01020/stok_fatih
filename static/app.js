@@ -1033,22 +1033,23 @@ async function loadUserInfo() {
     try {
         const res = await fetch('/api/system/user_info');
         const data = await res.json();
+        const userNameEl = document.getElementById('sidebar-user-name');
         if (data.unauthenticated) {
+            if (userNameEl) userNameEl.textContent = 'Giriş Yapılmadı';
             if (window.location.pathname !== '/login') {
                 window.location.href = '/login';
             }
             return;
         }
-        if (data.success && data.user_name) {
-            const userNameEl = document.getElementById('sidebar-user-name');
-            if (userNameEl) {
-                const displayName = cleanUserName(data.user_name);
-                userNameEl.textContent = displayName;
-                userNameEl.title = displayName;
-            }
+        if (userNameEl) {
+            const displayName = cleanUserName(data.user_name || data.username || 'Giriş Yapılmadı');
+            userNameEl.textContent = displayName;
+            userNameEl.title = displayName;
         }
     } catch (e) {
         console.error("User info error:", e);
+        const userNameEl = document.getElementById('sidebar-user-name');
+        if (userNameEl) userNameEl.textContent = 'Giriş Yapılmadı';
     }
 }
 

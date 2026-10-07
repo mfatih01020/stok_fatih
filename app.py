@@ -2592,8 +2592,8 @@ def api_system_login():
 def api_system_user_info():
     cred_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bakanlik_giris_bilgileri.txt")
     username, password, address_id, api_key = read_bkst_credentials()
-    if not username or not password:
-        return jsonify({'success': False, 'error': 'Oturum açılmamış.'})
+    if not username:
+        return jsonify({'success': True, 'username': '', 'user_name': 'Giriş Yapılmadı'})
 
     user_name = username
     if os.path.exists(cred_file):
