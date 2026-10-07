@@ -194,6 +194,16 @@ body {
     box-shadow: 0 0 10px var(--success-glow);
 }
 
+.status-indicator.offline {
+    background-color: #ef4444;
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.7);
+}
+
+.status-indicator.fetching {
+    background-color: #f59e0b;
+    box-shadow: 0 0 10px rgba(245, 158, 11, 0.7);
+}
+
 /* Quick Guide Bar (Sade Üst Rehber Barı) */
 .quick-guide-bar {
     display: grid;
@@ -961,6 +971,19 @@ body.sidebar-layout {
     font-size: 0.82rem;
     font-weight: 600;
     color: #34d399;
+    transition: all 0.3s ease;
+}
+
+.system-status-pill.offline {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.35);
+    color: #f87171;
+}
+
+.system-status-pill.fetching {
+    background: rgba(245, 158, 11, 0.12);
+    border-color: rgba(245, 158, 11, 0.35);
+    color: #fbbf24;
 }
 
 .version-pill {

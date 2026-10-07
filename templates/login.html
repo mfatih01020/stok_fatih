@@ -194,6 +194,9 @@
                 const data = await res.json();
 
                 if (data.success) {
+                    if (data.token) {
+                        localStorage.setItem('local_session_token', data.token);
+                    }
                     sessionStorage.clear();
                     showAlert('🟢 Giriş başarılı! Yönlendiriliyorsunuz...', false);
                     setTimeout(() => {

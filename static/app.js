@@ -1,6 +1,47 @@
 // ── QR COMPARE APP.JS ──────────────────────────────────────────────────────
 console.log("QR Compare app.js loading...");
 
+// Native Fetch Interceptor for Automatic Session Token Attachment
+const _nativeFetch = window.fetch;
+window.fetch = async function(resource, init = {}) {
+    init = init || {};
+    const urlStr = typeof resource === 'string' ? resource : (resource && resource.url ? resource.url : '');
+    if (urlStr && urlStr.startsWith('/api/')) {
+        const token = localStorage.getItem('local_session_token');
+        if (token) {
+            if (init.headers instanceof Headers) {
+                if (!init.headers.has('X-Local-Token')) {
+                    init.headers.append('X-Local-Token', token);
+                }
+            } else {
+                init.headers = init.headers || {};
+                if (!init.headers['X-Local-Token']) {
+                    init.headers['X-Local-Token'] = token;
+                }
+            }
+        }
+    }
+    const response = await _nativeFetch(resource, init);
+    if (response.status === 401 && urlStr && urlStr.startsWith('/api/') && !urlStr.startsWith('/api/system/heartbeat') && !urlStr.startsWith('/api/system/user_info')) {
+        window.location.href = '/login';
+    }
+    return response;
+};
+
+// Global Session Authenticated Fetch Wrapper
+window.apiFetch = window.fetch;
+
+(function syncSessionToken() {
+    fetch('/api/system/user_info')
+        .then(res => res.json())
+        .then(data => {
+            if (data && data.token) {
+                localStorage.setItem('local_session_token', data.token);
+            }
+        })
+        .catch(() => {});
+})();
+
 (function initAppWindowControl() {
     if (window.outerWidth < screen.availWidth || window.outerHeight < screen.availHeight) {
         try {
@@ -8,18 +49,41 @@ console.log("QR Compare app.js loading...");
             window.resizeTo(screen.availWidth, screen.availHeight);
         } catch (e) {}
     }
+})();
 
-    const sendHeartbeat = () => {
-        fetch('/api/heartbeat', { method: 'POST' }).catch(() => {});
-    };
-
-    setInterval(sendHeartbeat, 2500);
-
+(function startHeartbeat() {
+    let hbTimer = null;
+    async function sendPing() {
+        try {
+            const res = await window.apiFetch('/api/system/heartbeat', { method: 'POST' });
+            if (res && res.ok) {
+                const data = await res.json();
+                if (data && typeof window.updateSystemStatusPill === 'function') {
+                    if (data.running) {
+                        window.updateSystemStatusPill('fetching', 'Veriler Çekiliyor...');
+                    } else if (data.online === false || data.status === 'offline' || data.status === 'error') {
+                        window.updateSystemStatusPill(false, 'Sistem Deaktif', data.message);
+                    } else if (data.online === true && data.fetched_count > 0) {
+                        window.updateSystemStatusPill(true, 'Sistem Aktif');
+                    }
+                }
+            }
+        } catch (_) {}
+    }
+    function startTimer() {
+        if (hbTimer) return;
+        hbTimer = setInterval(sendPing, 10000);
+    }
+    function stopTimer() {
+        if (hbTimer) { clearInterval(hbTimer); hbTimer = null; }
+    }
+    sendPing();
+    startTimer();
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') {
-            sendHeartbeat();
-        }
+        if (document.hidden) stopTimer();
+        else { sendPing(); startTimer(); }
     });
+})();
 
 // ── Startup Auto Update Engine ──────────────────────────────────────────────
 (function checkStartupAutoUpdate() {
@@ -115,7 +179,6 @@ function showUpdateLoadingScreen(updateInfo) {
 window.shelfKoliMap = window.shelfKoliMap || new Map();
 window.shelfItems = window.shelfItems || [];
 window.scannedQRsInShelf = window.scannedQRsInShelf || new Set();
-window.bkstPollTimer = window.bkstPollTimer || null;
 window.isAuditAllMode = window.isAuditAllMode || false;
 window.allWarehouseItems = window.allWarehouseItems || [];
 
@@ -161,7 +224,6 @@ function setBkstUI(status, message) {
     const bkstBadge  = document.getElementById('bkst-status-badge');
     const bkstMsgBox = document.getElementById('bkst-message-box');
     const btnBkstFetch = document.getElementById('btn-bkst-fetch');
-    const btnBkstClose = document.getElementById('btn-bkst-close');
 
     if (!bkstBadge || !bkstMsgBox) return;
     const info = BADGE_MAP[status] || BADGE_MAP.closed;
@@ -192,61 +254,60 @@ function setBkstUI(status, message) {
     }
 
     if (btnBkstFetch) btnBkstFetch.disabled = !(status === 'ready' || status === 'done');
-    if (btnBkstClose) btnBkstClose.classList.toggle('hidden', status === 'closed');
 }
-
-function startBkstPolling() {
-    if (window.bkstPollTimer) return;
-    window.bkstPollTimer = setInterval(async () => {
-        try {
-            const res  = await fetch('/api/bkst/status');
-            const data = await res.json();
-            setBkstUI(data.status, data.message);
-            if (data.status === 'done' || data.status === 'error' || data.status === 'closed') {
-                clearInterval(window.bkstPollTimer);
-                window.bkstPollTimer = null;
-            }
-        } catch (_) {}
-    }, 2000);
-}
-
-// Global button click triggers
-window.triggerBkstOpen = function() {
-    console.log("triggerBkstOpen called");
-    setBkstUI('opening', 'Bakanlık tarayıcısı açılıyor...');
-
-    fetch('/api/bkst/open', { method: 'POST' })
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                setBkstUI(data.status, data.message);
-                startBkstPolling();
-            } else {
-                setBkstUI('error', data.message || 'Başlatma hatası oluştu.');
-            }
-        })
-        .catch(err => {
-            setBkstUI('error', 'Sunucu ile iletişim kurulamadı: ' + err.message);
-        });
-};
 
 window.triggerBkstFetchApi = function() {
     console.log("triggerBkstFetchApi called");
-    setBkstUI('fetching', '⚡ Bakanlık verileri API üzerinden 2 saniyede çekiliyor...');
+    setBkstUI('fetching', '⚡ Bakanlık verileri API üzerinden çekiliyor...');
+    if (window.updateSystemStatusPill) window.updateSystemStatusPill('fetching', 'Bağlantı Kuruluyor...');
 
-    fetch('/api/bkst/fetch_api', { method: 'POST' })
+    const sidebar = document.querySelector('.sidebar');
+    if (sidebar) sidebar.style.pointerEvents = 'none';
+
+    window.apiFetch('/api/bkst/fetch_api', { method: 'POST' })
         .then(r => r.json())
         .then(data => {
             if (data.success) {
-                setBkstUI('done', data.message);
-                const dlBtn = document.getElementById('btn-bkst-download-excel');
-                if (dlBtn) dlBtn.classList.remove('hidden');
+                let pollAttempts = 0;
+                let statusTimer = setInterval(async () => {
+                    pollAttempts++;
+                    try {
+                        const res = await window.apiFetch('/api/bkst/fetch_status');
+                        const statusData = await res.json();
+                        setBkstUI(statusData.status, statusData.message);
+                        if (!statusData.running || pollAttempts > 45) {
+                            clearInterval(statusTimer);
+                            if (sidebar) sidebar.style.pointerEvents = 'auto';
+
+                            if (statusData.online === true && statusData.fetched_count > 0) {
+                                if (window.updateSystemStatusPill) {
+                                    window.updateSystemStatusPill(true, 'Sistem Aktif', `Bakanlıktan ${statusData.fetched_count} adet stok çekildi.`);
+                                }
+                                const dlBtn = document.getElementById('btn-bkst-download-excel');
+                                if (dlBtn) dlBtn.classList.remove('hidden');
+                            } else {
+                                if (window.updateSystemStatusPill) {
+                                    window.updateSystemStatusPill(false, 'Sistem Deaktif', statusData.message || 'Bakanlık bağlantı sorunu (0 adet veri).');
+                                }
+                                alert(`⚠️ Bakanlık Bağlantı Sorunu: 0 adet veri çekildi!\n\nSistem Deaktif moduna alındı.\n\n${statusData.message || 'Yerel veritabanındaki son kayıtlı stoklar korunuyor.'}`);
+                            }
+                        }
+                    } catch (e) {
+                        clearInterval(statusTimer);
+                        if (sidebar) sidebar.style.pointerEvents = 'auto';
+                        if (window.updateSystemStatusPill) window.updateSystemStatusPill(false, 'Sistem Deaktif', 'Bağlantı hatası');
+                    }
+                }, 1500);
             } else {
                 setBkstUI('error', data.error || 'API veri çekme hatası oluştu.');
+                if (window.updateSystemStatusPill) window.updateSystemStatusPill(false, 'Sistem Deaktif', data.error);
+                if (sidebar) sidebar.style.pointerEvents = 'auto';
             }
         })
         .catch(err => {
             setBkstUI('error', 'Sunucu hatası: ' + err.message);
+            if (window.updateSystemStatusPill) window.updateSystemStatusPill(false, 'Sistem Deaktif', err.message);
+            if (sidebar) sidebar.style.pointerEvents = 'auto';
         });
 };
 
@@ -729,21 +790,9 @@ function formatBytes(bytes, decimals = 2) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
-// Immediate polling start
-startBkstPolling();
-
 // Direct DOM Event Binding
 document.addEventListener('DOMContentLoaded', () => {
-    console.log("DOM loaded, starting status polling and binding event listeners...");
-    startBkstPolling();
-
-    const btnOpen = document.getElementById('btn-bkst-open');
-    if (btnOpen) {
-        btnOpen.addEventListener('click', (e) => {
-            e.preventDefault();
-            window.triggerBkstOpen();
-        });
-    }
+    console.log("DOM loaded, binding event listeners...");
 
     const btnFetch = document.getElementById('btn-bkst-fetch');
     if (btnFetch) {
@@ -905,18 +954,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    const btnBkstClose = document.getElementById('btn-bkst-close');
     const btnAuditResetKoli = document.getElementById('btn-audit-reset-koli');
     const btnAuditExcel = document.getElementById('btn-dl-audit-excel');
     const btnAuditToggleMode = document.getElementById('btn-audit-toggle-mode');
-
-    if (btnBkstClose) {
-        btnBkstClose.addEventListener('click', async () => {
-            if (window.bkstPollTimer) { clearInterval(window.bkstPollTimer); window.bkstPollTimer = null; }
-            await fetch('/api/bkst/close', { method: 'POST' });
-            setBkstUI('closed', '');
-        });
-    }
 
     if (btnAuditToggleMode) {
         btnAuditToggleMode.addEventListener('click', (e) => {
@@ -948,7 +988,7 @@ function loadSystemVersion() {
         .then(r => r.json())
         .then(data => {
             if (data.success) {
-                const verStr = data.version || 'v3.1.0';
+                const verStr = data.version || 'v3.1.1';
                 document.querySelectorAll('#versionText, .version-text').forEach(el => {
                     el.textContent = verStr;
                 });
@@ -958,7 +998,7 @@ function loadSystemVersion() {
                 const m = document.getElementById('modalCommitMsg');
                 if (h) h.textContent = data.commit_hash || verStr;
                 if (d) d.textContent = data.commit_date || '08.10.2026';
-                if (m) m.textContent = data.commit_msg || 'v3.1.0: Tam ekran masaüstü modu, SQLite DB entegrasyonu ve stabilite güncellemeleri';
+                if (m) m.textContent = data.commit_msg || 'v3.1.1: Waitress çoklu iş parçacığı mimarisi, arka plan asenkron BKST veri çekme, oturum güvenliği ve stabilite güncellemeleri';
             }
         })
         .catch(e => console.warn('Version check error:', e));
@@ -983,10 +1023,10 @@ window.showVersionModal = function() {
             <span onclick="closeVersionModal()" style="cursor:pointer; font-size:1.4rem; color:#94a3b8;">&times;</span>
         </div>
         <div style="font-size:0.95rem; line-height:1.8;">
-            <p style="margin:6px 0;"><strong>📦 Sürüm Kodu:</strong> <span id="modalCommitHash" style="color:#38bdf8; font-family:monospace; font-weight:bold;">v3.1.0</span></p>
+            <p style="margin:6px 0;"><strong>📦 Sürüm Kodu:</strong> <span id="modalCommitHash" style="color:#38bdf8; font-family:monospace; font-weight:bold;">v3.1.1</span></p>
             <p style="margin:6px 0;"><strong>📅 Son Güncelleme:</strong> <span id="modalCommitDate" style="color:#f1f5f9;">08.10.2026</span></p>
             <p style="margin:6px 0;"><strong>📝 Son Değişiklik Notu:</strong></p>
-            <div id="modalCommitMsg" style="background:#0f172a; padding:10px 14px; border-radius:8px; font-size:0.85rem; color:#cbd5e1; border:1px solid rgba(255,255,255,0.05); margin-top:4px;">v3.1.0: Tam ekran masaüstü modu, SQLite DB entegrasyonu ve genel stabilite güncellemeleri</div>
+            <div id="modalCommitMsg" style="background:#0f172a; padding:10px 14px; border-radius:8px; font-size:0.85rem; color:#cbd5e1; border:1px solid rgba(255,255,255,0.05); margin-top:4px;">v3.1.1: Waitress çoklu iş parçacığı mimarisi, arka plan asenkron BKST veri çekme, oturum güvenliği ve stabilite güncellemeleri</div>
             <div style="margin-top:16px; background:rgba(34, 197, 94, 0.15); border:1px solid rgba(34, 197, 94, 0.3); color:#4ade80; padding:8px 12px; border-radius:8px; text-align:center; font-size:0.85rem; font-weight:600;">
                 🟢 GitHub Sunucusu ile Eşitlendi & Güncel
             </div>
@@ -1004,20 +1044,6 @@ window.closeVersionModal = function() {
     const modal = document.getElementById('versionModal');
     if (modal) modal.style.display = 'none';
 };
-
-// ── Heartbeat Auto-Shutdown Monitor (Sekme Kapatılınca Sunucu Kapanır) ──────────
-(function startHeartbeat() {
-    function sendPing() {
-        fetch('/api/system/heartbeat', { method: 'POST' }).catch(() => {});
-    }
-    sendPing();
-    setInterval(sendPing, 3000);
-    document.addEventListener('visibilitychange', () => {
-        if (!document.hidden) {
-            sendPing();
-        }
-    });
-})();
 
 function cleanUserName(name) {
     if (!name) return "";
@@ -1081,6 +1107,34 @@ async function logoutUser() {
 
 window.logoutUser = logoutUser;
 
+// ── Sistem Durumu ve Durum Rozeti (Sistem Aktif / Sistem Deaktif) ───────────
+window.updateSystemStatusPill = function(isOnline, statusText, details) {
+    const pills = document.querySelectorAll('.system-status-pill');
+    pills.forEach(pill => {
+        const ind = pill.querySelector('.status-indicator');
+        const textSpan = pill.querySelector('span:not(.status-indicator)');
+        
+        pill.classList.remove('offline', 'fetching');
+        if (ind) ind.classList.remove('online', 'offline', 'fetching');
+        
+        if (isOnline === true) {
+            if (ind) ind.classList.add('online');
+            if (textSpan) textSpan.textContent = statusText || 'Sistem Aktif';
+            pill.title = details || 'Bakanlık bağlantısı aktif, güncel veriler senkronize.';
+        } else if (isOnline === false) {
+            pill.classList.add('offline');
+            if (ind) ind.classList.add('offline');
+            if (textSpan) textSpan.textContent = statusText || 'Sistem Deaktif';
+            pill.title = details || 'Bakanlığa bağlanılamadı. Sistem yerel veritabanı ile deaktif modda çalışıyor.';
+        } else if (isOnline === 'fetching') {
+            pill.classList.add('fetching');
+            if (ind) ind.classList.add('fetching');
+            if (textSpan) textSpan.textContent = statusText || 'Bağlantı Kuruluyor...';
+            pill.title = details || 'Bakanlık verileri güncelleniyor...';
+        }
+    });
+};
+
 // ── Otomatik Bakanlık Veri Senkronizasyonu (Uygulama Açıldığında) ──────────────────────────
 async function runAutoBkstSync() {
     if (window.location.pathname === '/login') return;
@@ -1096,16 +1150,16 @@ async function runAutoBkstSync() {
         loader.id = 'auto-sync-loader';
         loader.style.cssText = 'display:flex; position:fixed; z-index:99999; left:0; top:0; width:100%; height:100%; background:rgba(10, 11, 16, 0.94); backdrop-filter:blur(14px); flex-direction:column; align-items:center; justify-content:center; text-align:center;';
         loader.innerHTML = `
-            <div style="background:rgba(15, 23, 42, 0.96); border:1px solid rgba(56, 189, 248, 0.35); border-radius:24px; padding:2.8rem 3rem; max-width:520px; width:90%; box-shadow:0 25px 50px rgba(0,0,0,0.8); transition: all 0.3s ease;">
+            <div style="background:rgba(15, 23, 42, 0.96); border:1px solid rgba(56, 189, 248, 0.35); border-radius:24px; padding:2.8rem 3rem; max-width:540px; width:92%; box-shadow:0 25px 50px rgba(0,0,0,0.8); transition: all 0.3s ease;">
                 <div id="loader-icon-box" style="width:80px; height:80px; border-radius:50%; background:rgba(56,189,248,0.15); border:2px solid rgba(56,189,248,0.4); margin:0 auto 1.5rem auto; display:flex; align-items:center; justify-content:center; transition: all 0.3s ease;">
                     <i id="loader-icon" class="fa-solid fa-cloud-arrow-down fa-bounce" style="font-size:2.4rem; color:#38bdf8;"></i>
                 </div>
                 <h2 id="loader-title" style="font-family:var(--font-outfit, sans-serif); font-size:1.45rem; font-weight:800; color:#fff; margin:0 0 0.6rem 0;">
                     Bakanlıktan Güncel Veriler Çekiliyor...
                 </h2>
-                <p id="loader-status" style="font-size:0.95rem; color:#94a3b8; margin:0 0 1.6rem 0; line-height:1.6; transition: all 0.3s ease;">
-                    Lütfen bekleyin, BKST sunucusundan güncel stok ve karekod verileriniz otomatik çekiliyor.
-                </p>
+                <div id="loader-status" style="font-size:0.95rem; color:#94a3b8; margin:0 0 1.6rem 0; line-height:1.6; transition: all 0.3s ease;">
+                    Lütfen bekleyin, BKST sunucusundan güncel stok ve karekod verileriniz API üzerinden çekiliyor.
+                </div>
                 <div style="background:rgba(255,255,255,0.06); height:6px; border-radius:10px; overflow:hidden; width:100%;">
                     <div id="loader-progress-bar" style="background:linear-gradient(90deg, #38bdf8, #818cf8); height:100%; width:100%; transition: background 0.4s ease, width 0.4s ease;"></div>
                 </div>
@@ -1122,11 +1176,13 @@ async function runAutoBkstSync() {
     const icon = document.getElementById('loader-icon');
     const progressBar = document.getElementById('loader-progress-bar');
 
-    try {
-        const res = await fetch('/api/bkst/fetch_api', { method: 'POST' });
-        const data = await res.json();
+    window.updateSystemStatusPill('fetching', 'Bağlantı Kuruluyor...');
 
-        if (data.unauthenticated) {
+    try {
+        const startRes = await window.apiFetch('/api/bkst/fetch_api', { method: 'POST' });
+        const startData = await startRes.json();
+
+        if (startData.unauthenticated) {
             if (loader) loader.style.display = 'none';
             if (window.location.pathname !== '/login') {
                 window.location.href = '/login';
@@ -1134,39 +1190,95 @@ async function runAutoBkstSync() {
             return;
         }
 
-        if (data.success) {
-            const count = data.item_count !== undefined ? data.item_count : 0;
-            if (title) title.textContent = "✅ Veriler Başarıyla Çekildi!";
-            if (status) {
-                status.style.color = "#4ade80";
-                status.style.fontWeight = "700";
-                status.style.fontSize = "1.05rem";
-                status.textContent = `Bakanlıktan Toplam ${count} Adet Stok Verisi Çekildi. Sisteme Aktarılıyor...`;
-            }
-            if (iconBox) {
-                iconBox.style.background = "rgba(34, 197, 94, 0.2)";
-                iconBox.style.borderColor = "rgba(34, 197, 94, 0.5)";
-            }
-            if (icon) {
-                icon.className = "fa-solid fa-circle-check";
-                icon.style.color = "#4ade80";
-            }
-            if (progressBar) {
-                progressBar.style.background = "#22c55e";
-            }
-        } else {
-            if (title) title.textContent = "⚠️ Veri Çekilirken Uyarı";
-            if (status) {
-                status.style.color = "#f87171";
-                status.textContent = data.error || "Bakanlık API'sine bağlanılamadı.";
-            }
-        }
+        // 2. setInterval ile her 3 saniyede bir fetch_status sorgula (Maks 100 deneme = 5 dakika)
+        await new Promise((resolve) => {
+            let attempts = 0;
+            const maxAttempts = 100;
+            const pollInterval = setInterval(async () => {
+                attempts++;
+                try {
+                    const sRes = await window.apiFetch('/api/bkst/fetch_status');
+                    if (sRes.ok) {
+                        const statusData = await sRes.json();
+                        if (statusData.message && status) {
+                            status.textContent = statusData.message;
+                        }
 
-        await new Promise(resolve => setTimeout(resolve, 2500));
+                        if (!statusData.running || attempts >= maxAttempts) {
+                            clearInterval(pollInterval);
+
+                            if (statusData.online === true && statusData.fetched_count > 0) {
+                                window.updateSystemStatusPill(true, 'Sistem Aktif', `Bakanlıktan ${statusData.fetched_count} adet stok çekildi.`);
+                                if (title) title.textContent = "Tamamlandı";
+                                if (status) {
+                                    status.style.color = "#4ade80";
+                                    status.style.fontWeight = "700";
+                                    status.style.fontSize = "1.05rem";
+                                    status.textContent = `🟢 Sistem Aktif: Bakanlıktan toplam ${statusData.fetched_count} adet stok verisi çekildi. Sisteme aktarıldı.`;
+                                }
+                                if (iconBox) {
+                                    iconBox.style.background = "rgba(34, 197, 94, 0.2)";
+                                    iconBox.style.borderColor = "rgba(34, 197, 94, 0.5)";
+                                }
+                                if (icon) {
+                                    icon.className = "fa-solid fa-circle-check";
+                                    icon.style.color = "#4ade80";
+                                }
+                                if (progressBar) progressBar.style.background = "#22c55e";
+                                setTimeout(resolve, 2000);
+                            } else {
+                                const failReason = statusData.message || "Bakanlık API'sine bağlanırken sorun oluştu (0 adet veri çekildi).";
+                                const localCount = statusData.local_count || 0;
+                                window.updateSystemStatusPill(false, 'Sistem Deaktif', failReason);
+
+                                if (title) {
+                                    title.textContent = "⚠️ BAKANLIK BAĞLANTI UYARISI";
+                                    title.style.color = "#f87171";
+                                }
+                                if (status) {
+                                    status.style.color = "#fca5a5";
+                                    status.style.fontWeight = "600";
+                                    status.style.fontSize = "0.95rem";
+                                    status.innerHTML = `
+                                        <div style="margin-bottom:0.6rem; color:#ef4444; font-weight:800; font-size:1.05rem;">
+                                            ⚠️ 0 Adet Veri Çekildi (Bakanlığa Bağlanılamadı)!
+                                        </div>
+                                        <div style="color:#cbd5e1; font-size:0.88rem; margin-bottom:0.8rem;">${failReason}</div>
+                                        <div style="padding:0.75rem; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.3); border-radius:10px; color:#fecaca; text-align:left; line-height:1.5;">
+                                            <div style="font-weight:700; color:#f87171; margin-bottom:3px;">🔴 Sistem Durumu: SİSTEM DEAKTİF</div>
+                                            <div style="font-size:0.83rem;">Yerel veritabanındaki son kayıtlı <strong>${localCount}</strong> adet stok verisi korunuyor ve kesintisiz kullanılmaya devam ediliyor.</div>
+                                        </div>
+                                    `;
+                                }
+                                if (iconBox) {
+                                    iconBox.style.background = "rgba(239, 68, 68, 0.2)";
+                                    iconBox.style.borderColor = "rgba(239, 68, 68, 0.5)";
+                                }
+                                if (icon) {
+                                    icon.className = "fa-solid fa-triangle-exclamation";
+                                    icon.style.color = "#ef4444";
+                                }
+                                if (progressBar) progressBar.style.background = "#ef4444";
+                                setTimeout(resolve, 3500);
+                            }
+                        }
+                    }
+                } catch (e) {
+                    if (attempts >= maxAttempts) {
+                        clearInterval(pollInterval);
+                        if (title) title.textContent = "Bağlantı Hatası";
+                        if (status) status.textContent = "Sunucu ile bağlantı kurulamadı veya zaman aşımına uğradı.";
+                        setTimeout(resolve, 2000);
+                    }
+                }
+            }, 3000);
+        });
+
     } catch (err) {
         console.error('Otomatik BKST veri çekme hatası:', err);
-        if (title) title.textContent = "❌ Bağlantı Hatası";
-        if (status) status.textContent = "Sunucu ile bağlantı kurulamadı.";
+        window.updateSystemStatusPill(false, 'Sistem Deaktif', 'Sunucu ile iletişim kurulamadı.');
+        if (title) title.textContent = "Bağlantı Hatası";
+        if (status) status.innerHTML = `<span style="color:#ef4444;">Sunucu ile bağlantı kurulamadı. Sistem Deaktif durumdadır.</span>`;
         await new Promise(resolve => setTimeout(resolve, 2000));
     } finally {
         if (loader) loader.style.display = 'none';
@@ -1243,6 +1355,7 @@ async function applyWebSystemUpdate() {
 
 function initApp() {
     loadUserInfo();
+    runAutoBkstSync();
 }
 
 if (document.readyState === "loading") {

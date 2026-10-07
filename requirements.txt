@@ -4,3 +4,4 @@ openpyxl==3.1.2
 xlrd==2.0.2
 requests==2.31.0
 Werkzeug==3.1.8
+waitress==3.0.0

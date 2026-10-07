@@ -58,9 +58,9 @@
             </nav>
 
             <div class="sidebar-footer">
-                <div class="system-status-pill">
-                    <span class="status-indicator online"></span>
-                    <span>Sistem Aktif</span>
+                <div class="system-status-pill {{ 'offline' if not is_system_active else '' }}">
+                    <span class="status-indicator {{ system_status_cls | default('online') }}"></span>
+                    <span>{{ system_status_text | default('Sistem Aktif') }}</span>
                 </div>
                 <div class="user-profile-card">
                     <div class="user-profile-info">

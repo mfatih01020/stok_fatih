@@ -18,6 +18,7 @@ terek_eksik_urunler_bakanlik_cikis.xlsx
 # Özel Kullanıcı Notları ve Şifreler
 bakanlik_giris_bilgileri.txt
 günlük satışlar.txt
+.session_token
 *.log
 
 # Tarayıcı ve Sürücü Dosyaları (Her Bilgisayarda Otomatik İndirilir)

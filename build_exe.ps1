@@ -69,17 +69,8 @@ public class AppLauncher {
             MaximizeBrowserWindows();
         }
 
-        if (browserProc != null) {
-            try {
-                browserProc.WaitForExit();
-            } catch {}
-        }
-
-        try {
-            if (pythonProc != null && !pythonProc.HasExited) {
-                pythonProc.Kill();
-            }
-        } catch {}
+        // Python sunucusu arka planda bağımsız bir servis olarak çalışmaya devam etmeli.
+        // Tarayıcının hemen dönmesi durumunda sunucu asla kapatılmamalıdır.
     }
 
     private static void MaximizeBrowserWindows() {

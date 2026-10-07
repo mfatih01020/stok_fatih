@@ -1,8 +1,8 @@
 {
-  "version": "v3.1.0",
-  "commit": "3.1.0",
+  "version": "v3.1.1",
+  "commit": "3.1.1",
   "date": "08.10.2026",
-  "message": "v3.1.0: Tam ekran masaüstü modu, SQLite DB entegrasyonu, otomatik kapanma ve stabilite güncellemeleri",
+  "message": "v3.1.1: Waitress çoklu iş parçacığı mimarisi, arka plan asenkron BKST veri çekme, oturum güvenliği ve stabilite güncellemeleri",
   "files": [
     ".gitignore",
     "Calistir.bat",
@@ -23,7 +23,11 @@
     "static/style.css",
     "templates/cikis.html",
     "templates/cikis_listesi.html",
+    "templates/depo_kabul.html",
+    "templates/depo_stoklari.html",
     "templates/index.html",
+    "templates/kullaniciya_satis.html",
+    "templates/login.html",
     "version.json"
   ]
 }

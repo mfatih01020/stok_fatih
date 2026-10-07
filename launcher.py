@@ -42,15 +42,15 @@ def open_as_desktop_app(url="http://127.0.0.1:5000"):
 
 def launch():
     if not is_port_in_use(5000):
-        python_exe = sys.executable
-        if python_exe.endswith("python.exe"):
-            pythonw = os.path.join(os.path.dirname(python_exe), "pythonw.exe")
-            if os.path.exists(pythonw):
-                python_exe = pythonw
+        py_dir = os.path.dirname(sys.executable)
+        pythonw_cand = os.path.join(py_dir, "pythonw.exe")
+        target_py = pythonw_cand if os.path.exists(pythonw_cand) else sys.executable
+        flags = NO_WINDOW
+        if os.name == 'nt':
+            flags |= 0x00000008  # DETACHED_PROCESS
+        subprocess.Popen([target_py, "app.py"], cwd=BASE_DIR, creationflags=flags)
 
-        subprocess.Popen([python_exe, "app.py"], cwd=BASE_DIR, creationflags=NO_WINDOW)
-
-        for _ in range(20):
+        for _ in range(24):
             time.sleep(0.25)
             if is_port_in_use(5000):
                 break
