@@ -235,27 +235,23 @@ def clean_user_name(name):
 
 @app.context_processor
 def inject_global_template_vars():
+    username, password, address_id, api_key = read_bkst_credentials()
     user_name = "Giriş Yapılmadı"
-    cred_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bakanlik_giris_bilgileri.txt")
-    username = ""
-    if os.path.exists(cred_file):
-        try:
-            with open(cred_file, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line_s = line.strip()
-                    if line_s.startswith("KULLANICI="):
-                        username = line_s.split("=", 1)[1].strip()
-                    elif line_s.startswith("KULLANICI_ISIM="):
-                        val = line_s.split("=", 1)[1].strip()
-                        if val:
-                            user_name = val
-        except Exception:
-            pass
-    if username and user_name == "Giriş Yapılmadı":
+    if username:
         user_name = username
-
-    if user_name and user_name != "Giriş Yapılmadı":
-        user_name = clean_user_name(user_name)
+        cred_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bakanlik_giris_bilgileri.txt")
+        if os.path.exists(cred_file):
+            try:
+                with open(cred_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        if line.strip().startswith("KULLANICI_ISIM="):
+                            val = line.strip().split("=", 1)[1].strip()
+                            if val:
+                                user_name = val
+                                break
+            except Exception:
+                pass
+        user_name = clean_user_name(user_name or username)
 
     version_str = "v3.1.0"
     v_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.json")
