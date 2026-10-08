@@ -39,8 +39,8 @@ def clear_pycache():
                 pass
 
 def get_unified_version_info():
-    v_code = "v3.1.2"
-    v_commit = "3.1.2"
+    v_code = "v3.1.3"
+    v_commit = "3.1.3"
     v_date = "08.10.2026"
     v_msg = "Sistem Güncel"
 
@@ -49,8 +49,8 @@ def get_unified_version_info():
         try:
             with open(v_path, "r", encoding="utf-8") as f:
                 v_data = json.load(f)
-                v_code = v_data.get("version", "v3.1.2")
-                v_commit = v_data.get("commit", "3.1.2")
+                v_code = v_data.get("version", "v3.1.3")
+                v_commit = v_data.get("commit", "3.1.3")
                 v_date = v_data.get("date", "08.10.2026")
                 v_msg = v_data.get("message", f"{v_code} Sürümü")
         except Exception:

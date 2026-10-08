@@ -153,11 +153,11 @@ def get_version_info():
         try:
             with open(v_path, "r", encoding="utf-8") as f:
                 v_data = json.load(f)
-                v_code = v_data.get("version", "v3.1.2")
+                v_code = v_data.get("version", "v3.1.3")
                 return {
                     "success": True,
-                    "version": f"{v_code} ({v_data.get('commit', '3.1.2')})",
-                    "commit_hash": f"{v_code} ({v_data.get('commit', '3.1.2')})",
+                    "version": f"{v_code} ({v_data.get('commit', '3.1.3')})",
+                    "commit_hash": f"{v_code} ({v_data.get('commit', '3.1.3')})",
                     "commit_date": v_data.get("date", "08.10.2026"),
                     "commit_msg": v_data.get("message", f"{v_code} Sürümü")
                 }
@@ -166,10 +166,10 @@ def get_version_info():
 
     return {
         "success": True,
-        "version": "v3.1.2",
-        "commit_hash": "v3.1.2",
+        "version": "v3.1.3",
+        "commit_hash": "v3.1.3",
         "commit_date": "08.10.2026",
-        "commit_msg": "v3.1.2 Sürümü"
+        "commit_msg": "v3.1.3 Sürümü"
     }
 
 @app.route('/api/system/heartbeat', methods=['POST', 'GET'])
@@ -387,8 +387,11 @@ def read_bkst_credentials():
                     password = line.split("=", 1)[1].strip()
                 elif line.startswith("ADRES_ID="):
                     raw_id = line.split("=", 1)[1].strip()
-                    if "-" in raw_id:
-                        address_id = raw_id.split("-")[0].strip()
+                    guid_match = re.search(r'([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})', raw_id)
+                    if guid_match:
+                        address_id = guid_match.group(1).strip()
+                    elif " - " in raw_id:
+                        address_id = raw_id.split(" - ")[0].strip()
                     else:
                         address_id = raw_id
                 elif line.startswith("KEY=") or line.startswith("API_KEY="):
@@ -424,13 +427,13 @@ def inject_global_template_vars():
                 pass
         user_name = clean_user_name(user_name or username)
 
-    version_str = "v3.1.2"
+    version_str = "v3.1.3"
     v_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.json")
     if os.path.exists(v_path):
         try:
             with open(v_path, "r", encoding="utf-8") as f:
                 v_data = json.load(f)
-                v_code = v_data.get("version", "3.1.2")
+                v_code = v_data.get("version", "3.1.3")
                 if not str(v_code).startswith("v"):
                     version_str = f"v{v_code}"
                 else:
@@ -1396,17 +1399,24 @@ def _do_fetch_api_worker():
         token2 = token2_match.group(1) if token2_match else token1
 
         gln_guid = address_id
-        r_gln = session.post("https://bkst.tarbil.gov.tr/Partial/GetGLN",
-                             data={"FirmType": "0", "__RequestVerificationToken": token2},
-                             verify=False, timeout=(5, 10))
-        if r_gln.status_code == 200:
-            try:
-                gln_data = r_gln.json()
-                if isinstance(gln_data, list) and len(gln_data) > 0:
-                    gln_guid = str(gln_data[0].get("Value") or "").strip() or gln_guid
-            except Exception:
-                pass
-        if not gln_guid:
+        if not gln_guid or len(gln_guid) < 32:
+            for f_type in ["0", "1", "2"]:
+                try:
+                    r_gln = session.post("https://bkst.tarbil.gov.tr/Partial/GetGLN",
+                                         data={"FirmType": f_type, "__RequestVerificationToken": token2},
+                                         verify=False, timeout=(5, 10))
+                    if r_gln.status_code == 200:
+                        gln_data = r_gln.json()
+                        if isinstance(gln_data, list) and len(gln_data) > 0:
+                            val = str(gln_data[0].get("Value") or "").strip()
+                            if val and len(val) >= 32:
+                                gln_guid = val
+                                break
+                except Exception:
+                    pass
+                if gln_guid and len(gln_guid) >= 32:
+                    break
+        if not gln_guid or len(gln_guid) < 32:
             gln_guid = "8aaf058e-7444-48bb-bd74-4077173fa6a8"
 
         # 4) Stok listesi

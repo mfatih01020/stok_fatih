@@ -1013,7 +1013,7 @@ function loadSystemVersion() {
         .then(r => r.json())
         .then(data => {
             if (data.success) {
-                const verStr = data.version || 'v3.1.2';
+                const verStr = data.version || 'v3.1.3';
                 document.querySelectorAll('#versionText, .version-text').forEach(el => {
                     el.textContent = verStr;
                 });
@@ -1023,7 +1023,7 @@ function loadSystemVersion() {
                 const m = document.getElementById('modalCommitMsg');
                 if (h) h.textContent = data.commit_hash || verStr;
                 if (d) d.textContent = data.commit_date || '08.10.2026';
-                if (m) m.textContent = data.commit_msg || 'v3.1.2: Otomatik açılış güncellemesi, güvenli oturum yönetimi ve kararlılık geliştirmeleri';
+                if (m) m.textContent = data.commit_msg || 'v3.1.3: BKST veri çekme hatası düzeltmesi, şeffaf güncelleme motoru ve kararlılık geliştirmeleri';
             }
         })
         .catch(e => console.warn('Version check error:', e));
@@ -1048,10 +1048,10 @@ window.showVersionModal = function() {
             <span onclick="closeVersionModal()" style="cursor:pointer; font-size:1.4rem; color:#94a3b8;">&times;</span>
         </div>
         <div style="font-size:0.95rem; line-height:1.8;">
-            <p style="margin:6px 0;"><strong>📦 Sürüm Kodu:</strong> <span id="modalCommitHash" style="color:#38bdf8; font-family:monospace; font-weight:bold;">v3.1.2</span></p>
+            <p style="margin:6px 0;"><strong>📦 Sürüm Kodu:</strong> <span id="modalCommitHash" style="color:#38bdf8; font-family:monospace; font-weight:bold;">v3.1.3</span></p>
             <p style="margin:6px 0;"><strong>📅 Son Güncelleme:</strong> <span id="modalCommitDate" style="color:#f1f5f9;">08.10.2026</span></p>
             <p style="margin:6px 0;"><strong>📝 Son Değişiklik Notu:</strong></p>
-            <div id="modalCommitMsg" style="background:#0f172a; padding:10px 14px; border-radius:8px; font-size:0.85rem; color:#cbd5e1; border:1px solid rgba(255,255,255,0.05); margin-top:4px;">v3.1.2: Otomatik açılış güncellemesi, güvenli oturum yönetimi ve kararlılık geliştirmeleri</div>
+            <div id="modalCommitMsg" style="background:#0f172a; padding:10px 14px; border-radius:8px; font-size:0.85rem; color:#cbd5e1; border:1px solid rgba(255,255,255,0.05); margin-top:4px;">v3.1.3: BKST veri çekme hatası düzeltmesi, şeffaf güncelleme motoru ve kararlılık geliştirmeleri</div>
             <div style="margin-top:16px; background:rgba(34, 197, 94, 0.15); border:1px solid rgba(34, 197, 94, 0.3); color:#4ade80; padding:8px 12px; border-radius:8px; text-align:center; font-size:0.85rem; font-weight:600;">
                 🟢 GitHub Sunucusu ile Eşitlendi & Güncel
             </div>
