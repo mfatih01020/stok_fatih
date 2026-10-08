@@ -20,6 +20,7 @@ bakanlik_giris_bilgileri.txt
 günlük satışlar.txt
 .session_token
 *.log
+Hosts_Duzelt.bat
 
 # Tarayıcı ve Sürücü Dosyaları (Her Bilgisayarda Otomatik İndirilir)
 msedgedriver.exe
