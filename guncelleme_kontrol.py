@@ -13,6 +13,15 @@ os.chdir(BASE_DIR)
 
 NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
 
+# Windows Konsolu için ANSI Renk ve UTF-8 Türkçe Karakter Desteğini Aktifleştir
+if os.name == 'nt':
+    try:
+        os.system('')  # Windows VT100 / ANSI escape sequence modunu açar
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
 GREEN = '\033[92m'
 CYAN = '\033[96m'
 YELLOW = '\033[93m'

@@ -1,5 +1,6 @@
 @echo off
 cd /d "%~dp0"
+set PYTHONIOENCODING=utf-8
 chcp 65001 > nul
 title QR Stok Yonetim Sistemi - Guncelleyici
 
@@ -9,6 +10,7 @@ if %errorlevel% neq 0 (
     echo ============================================================
     echo [HATA] Guncelleme islemi basarisiz oldu!
     echo ============================================================
+    echo.
     pause
 )
 exit

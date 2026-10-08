@@ -23,8 +23,19 @@ class SafeStream:
 
 if getattr(sys, 'stdout', None) is None:
     sys.stdout = SafeStream()
+else:
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
 if getattr(sys, 'stderr', None) is None:
     sys.stderr = SafeStream()
+else:
+    try:
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
 
 # ── Logging Configuration ───────────────────────────────────────────────────
 handler = RotatingFileHandler(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'app.log'), maxBytes=5_000_000, backupCount=3, encoding='utf-8')
