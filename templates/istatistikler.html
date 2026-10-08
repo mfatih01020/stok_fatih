@@ -1,0 +1,1347 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>İstatistikler & Satış Raporları - QR Compare</title>
+    
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
+    <link rel="shortcut icon" href="/static/favicon.ico">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/chart.umd.min.js"></script>
+
+    <style>
+        .stats-kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1.25rem;
+            margin-bottom: 2rem;
+        }
+
+        .stats-kpi-card {
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 14px;
+            padding: 1.25rem 1.4rem;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .stats-kpi-card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(16, 185, 129, 0.3);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 0 15px rgba(16, 185, 129, 0.1);
+        }
+
+        .stats-kpi-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--card-accent, #10b981), transparent);
+        }
+
+        .kpi-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0.6rem;
+        }
+
+        .kpi-label {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #94a3b8;
+            font-weight: 600;
+        }
+
+        .kpi-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1rem;
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--card-accent, #10b981);
+        }
+
+        .kpi-value {
+            font-family: var(--font-outfit);
+            font-size: 1.85rem;
+            font-weight: 700;
+            color: #fff;
+            line-height: 1.2;
+            margin-bottom: 0.25rem;
+        }
+
+        .kpi-sub {
+            font-size: 0.78rem;
+            color: #64748b;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .kpi-sub .badge-pill {
+            padding: 0.15rem 0.45rem;
+            border-radius: 6px;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+
+        /* Filter Toolbar */
+        .filter-toolbar {
+            background: rgba(15, 23, 42, 0.65);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 14px;
+            padding: 1rem 1.4rem;
+            margin-bottom: 1.75rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .year-pills {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            flex-wrap: wrap;
+        }
+
+        .year-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #cbd5e1;
+            padding: 0.45rem 0.9rem;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .year-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            border-color: rgba(255, 255, 255, 0.25);
+        }
+
+        .year-btn.active {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            border-color: #10b981;
+            color: #fff;
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+        }
+
+        .custom-date-box {
+            display: none;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .custom-date-box.show {
+            display: flex;
+        }
+
+        .date-input {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #fff;
+            padding: 0.45rem 0.75rem;
+            border-radius: 8px;
+            font-size: 0.82rem;
+            font-family: inherit;
+            outline: none;
+        }
+
+        .date-input:focus {
+            border-color: #10b981;
+        }
+
+        .action-btns {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            flex-wrap: wrap;
+        }
+
+        .btn-act {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-decoration: none;
+            border: none;
+        }
+
+        .btn-excel {
+            background: linear-gradient(135deg, #059669 0%, #047857 100%);
+            color: #fff;
+            box-shadow: 0 4px 12px rgba(5, 150, 105, 0.25);
+        }
+
+        .btn-excel:hover {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            box-shadow: 0 6px 16px rgba(16, 185, 129, 0.35);
+        }
+
+        .btn-print {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #e2e8f0;
+        }
+
+        .btn-print:hover {
+            background: rgba(255, 255, 255, 0.15);
+            color: #fff;
+        }
+
+        .btn-sample {
+            background: rgba(99, 102, 241, 0.15);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            color: #a5b4fc;
+        }
+
+        .btn-sample:hover {
+            background: rgba(99, 102, 241, 0.25);
+            color: #c7d2fe;
+        }
+
+        /* Charts Grid */
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(480px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        @media (max-width: 992px) {
+            .charts-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .chart-box {
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 14px;
+            padding: 1.4rem;
+            position: relative;
+        }
+
+        .chart-box-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1.2rem;
+        }
+
+        .chart-title {
+            font-family: var(--font-outfit);
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: #f1f5f9;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .chart-subtitle {
+            font-size: 0.78rem;
+            color: #64748b;
+        }
+
+        .chart-canvas-container {
+            position: relative;
+            height: 280px;
+            width: 100%;
+        }
+
+        /* Table Section */
+        .stats-table-section {
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 14px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .tab-nav {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            margin-bottom: 1.25rem;
+            padding-bottom: 0.5rem;
+        }
+
+        .tab-btn {
+            background: transparent;
+            border: none;
+            color: #94a3b8;
+            padding: 0.6rem 1.1rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .tab-btn:hover {
+            color: #fff;
+            background: rgba(255, 255, 255, 0.04);
+        }
+
+        .tab-btn.active {
+            color: #10b981;
+            background: rgba(16, 185, 129, 0.1);
+        }
+
+        .table-responsive {
+            overflow-x: auto;
+        }
+
+        .stats-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 0.88rem;
+        }
+
+        .stats-table th {
+            background: rgba(0, 0, 0, 0.25);
+            color: #94a3b8;
+            font-weight: 600;
+            text-align: left;
+            padding: 0.85rem 1rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            white-space: nowrap;
+        }
+
+        .stats-table td {
+            padding: 0.85rem 1rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            color: #e2e8f0;
+            vertical-align: middle;
+        }
+
+        .stats-table tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .progress-bar-wrap {
+            width: 100px;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 999px;
+            overflow: hidden;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 0.5rem;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #10b981, #06b6d4);
+            border-radius: 999px;
+        }
+
+        /* Print Media */
+        @media print {
+            .sidebar, .glass-bg-decor1, .glass-bg-decor2, .filter-toolbar, .tab-nav, .btn-act {
+                display: none !important;
+            }
+            body, .app-wrapper, .main-content {
+                background: #fff !important;
+                color: #000 !important;
+                padding: 0 !important;
+                margin: 0 !important;
+            }
+            .stats-kpi-card, .chart-box, .stats-table-section {
+                border: 1px solid #ccc !important;
+                box-shadow: none !important;
+                background: #fff !important;
+                color: #000 !important;
+            }
+            .kpi-value, .chart-title {
+                color: #000 !important;
+            }
+            .stats-table th {
+                background: #eee !important;
+                color: #000 !important;
+            }
+            .stats-table td {
+                color: #000 !important;
+            }
+        }
+    </style>
+</head>
+<body class="sidebar-layout">
+    <div class="glass-bg-decor1"></div>
+    <div class="glass-bg-decor2"></div>
+    
+    <div class="app-wrapper">
+        <!-- SOL SIDEBAR NAVİGASYON -->
+        <aside class="sidebar">
+            <div class="sidebar-brand">
+                <i class="fa-solid fa-qrcode logo-icon"></i>
+                <div>
+                    <h2>QR Compare</h2>
+                    <p>Akıllı Stok Sistemi</p>
+                </div>
+            </div>
+
+            <nav class="sidebar-menu">
+                <a href="/cikis" class="sidebar-link">
+                    <i class="fa-solid fa-box-open"></i>
+                    <span>Barkod Okut & Çıkış</span>
+                </a>
+                <a href="/cikis-listesi" class="sidebar-link">
+                    <i class="fa-solid fa-list-check"></i>
+                    <span>Çıkış Listesi</span>
+                </a>
+                <a href="/stok-esitleme" class="sidebar-link">
+                    <i class="fa-solid fa-chart-line"></i>
+                    <span>Stok & Eşitleme</span>
+                </a>
+                <a href="/depo_stoklari" class="sidebar-link">
+                    <i class="fa-solid fa-warehouse"></i>
+                    <span>Depomdaki Stoklar</span>
+                </a>
+                <a href="/depo_kabul" class="sidebar-link">
+                    <i class="fa-solid fa-boxes-packing"></i>
+                    <span>Depoya Kabul Et</span>
+                </a>
+                <a href="/istatistikler" class="sidebar-link active">
+                    <i class="fa-solid fa-chart-pie"></i>
+                    <span>İstatistikler & Raporlar</span>
+                </a>
+                <a href="/kullaniciya-satis" class="sidebar-link">
+                    <i class="fa-solid fa-user-tag"></i>
+                    <span>Kullanıcıya Satış (Demo)</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="system-status-pill {{ 'offline' if not is_system_active else '' }}">
+                    <span class="status-indicator {{ system_status_cls | default('online') }}"></span>
+                    <span>{{ system_status_text | default('Sistem Aktif') }}</span>
+                </div>
+                <div class="user-profile-card">
+                    <div class="user-profile-info">
+                        <i class="fa-solid fa-user-circle user-avatar-icon"></i>
+                        <span id="sidebar-user-name" class="user-name-title">{{ current_user_name }}</span>
+                    </div>
+                    <button type="button" class="btn-logout-icon" onclick="logoutUser()" title="Oturumdan Çıkış Yap">
+                        <i class="fa-solid fa-power-off"></i>
+                    </button>
+                </div>
+                <div class="version-pill" id="versionBadge" onclick="showVersionModal()" title="Sürüm Bilgisi">
+                    <i class="fa-solid fa-code-branch" style="color: #38bdf8;"></i>
+                    <span>{{ current_app_version }}</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- ANA İÇERİK ALANI -->
+        <main class="main-content">
+            <!-- Header Bar -->
+            <div class="top-nav-bar" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem; margin-bottom:1.5rem;">
+                <div>
+                    <h1 style="font-family:var(--font-outfit); font-size:1.6rem; font-weight:700; color:#fff; display:flex; align-items:center; gap:0.6rem;">
+                        <i class="fa-solid fa-chart-pie" style="color:#10b981;"></i>
+                        İstatistikler & Satış Raporları
+                    </h1>
+                    <p style="font-size:0.86rem; color:#94a3b8; margin-top:2px;">
+                        Geçmiş yıllar, aylık dağılımlar ve ürün bazlı detaylı çıkış istatistikleri
+                    </p>
+                </div>
+                <div>
+                    <button id="btn-reset-stats-header" style="background: linear-gradient(135deg, #ef4444, #dc2626); color:#fff; border:none; padding:0.65rem 1.3rem; border-radius:10px; font-weight:700; font-size:0.92rem; display:flex; align-items:center; gap:0.55rem; cursor:pointer; box-shadow: 0 4px 14px rgba(239,68,68,0.4);">
+                        <i class="fa-solid fa-trash-can"></i> İstatistikleri Sıfırla
+                    </button>
+                </div>
+            </div>
+
+            <!-- Filter Toolbar -->
+            <div class="filter-toolbar">
+                <div class="year-pills" id="year-pills-container">
+                    <span style="font-size:0.8rem; font-weight:600; color:#64748b; margin-right:0.3rem;"><i class="fa-solid fa-calendar"></i> DÖNEM:</span>
+                    <button class="year-btn active" data-year="tum">Tüm Yıllar</button>
+                    <button class="year-btn" data-year="2026">2026</button>
+                    <button class="year-btn" data-year="2025">2025</button>
+                    <button class="year-btn" data-year="2024">2024</button>
+                    <button class="year-btn" data-year="2023">2023</button>
+                    <button class="year-btn" data-year="custom"><i class="fa-solid fa-sliders"></i> Özel Aralık</button>
+                </div>
+
+                <div class="custom-date-box" id="custom-date-box">
+                    <input type="date" id="input-date-start" class="date-input" title="Başlangıç Tarihi">
+                    <span style="color:#64748b;">-</span>
+                    <input type="date" id="input-date-end" class="date-input" title="Bitiş Tarihi">
+                    <button class="year-btn" id="btn-apply-custom-date" style="background:#10b981; color:#fff; border-color:#10b981;">Filtrele</button>
+                </div>
+
+                <div class="action-btns">
+                    <button class="btn-act btn-excel" id="btn-download-excel" title="Detaylı Excel Raporu İndir">
+                        <i class="fa-solid fa-file-excel"></i> Excel İndir (.xlsx)
+                    </button>
+                    <button class="btn-act btn-print" onclick="window.print()" title="Raporu Yazdır veya PDF olarak kaydet">
+                        <i class="fa-solid fa-print"></i> Yazdır / PDF
+                    </button>
+                    <button class="btn-act btn-sample" id="btn-sample-data" title="2024-2025 yıllarına ait test verisi ekle">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> Örnek Geçmiş Veri
+                    </button>
+                    <button class="btn-act btn-reset" id="btn-reset-stats" style="background:rgba(239, 68, 68, 0.16); border:1px solid rgba(239, 68, 68, 0.4); color:#fca5a5;" title="Kalıcı satış arşivi ve tüm geçmiş istatistik verilerini sıfırla">
+                        <i class="fa-solid fa-trash-can"></i> İstatistikleri Sıfırla
+                    </button>
+                </div>
+            </div>
+
+            <!-- 6 KPI CARDS -->
+            <div class="stats-kpi-grid">
+                <!-- KPI 1 -->
+                <div class="stats-kpi-card" style="--card-accent: #10b981;">
+                    <div class="kpi-head">
+                        <span class="kpi-label">Toplam Çıkış Adedi</span>
+                        <div class="kpi-icon"><i class="fa-solid fa-boxes-stacked"></i></div>
+                    </div>
+                    <div class="kpi-value" id="kpi-total-exits">0</div>
+                    <div class="kpi-sub">
+                        <span>Seçilen dönemdeki toplam ürün</span>
+                    </div>
+                </div>
+
+                <!-- KPI 2 -->
+                <div class="stats-kpi-card" style="--card-accent: #06b6d4;">
+                    <div class="kpi-head">
+                        <span class="kpi-label">Satılan Kalem Çeşidi</span>
+                        <div class="kpi-icon"><i class="fa-solid fa-shapes"></i></div>
+                    </div>
+                    <div class="kpi-value" id="kpi-unique-products">0</div>
+                    <div class="kpi-sub">
+                        <span>Farklı ilaç / ürün çeşidi</span>
+                    </div>
+                </div>
+
+                <!-- KPI 3 -->
+                <div class="stats-kpi-card" style="--card-accent: #f59e0b;">
+                    <div class="kpi-head">
+                        <span class="kpi-label">En Çok Satan Lider Ürün</span>
+                        <div class="kpi-icon"><i class="fa-solid fa-trophy"></i></div>
+                    </div>
+                    <div class="kpi-value" id="kpi-top-product" style="font-size:1.25rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="-">-</div>
+                    <div class="kpi-sub">
+                        <span id="kpi-top-product-count" class="badge-pill" style="background:rgba(245,158,11,0.2); color:#fbbf24;">0 Adet</span>
+                        <span>çıkış ile lider</span>
+                    </div>
+                </div>
+
+                <!-- KPI 4 -->
+                <div class="stats-kpi-card" style="--card-accent: #8b5cf6;">
+                    <div class="kpi-head">
+                        <span class="kpi-label">Koli / Tekil Dağılımı</span>
+                        <div class="kpi-icon"><i class="fa-solid fa-pallet"></i></div>
+                    </div>
+                    <div class="kpi-value" id="kpi-carton-ratio">-%</div>
+                    <div class="kpi-sub">
+                        <span id="kpi-carton-detail">0 Koli / 0 Tekil Kutu</span>
+                    </div>
+                </div>
+
+                <!-- KPI 5 -->
+                <div class="stats-kpi-card" style="--card-accent: #3b82f6;">
+                    <div class="kpi-head">
+                        <span class="kpi-label">Günlük Çıkış Ortalaması</span>
+                        <div class="kpi-icon"><i class="fa-solid fa-bolt"></i></div>
+                    </div>
+                    <div class="kpi-value" id="kpi-daily-avg">0</div>
+                    <div class="kpi-sub">
+                        <span>Kutu / aktif gün başına</span>
+                    </div>
+                </div>
+
+                <!-- KPI 6 -->
+                <div class="stats-kpi-card" style="--card-accent: #ec4899;">
+                    <div class="kpi-head">
+                        <span class="kpi-label">Tekrar Okutma Oranı</span>
+                        <div class="kpi-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
+                    </div>
+                    <div class="kpi-value" id="kpi-repeat-ratio">0%</div>
+                    <div class="kpi-sub">
+                        <span id="kpi-repeat-count">0 mükerrer okutma</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CHARTS GRID -->
+            <div class="charts-grid">
+                <!-- CHART 1: Aylık Satış Dağılımı -->
+                <div class="chart-box">
+                    <div class="chart-box-header">
+                        <div>
+                            <div class="chart-title"><i class="fa-solid fa-chart-column" style="color:#10b981;"></i> Aylık Çıkış Dağılımı</div>
+                            <div class="chart-subtitle" id="chart1-subtitle">Yıl içi 12 ayın satış adetleri</div>
+                        </div>
+                    </div>
+                    <div class="chart-canvas-container">
+                        <canvas id="canvas-monthly"></canvas>
+                    </div>
+                </div>
+
+                <!-- CHART 2: Yıllık Karşılaştırma -->
+                <div class="chart-box">
+                    <div class="chart-box-header">
+                        <div>
+                            <div class="chart-title"><i class="fa-solid fa-chart-line" style="color:#06b6d4;"></i> Yıllık Satış Karşılaştırması</div>
+                            <div class="chart-subtitle">Tüm yıllara ait toplam çıkış trendi</div>
+                        </div>
+                    </div>
+                    <div class="chart-canvas-container">
+                        <canvas id="canvas-yearly"></canvas>
+                    </div>
+                </div>
+
+                <!-- CHART 3: En Çok Satanlar Pazar Payı -->
+                <div class="chart-box">
+                    <div class="chart-box-header">
+                        <div>
+                            <div class="chart-title"><i class="fa-solid fa-chart-pie" style="color:#f59e0b;"></i> En Çok Satan Ürünler Payı</div>
+                            <div class="chart-subtitle">Lider ürünlerin toplam çıkıştaki yüzdesi</div>
+                        </div>
+                    </div>
+                    <div class="chart-canvas-container">
+                        <canvas id="canvas-top-products"></canvas>
+                    </div>
+                </div>
+
+                <!-- CHART 4: Haftanın Günleri -->
+                <div class="chart-box">
+                    <div class="chart-box-header">
+                        <div>
+                            <div class="chart-title"><i class="fa-solid fa-calendar-week" style="color:#8b5cf6;"></i> Gün Bazlı Çıkış Yoğunluğu</div>
+                            <div class="chart-subtitle">Haftanın günlerine göre operasyon dağılımı</div>
+                        </div>
+                    </div>
+                    <div class="chart-canvas-container">
+                        <canvas id="canvas-weekday"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- DETAYLI TABLOLAR & YÖNETİM -->
+            <div class="stats-table-section">
+                <div class="tab-nav">
+                    <button class="tab-btn active" data-tab="tab-products">
+                        <i class="fa-solid fa-list-ol"></i> En Çok Satan Ürünler
+                    </button>
+                    <button class="tab-btn" data-tab="tab-batches">
+                        <i class="fa-solid fa-barcode"></i> Parti / Lot Dağılımı
+                    </button>
+                    <button class="tab-btn" data-tab="tab-monthly-detail">
+                        <i class="fa-solid fa-calendar-days"></i> Aylık Tablo
+                    </button>
+                    <button class="tab-btn" data-tab="tab-import">
+                        <i class="fa-solid fa-file-import"></i> Geçmiş Satış Yükle (Excel)
+                    </button>
+                </div>
+
+                <!-- TAB 1: ÜRÜNLER -->
+                <div class="tab-content" id="tab-products">
+                    <div style="margin-bottom:1rem; display:flex; justify-content:space-between; align-items:center;">
+                        <input type="text" id="input-search-products" placeholder="Ürün adı veya GTIN ile ara..." style="background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); padding:0.5rem 0.9rem; border-radius:8px; color:#fff; font-size:0.85rem; width:280px; outline:none;">
+                        <span style="font-size:0.8rem; color:#64748b;" id="lbl-product-count">0 ürün listeleniyor</span>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="stats-table">
+                            <thead>
+                                <tr>
+                                    <th style="width:50px;">Sıra</th>
+                                    <th>Ürün Adı</th>
+                                    <th>GTIN / Barkod</th>
+                                    <th style="text-align:right;">Toplam Çıkış</th>
+                                    <th style="text-align:center;">Koli Payı</th>
+                                    <th>Pazar Payı</th>
+                                    <th>Son Çıkış Tarihi</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tbody-top-products">
+                                <tr><td colspan="7" style="text-align:center; color:#64748b; padding:2rem;"><i class="fa-solid fa-spinner fa-spin"></i> İstatistikler yükleniyor...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- TAB 2: PARTİ / LOT -->
+                <div class="tab-content" id="tab-batches" style="display:none;">
+                    <div class="table-responsive">
+                        <table class="stats-table">
+                            <thead>
+                                <tr>
+                                    <th style="width:50px;">Sıra</th>
+                                    <th>Parti Numarası</th>
+                                    <th>Ürün Adı</th>
+                                    <th style="text-align:right;">Çıkış Adedi</th>
+                                    <th>Son Kullanma Tarihi (SKT)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tbody-batches">
+                                <tr><td colspan="5" style="text-align:center; color:#64748b; padding:2rem;">Parti verisi yükleniyor...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- TAB 3: AYLIK DETAY -->
+                <div class="tab-content" id="tab-monthly-detail" style="display:none;">
+                    <div class="table-responsive">
+                        <table class="stats-table">
+                            <thead>
+                                <tr>
+                                    <th style="width:60px;">Ay</th>
+                                    <th>Dönem</th>
+                                    <th style="text-align:right;">Çıkış Adedi (Kutu)</th>
+                                    <th>Dönem İçi Payı</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tbody-monthly-detail">
+                                <tr><td colspan="4" style="text-align:center; color:#64748b; padding:2rem;">Aylık veriler yükleniyor...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- TAB 4: EXCEL İLE GEÇMİŞ SATIŞ YÜKLEME -->
+                <div class="tab-content" id="tab-import" style="display:none;">
+                    <div style="max-width:650px; background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:1.5rem;">
+                        <h3 style="font-size:1.05rem; font-weight:600; color:#fff; margin-bottom:0.4rem;">
+                            <i class="fa-solid fa-file-excel" style="color:#10b981;"></i> Eski Yıllara Ait Satışları İçe Aktar
+                        </h3>
+                        <p style="font-size:0.82rem; color:#94a3b8; line-height:1.5; margin-bottom:1.2rem;">
+                            Geçmiş yıllara (2023, 2024, 2025 vb.) ait eski satış kayıtlarınızı Excel formatında sisteme yükleyebilirsiniz. 
+                            Dosyanızda <b>Tarih</b>, <b>Ürün Adı</b>, <b>Barkod/GTIN</b> ve <b>Parti No</b> sütunlarının bulunması yeterlidir.
+                        </p>
+
+                        <div style="display:flex; gap:0.75rem; align-items:center; margin-bottom:1rem;">
+                            <input type="file" id="input-excel-file" accept=".xlsx, .xls" style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.15); padding:0.5rem; border-radius:8px; color:#cbd5e1; font-size:0.85rem; flex:1;">
+                            <button id="btn-upload-excel" class="btn-act btn-excel">
+                                <i class="fa-solid fa-cloud-arrow-up"></i> Yükle ve Aktar
+                            </button>
+                        </div>
+                        <div id="upload-status-msg" style="font-size:0.85rem; margin-top:0.5rem;"></div>
+
+                        <hr style="border:none; border-top:1px solid rgba(255,255,255,0.08); margin:1.5rem 0;">
+
+                        <div style="display:flex; align-items:center; justify-content:space-between;">
+                            <div>
+                                <h4 style="font-size:0.9rem; font-weight:600; color:#cbd5e1;">Test & Demo Geçmiş Verisi</h4>
+                                <p style="font-size:0.78rem; color:#64748b;">2024 ve 2025 yıllarına ait otomatik gerçekçi satış kayıtları oluşturun.</p>
+                            </div>
+                            <div style="display:flex; gap:0.5rem;">
+                                <button id="btn-add-sample-data" class="btn-act btn-sample">
+                                    <i class="fa-solid fa-plus-circle"></i> Örnek Veri Ekle
+                                </button>
+                                <button id="btn-clear-sample-data" class="btn-act" style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.3); color:#f87171;">
+                                    <i class="fa-solid fa-trash-can"></i> Temizle
+                                </button>
+                            </div>
+                        </div>
+
+                        <hr style="border:none; border-top:1px solid rgba(255,255,255,0.08); margin:1.5rem 0;">
+
+                        <div style="display:flex; align-items:center; justify-content:space-between; background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.25); border-radius:10px; padding:1.1rem 1.25rem;">
+                            <div>
+                                <h4 style="font-size:0.92rem; font-weight:700; color:#fca5a5; display:flex; align-items:center; gap:0.45rem;">
+                                    <i class="fa-solid fa-triangle-exclamation"></i> Geçmiş İstatistikleri Sıfırla
+                                </h4>
+                                <p style="font-size:0.78rem; color:#94a3b8; margin-top:3px; line-height:1.4;">
+                                    Kalıcı satış arşivindeki tüm geçmiş istatistik verilerini sıfırlar. Aktif çalışma listeniz bundan etkilenmez.
+                                </p>
+                            </div>
+                            <div>
+                                <button id="btn-reset-stats-tab" class="btn-act" style="background:rgba(239,68,68,0.22); border:1px solid rgba(239,68,68,0.5); color:#fca5a5; font-weight:700; padding:0.6rem 1.1rem; white-space:nowrap;">
+                                    <i class="fa-solid fa-trash-can"></i> Tümünü Sıfırla
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        window.LOCAL_SESSION_TOKEN = "{{ local_session_token }}";
+        if (window.LOCAL_SESSION_TOKEN && window.LOCAL_SESSION_TOKEN !== 'undefined') {
+            localStorage.setItem('local_session_token', window.LOCAL_SESSION_TOKEN);
+        } else if (localStorage.getItem('local_session_token') === 'undefined' || localStorage.getItem('local_session_token') === 'null') {
+            localStorage.removeItem('local_session_token');
+        }
+
+        function getAuthHeaders(extraHeaders = {}) {
+            const token = window.LOCAL_SESSION_TOKEN || localStorage.getItem('local_session_token') || '';
+            const headers = {
+                'X-Requested-With': 'XMLHttpRequest',
+                ...extraHeaders
+            };
+            if (token && token !== 'undefined' && token !== 'null') {
+                headers['X-Local-Token'] = token;
+                headers['X-Session-Token'] = token;
+            }
+            return headers;
+        }
+
+        // Global State
+        let currentYear = 'tum';
+        let customStart = '';
+        let customEnd = '';
+        let statsData = null;
+
+        // Chart instances
+        let chartMonthly = null;
+        let chartYearly = null;
+        let chartTopProducts = null;
+        let chartWeekday = null;
+
+        // Elements
+        const yearPillsContainer = document.getElementById('year-pills-container');
+        const customDateBox = document.getElementById('custom-date-box');
+        const inputDateStart = document.getElementById('input-date-start');
+        const inputDateEnd = document.getElementById('input-date-end');
+        const btnApplyCustomDate = document.getElementById('btn-apply-custom-date');
+        const btnDownloadExcel = document.getElementById('btn-download-excel');
+        const btnSampleData = document.getElementById('btn-sample-data');
+        const btnAddSampleData = document.getElementById('btn-add-sample-data');
+        const btnClearSampleData = document.getElementById('btn-clear-sample-data');
+        const btnResetStatsHeader = document.getElementById('btn-reset-stats-header');
+        const btnResetStats = document.getElementById('btn-reset-stats');
+        const btnResetStatsTab = document.getElementById('btn-reset-stats-tab');
+        const btnUploadExcel = document.getElementById('btn-upload-excel');
+        const inputExcelFile = document.getElementById('input-excel-file');
+        const uploadStatusMsg = document.getElementById('upload-status-msg');
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            setupYearFilters();
+            setupTabs();
+            setupSearch();
+            loadStatistics();
+        });
+
+        // Setup Year Filter Buttons
+        function setupYearFilters() {
+            yearPillsContainer.addEventListener('click', (e) => {
+                const btn = e.target.closest('.year-btn');
+                if (!btn) return;
+
+                const yr = btn.dataset.year;
+                if (!yr) return;
+
+                document.querySelectorAll('.year-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+
+                if (yr === 'custom') {
+                    customDateBox.classList.add('show');
+                } else {
+                    customDateBox.classList.remove('show');
+                    currentYear = yr;
+                    customStart = '';
+                    customEnd = '';
+                    loadStatistics();
+                }
+            });
+
+            btnApplyCustomDate.addEventListener('click', () => {
+                customStart = inputDateStart.value;
+                customEnd = inputDateEnd.value;
+                if (!customStart && !customEnd) {
+                    alert('Lütfen en az bir tarih seçin.');
+                    return;
+                }
+                currentYear = 'tum';
+                loadStatistics();
+            });
+
+            btnDownloadExcel.addEventListener('click', () => {
+                let url = `/api/istatistikler/excel_indir?yil=${encodeURIComponent(currentYear)}`;
+                if (customStart) url += `&baslangic=${encodeURIComponent(customStart)}`;
+                if (customEnd) url += `&bitis=${encodeURIComponent(customEnd)}`;
+                window.location.href = url;
+            });
+
+            // Sample historical data buttons
+            const handleAddSample = async () => {
+                if (!confirm('2024 ve 2025 yıllarına ait gerçekçi örnek satış kayıtları eklensin mi?')) return;
+                try {
+                    const res = await fetch('/api/istatistikler/ornek_gecmis_ekle', {
+                        method: 'POST',
+                        headers: getAuthHeaders({ 'Content-Type': 'application/json' })
+                    });
+                    const d = await res.json();
+                    if (d.success) {
+                        alert(d.message);
+                        loadStatistics();
+                    } else {
+                        alert('Hata: ' + (d.error || 'İşlem başarısız'));
+                    }
+                } catch (e) {
+                    alert('Bağlantı hatası: ' + e.message);
+                }
+            };
+
+            const handleClearSample = async () => {
+                if (!confirm('Eklenen örnek geçmiş satış verileri silinsin mi?')) return;
+                try {
+                    const res = await fetch('/api/istatistikler/ornek_gecmis_temizle', {
+                        method: 'POST',
+                        headers: getAuthHeaders({ 'Content-Type': 'application/json' })
+                    });
+                    const d = await res.json();
+                    if (d.success) {
+                        alert(d.message);
+                        loadStatistics();
+                    } else {
+                        alert('Hata: ' + (d.error || 'İşlem başarısız'));
+                    }
+                } catch (e) {
+                    alert('Bağlantı hatası: ' + e.message);
+                }
+            };
+
+            btnSampleData.addEventListener('click', handleAddSample);
+            btnAddSampleData.addEventListener('click', handleAddSample);
+            btnClearSampleData.addEventListener('click', handleClearSample);
+
+            // Reset All Historical Statistics Handler
+            const handleResetStats = async () => {
+                const yearText = (currentYear && currentYear !== 'tum') ? `${currentYear} yılı dahil tüm yıllara ait` : 'tüm yıllara ait';
+                const promptMsg = `⚠️ DİKKAT: Kalıcı satış arşivindeki ${yearText} tüm geçmiş istatistik verileri sıfırlanacaktır.\n\n` +
+                                  `• Bu işlem geri alınamaz!\n` +
+                                  `• 'Barkod Okut & Çıkış' bölümündeki güncel çalışma sepetinizdeki ürünler SİLİNMEZ.\n\n` +
+                                  `Geçmiş istatistik verilerini kalıcı olarak sıfırlamak istiyor musunuz?`;
+                if (!confirm(promptMsg)) return;
+
+                if (!confirm(`Son onay: Kalıcı arşivdeki tüm geçmiş satış verileri tamamen temizleniyor. Emin misiniz?`)) return;
+
+                try {
+                    const res = await fetch('/api/istatistikler/sifirla', {
+                        method: 'POST',
+                        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+                        body: JSON.stringify({ yil: 'tum' })
+                    });
+                    const d = await res.json();
+                    if (d.success) {
+                        alert(`✅ ${d.message} (${d.silinen_adet || 0} kayıt temizlendi)`);
+                        loadStatistics();
+                    } else {
+                        alert('Hata: ' + (d.error || 'Sıfırlama işlemi başarısız'));
+                    }
+                } catch (e) {
+                    alert('Bağlantı hatası: ' + e.message);
+                }
+            };
+
+            if (btnResetStatsHeader) btnResetStatsHeader.addEventListener('click', handleResetStats);
+            if (btnResetStats) btnResetStats.addEventListener('click', handleResetStats);
+            if (btnResetStatsTab) btnResetStatsTab.addEventListener('click', handleResetStats);
+
+            // Excel Upload
+            btnUploadExcel.addEventListener('click', async () => {
+                const file = inputExcelFile.files[0];
+                if (!file) {
+                    alert('Lütfen bir Excel dosyası (.xlsx) seçin.');
+                    return;
+                }
+                const formData = new FormData();
+                formData.append('file', file);
+
+                btnUploadExcel.disabled = true;
+                btnUploadExcel.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Aktarılıyor...';
+                uploadStatusMsg.innerHTML = '<span style="color:#94a3b8;"><i class="fa-solid fa-spinner fa-spin"></i> Dosya işleniyor, lütfen bekleyin...</span>';
+
+                try {
+                    const res = await fetch('/api/istatistikler/excel_yukle', {
+                        method: 'POST',
+                        headers: getAuthHeaders(),
+                        body: formData
+                    });
+                    const d = await res.json();
+                    if (d.success) {
+                        uploadStatusMsg.innerHTML = `<span style="color:#10b981;"><i class="fa-solid fa-circle-check"></i> ${d.message}</span>`;
+                        inputExcelFile.value = '';
+                        loadStatistics();
+                    } else {
+                        uploadStatusMsg.innerHTML = `<span style="color:#ef4444;"><i class="fa-solid fa-circle-xmark"></i> Hata: ${d.error}</span>`;
+                    }
+                } catch (e) {
+                    uploadStatusMsg.innerHTML = `<span style="color:#ef4444;"><i class="fa-solid fa-circle-xmark"></i> Bağlantı hatası: ${e.message}</span>`;
+                } finally {
+                    btnUploadExcel.disabled = false;
+                    btnUploadExcel.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> Yükle ve Aktar';
+                }
+            });
+        }
+
+        // Setup Tab Navigation
+        function setupTabs() {
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                    document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+
+                    btn.classList.add('active');
+                    const tabId = btn.dataset.tab;
+                    const content = document.getElementById(tabId);
+                    if (content) content.style.display = 'block';
+                });
+            });
+        }
+
+        // Setup Product Search
+        function setupSearch() {
+            const input = document.getElementById('input-search-products');
+            input.addEventListener('input', () => {
+                const q = input.value.trim().toLowerCase();
+                if (!statsData || !statsData.en_cok_satanlar) return;
+                const filtered = statsData.en_cok_satanlar.filter(p => 
+                    (p.urun_adi || '').toLowerCase().includes(q) ||
+                    (p.barkod || '').toLowerCase().includes(q)
+                );
+                renderTopProductsTable(filtered);
+            });
+        }
+
+        // Load Statistics from API
+        async function loadStatistics() {
+            let url = `/api/istatistikler/ozet?yil=${encodeURIComponent(currentYear)}`;
+            if (customStart) url += `&baslangic=${encodeURIComponent(customStart)}`;
+            if (customEnd) url += `&bitis=${encodeURIComponent(customEnd)}`;
+
+            try {
+                const res = await fetch(url, { headers: getAuthHeaders() });
+                const d = await res.json();
+
+                if (d.success) {
+                    statsData = d;
+                    renderKpiCards(d.kpi);
+                    renderCharts(d);
+                    renderTopProductsTable(d.en_cok_satanlar || []);
+                    renderBatchesTable(d.parti_dagilimi || []);
+                    renderMonthlyTable(d.aylik_grafik);
+                    updateDynamicYearPills(d.mevcut_yillar || []);
+                } else {
+                    console.error('İstatistik yükleme hatası:', d.error);
+                }
+            } catch (err) {
+                console.error('API hatası:', err);
+            }
+        }
+
+        // Update Dynamic Year Pills if new years exist
+        function updateDynamicYearPills(years) {
+            // Keep "tum", add any newly discovered years if not present
+            years.forEach(yr => {
+                const existing = document.querySelector(`.year-btn[data-year="${yr}"]`);
+                if (!existing && yr) {
+                    const btn = document.createElement('button');
+                    btn.className = 'year-btn';
+                    btn.dataset.year = yr;
+                    btn.textContent = yr;
+                    const customBtn = document.querySelector('.year-btn[data-year="custom"]');
+                    yearPillsContainer.insertBefore(btn, customBtn);
+                }
+            });
+        }
+
+        // Render KPI Cards
+        function renderKpiCards(kpi) {
+            if (!kpi) return;
+            document.getElementById('kpi-total-exits').textContent = Number(kpi.toplam_cikis || 0).toLocaleString('tr-TR');
+            document.getElementById('kpi-unique-products').textContent = Number(kpi.tekil_urun_sayisi || 0).toLocaleString('tr-TR') + ' Çeşit';
+            
+            const topName = kpi.lider_urun || '-';
+            const topEl = document.getElementById('kpi-top-product');
+            topEl.textContent = topName;
+            topEl.title = topName;
+            document.getElementById('kpi-top-product-count').textContent = (kpi.lider_adet || 0) + ' Kutu';
+
+            document.getElementById('kpi-carton-ratio').textContent = `%${kpi.koli_orani || 0} Koli`;
+            document.getElementById('kpi-carton-detail').textContent = `${kpi.koli_adet || 0} Koli / ${kpi.tekil_adet || 0} Tekil`;
+
+            document.getElementById('kpi-daily-avg').textContent = Number(kpi.gunluk_ortalama || 0).toLocaleString('tr-TR');
+            document.getElementById('kpi-repeat-ratio').textContent = `%${kpi.tekrar_orani || 0}`;
+            document.getElementById('kpi-repeat-count').textContent = `${kpi.tekrar_adet || 0} mükerrer okutma`;
+
+            document.getElementById('chart1-subtitle').textContent = currentYear === 'tum' ? 'Tüm zamanların aylık toplam çıkışları' : `${currentYear} yılının 12 aylık çıkış dağılımı`;
+        }
+
+        // Render Charts using Chart.js
+        function renderCharts(d) {
+            // Destroy existing instances
+            if (chartMonthly) chartMonthly.destroy();
+            if (chartYearly) chartYearly.destroy();
+            if (chartTopProducts) chartTopProducts.destroy();
+            if (chartWeekday) chartWeekday.destroy();
+
+            const chartFont = { family: "'Inter', sans-serif", size: 11 };
+            const chartGrid = { color: 'rgba(255, 255, 255, 0.05)', borderColor: 'rgba(255, 255, 255, 0.1)' };
+            const chartTicks = { color: '#94a3b8', font: chartFont };
+
+            // 1. Monthly Chart (Bar)
+            const ctxMonthly = document.getElementById('canvas-monthly').getContext('2d');
+            const monthlyGrad = ctxMonthly.createLinearGradient(0, 0, 0, 260);
+            monthlyGrad.addColorStop(0, 'rgba(16, 185, 129, 0.85)');
+            monthlyGrad.addColorStop(1, 'rgba(16, 185, 129, 0.15)');
+
+            chartMonthly = new Chart(ctxMonthly, {
+                type: 'bar',
+                data: {
+                    labels: d.aylik_grafik.etiketler,
+                    datasets: [{
+                        label: 'Çıkış Adedi (Kutu)',
+                        data: d.aylik_grafik.veriler,
+                        backgroundColor: monthlyGrad,
+                        borderColor: '#10b981',
+                        borderWidth: 1.5,
+                        borderRadius: 6,
+                        maxBarThickness: 32
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#cbd5e1', padding: 10, cornerRadius: 8 }
+                    },
+                    scales: {
+                        x: { grid: { display: false }, ticks: chartTicks },
+                        y: { grid: chartGrid, ticks: chartTicks, beginAtZero: true }
+                    }
+                }
+            });
+
+            // 2. Yearly Comparison Chart (Bar)
+            const ctxYearly = document.getElementById('canvas-yearly').getContext('2d');
+            const yearlyGrad = ctxYearly.createLinearGradient(0, 0, 0, 260);
+            yearlyGrad.addColorStop(0, 'rgba(6, 182, 212, 0.85)');
+            yearlyGrad.addColorStop(1, 'rgba(6, 182, 212, 0.15)');
+
+            chartYearly = new Chart(ctxYearly, {
+                type: 'bar',
+                data: {
+                    labels: d.yillik_grafik.etiketler,
+                    datasets: [{
+                        label: 'Yıllık Satış (Kutu)',
+                        data: d.yillik_grafik.veriler,
+                        backgroundColor: yearlyGrad,
+                        borderColor: '#06b6d4',
+                        borderWidth: 1.5,
+                        borderRadius: 8,
+                        maxBarThickness: 44
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#cbd5e1', padding: 10, cornerRadius: 8 }
+                    },
+                    scales: {
+                        x: { grid: { display: false }, ticks: chartTicks },
+                        y: { grid: chartGrid, ticks: chartTicks, beginAtZero: true }
+                    }
+                }
+            });
+
+            // 3. Top Products (Doughnut)
+            const top5 = (d.en_cok_satanlar || []).slice(0, 5);
+            const otherSum = (d.en_cok_satanlar || []).slice(5).reduce((acc, p) => acc + (p.adet || 0), 0);
+            const pieLabels = top5.map(p => p.urun_adi.length > 18 ? p.urun_adi.substring(0, 18) + '...' : p.urun_adi);
+            const pieData = top5.map(p => p.adet);
+            if (otherSum > 0) {
+                pieLabels.push('Diğerleri');
+                pieData.push(otherSum);
+            }
+
+            const ctxPie = document.getElementById('canvas-top-products').getContext('2d');
+            chartTopProducts = new Chart(ctxPie, {
+                type: 'doughnut',
+                data: {
+                    labels: pieLabels.length ? pieLabels : ['Veri Yok'],
+                    datasets: [{
+                        data: pieData.length ? pieData : [1],
+                        backgroundColor: [
+                            '#10b981', '#06b6d4', '#f59e0b', '#8b5cf6', '#ec4899', '#64748b'
+                        ],
+                        borderWidth: 2,
+                        borderColor: '#0f172a'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'right', labels: { color: '#cbd5e1', font: chartFont, boxWidth: 12, padding: 12 } },
+                        tooltip: { backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#cbd5e1', padding: 10, cornerRadius: 8 }
+                    },
+                    cutout: '65%'
+                }
+            });
+
+            // 4. Weekday Distribution (Bar)
+            const ctxWeekday = document.getElementById('canvas-weekday').getContext('2d');
+            const weekdayGrad = ctxWeekday.createLinearGradient(0, 0, 0, 260);
+            weekdayGrad.addColorStop(0, 'rgba(139, 92, 246, 0.85)');
+            weekdayGrad.addColorStop(1, 'rgba(139, 92, 246, 0.15)');
+
+            chartWeekday = new Chart(ctxWeekday, {
+                type: 'bar',
+                data: {
+                    labels: d.haftalik_grafik.etiketler,
+                    datasets: [{
+                        label: 'Çıkış Adedi',
+                        data: d.haftalik_grafik.veriler,
+                        backgroundColor: weekdayGrad,
+                        borderColor: '#8b5cf6',
+                        borderWidth: 1.5,
+                        borderRadius: 6,
+                        maxBarThickness: 30
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#cbd5e1', padding: 10, cornerRadius: 8 }
+                    },
+                    scales: {
+                        x: { grid: { display: false }, ticks: chartTicks },
+                        y: { grid: chartGrid, ticks: chartTicks, beginAtZero: true }
+                    }
+                }
+            });
+        }
+
+        // Render Top Products Table
+        function renderTopProductsTable(list) {
+            const tbody = document.getElementById('tbody-top-products');
+            document.getElementById('lbl-product-count').textContent = `${list.length} ürün listeleniyor`;
+
+            if (!list || list.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#64748b; padding:2rem;">Bu döneme ait çıkış kaydı bulunamadı.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = list.map((p, idx) => `
+                <tr>
+                    <td style="color:#64748b; font-weight:600;">${idx + 1}</td>
+                    <td><b style="color:#fff;">${esc(p.urun_adi)}</b></td>
+                    <td style="font-family:monospace; color:#94a3b8; font-size:0.82rem;">${esc(p.barkod || '-')}</td>
+                    <td style="text-align:right; font-family:var(--font-outfit); font-weight:700; color:#10b981; font-size:0.95rem;">${Number(p.adet).toLocaleString('tr-TR')}</td>
+                    <td style="text-align:center;"><span style="background:rgba(255,255,255,0.06); padding:0.2rem 0.5rem; border-radius:6px; font-size:0.75rem;">${p.koli_sayisi || 0} Koli</span></td>
+                    <td>
+                        <div class="progress-bar-wrap"><div class="progress-bar-fill" style="width: ${Math.min(100, p.yuzde)}%;"></div></div>
+                        <span style="font-size:0.78rem; color:#94a3b8;">%${p.yuzde}</span>
+                    </td>
+                    <td style="font-size:0.8rem; color:#64748b;">${esc(p.son_cikis || '-')}</td>
+                </tr>
+            `).join('');
+        }
+
+        // Render Batches Table
+        function renderBatchesTable(list) {
+            const tbody = document.getElementById('tbody-batches');
+            if (!list || list.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#64748b; padding:2rem;">Parti verisi bulunamadı.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = list.map((b, idx) => `
+                <tr>
+                    <td style="color:#64748b;">${idx + 1}</td>
+                    <td><span style="font-family:monospace; background:rgba(245,158,11,0.12); color:#fbbf24; padding:0.2rem 0.5rem; border-radius:6px; font-size:0.82rem; font-weight:600;">${esc(b.parti)}</span></td>
+                    <td><b style="color:#fff;">${esc(b.urun_adi)}</b></td>
+                    <td style="text-align:right; font-weight:700; color:#10b981;">${Number(b.adet).toLocaleString('tr-TR')}</td>
+                    <td style="color:#94a3b8; font-size:0.82rem;">${esc(b.skt || '-')}</td>
+                </tr>
+            `).join('');
+        }
+
+        // Render Monthly Table
+        function renderMonthlyTable(monthly) {
+            const tbody = document.getElementById('tbody-monthly-detail');
+            if (!monthly || !monthly.etiketler) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#64748b;">Veri bulunamadı.</td></tr>';
+                return;
+            }
+
+            const total = monthly.veriler.reduce((a, b) => a + b, 0);
+
+            tbody.innerHTML = monthly.etiketler.map((mName, idx) => {
+                const cnt = monthly.veriler[idx] || 0;
+                const pct = total > 0 ? ((cnt / total) * 100).toFixed(1) : 0;
+                return `
+                    <tr>
+                        <td style="color:#64748b; font-weight:600;">${idx + 1}</td>
+                        <td><b>${mName}</b></td>
+                        <td style="text-align:right; font-weight:700; color:${cnt > 0 ? '#10b981' : '#64748b'};">${Number(cnt).toLocaleString('tr-TR')}</td>
+                        <td>
+                            <div class="progress-bar-wrap"><div class="progress-bar-fill" style="width: ${Math.min(100, pct)}%;"></div></div>
+                            <span style="font-size:0.78rem; color:#94a3b8;">%${pct}</span>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function esc(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        async function logoutUser() {
+            if (!confirm('Oturumdan çıkmak istediğinize emin misiniz?')) return;
+            try {
+                await fetch('/api/system/logout', { method: 'POST', headers: getAuthHeaders() });
+            } catch (e) {}
+            localStorage.removeItem('local_session_token');
+            window.location.href = '/login';
+        }
+    </script>
+</body>
+</html>

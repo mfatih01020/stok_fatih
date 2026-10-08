@@ -200,6 +200,10 @@
                     <i class="fa-solid fa-boxes-packing"></i>
                     <span>Depoya Kabul Et</span>
                 </a>
+                <a href="/istatistikler" class="sidebar-link">
+                    <i class="fa-solid fa-chart-pie"></i>
+                    <span>İstatistikler & Raporlar</span>
+                </a>
                 <a href="/kullaniciya-satis" class="sidebar-link active">
                     <i class="fa-solid fa-user-tag"></i>
                     <span>Kullanıcıya Satış (Demo)</span>
@@ -733,7 +737,8 @@
         }
 
         function esc(str) {
-            return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+            if (window.esc) return window.esc(str);
+            return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
         }
 
     </script>

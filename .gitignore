@@ -19,6 +19,8 @@ terek_eksik_urunler_bakanlik_cikis.xlsx
 bakanlik_giris_bilgileri.txt
 günlük satışlar.txt
 .session_token
+.flask_secret
+.dev_mode
 *.log
 Hosts_Duzelt.bat
 

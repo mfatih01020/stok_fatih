@@ -11,6 +11,9 @@ import logging
 from logging.handlers import RotatingFileHandler
 import concurrent.futures
 from datetime import datetime
+import subprocess
+import socket
+import atexit
 import pandas as pd
 from flask import Flask, render_template, request, jsonify, send_file, redirect
 import io
@@ -43,16 +46,37 @@ handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(
 logging.basicConfig(level=logging.INFO, handlers=[handler])
 logger = logging.getLogger('qr_compare')
 
+# ── Dynamic Flask Secret Key ─────────────────────────────────────────────────
+FLASK_SECRET_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".flask_secret")
+
+def _get_or_create_flask_secret():
+    if os.path.exists(FLASK_SECRET_PATH):
+        try:
+            with open(FLASK_SECRET_PATH, 'r', encoding='utf-8') as f:
+                s = f.read().strip()
+                if s:
+                    return s
+        except Exception:
+            pass
+    secret = secrets.token_hex(32)
+    try:
+        with open(FLASK_SECRET_PATH, 'w', encoding='utf-8') as f:
+            f.write(secret)
+    except Exception:
+        pass
+    return secret
+
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "qr_compare_stok_fatih_secret_key_2026_x89")
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or _get_or_create_flask_secret()
+app.config['TEMPLATES_AUTO_RELOAD'] = True
 
 # ── Global Thread Lock & Memory State ─────────────────────────────────────────
 _state_lock = threading.RLock()
 _user_cache_map = {}
 _cache_access_order = []
+_compare_cache_map = {}
 bkst_status = "closed"
 bkst_message = ""
-cached_results = {}
 _app_bkst_synced = False
 
 _fetch_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix='bkst_fetch')
@@ -66,8 +90,7 @@ def heartbeat_watchdog():
         time.sleep(15)
         if time.time() - _last_heartbeat > 60:
             logger.warning("Heartbeat timeout (60s). Uygulama otomatik yenileniyor/kapatılıyor.")
-            # Graceful watchdog logging
-            
+
 threading.Thread(target=heartbeat_watchdog, daemon=True).start()
 
 # ── Session Token Authentication Helper ───────────────────────────────────────
@@ -98,8 +121,8 @@ def add_header(response):
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'
-    if not request.cookies.get('local_session_token'):
-        response.set_cookie('local_session_token', LOCAL_SESSION_TOKEN, httponly=False, samesite='Lax')
+    if request.cookies.get('local_session_token') != LOCAL_SESSION_TOKEN:
+        response.set_cookie('local_session_token', LOCAL_SESSION_TOKEN, httponly=True, samesite='Strict')
     return response
 
 @app.before_request
@@ -108,7 +131,6 @@ def check_authentication():
     if (path.startswith('/static') or 
         path == '/login' or 
         path == '/api/system/login' or 
-        path == '/api/system/user_info' or 
         path == '/api/system/check_update' or 
         path == '/api/system/apply_update' or 
         path == '/api/system/version' or 
@@ -123,12 +145,16 @@ def check_authentication():
         return redirect('/login')
 
     if path.startswith('/api/'):
-        client_token = request.headers.get('X-Local-Token')
-        if not client_token:
-            client_token = request.args.get('token')
-        if not client_token:
-            client_token = request.cookies.get('local_session_token')
-        if not client_token or client_token != LOCAL_SESSION_TOKEN:
+        client_tokens = [
+            request.cookies.get('local_session_token'),
+            request.headers.get('X-Local-Token'),
+            request.headers.get('X-Session-Token'),
+            request.args.get('token')
+        ]
+        # Ignore empty, None, and literal strings 'undefined', 'null'
+        valid_tokens = [t.strip() for t in client_tokens if t and str(t).strip().lower() not in ('undefined', 'null', 'none', '')]
+
+        if not any(t == LOCAL_SESSION_TOKEN for t in valid_tokens):
             return jsonify({'success': False, 'error': 'Geçersiz veya eksik oturum anahtarı', 'code': 401}), 401
 
     return None
@@ -179,79 +205,86 @@ def api_heartbeat():
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cikis_kayitlari.db')
 
 def save_bkst_data_to_db(df, username=""):
-    if df is None or df.empty:
+    if not username:
+        logger.warning("save_bkst_data_to_db: username boş, işlem iptal.")
         return
+    if df is None:
+        return
+    if isinstance(df, pd.DataFrame) and df.empty:
+        return
+    if isinstance(df, list) and len(df) == 0:
+        return
+
     ensure_db_schema()
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     c = conn.cursor()
-    
-    if username:
-        c.execute("DELETE FROM bkst_depo_verileri_staging WHERE kullanici_adi = ?", (username,))
-    else:
-        c.execute("DELETE FROM bkst_depo_verileri_staging")
-        
-    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    koli_col = find_koli_column(df.columns)
-    
-    records = df.to_dict(orient="records")
-    rows_to_insert = []
-    for r in records:
-        qr_val = normalize_qr(str(r.get("Karekod", r.get("tam_karekod", r.get("QR", "")))))
-        gtin_val = ""
-        for k in ("Gtin Numarası", "Gtin / Barkod", "Gtin/Barkod", "gtin", "GTIN", "BARKOD", "Barkod", "BARCODE", "Barcode"):
-            v = r.get(k)
-            if v is not None and str(v).strip() and str(v).strip().upper() != "NAN":
-                gtin_val = str(v).strip()
-                break
-        if not gtin_val and qr_val:
-            parsed = parse_gs1_qr(qr_val)
-            if parsed and parsed.get("gtin"):
-                gtin_val = str(parsed["gtin"]).strip()
-
-        urun_val = str(r.get("Ürün Adı", r.get("urun_adi", r.get("URUNADI", "")))).strip()
-        seri_val = str(r.get("Seri Numarası", r.get("seri_no", r.get("SERIALNUMBER", "")))).strip()
-        parti_val = str(r.get("Parti Numarası", r.get("parti_no", r.get("SARJNO", "")))).strip()
-        raw_koli = r.get(koli_col) if koli_col else r.get("koli_no")
-        koli_val = str(raw_koli).strip().upper() if pd.notna(raw_koli) and raw_koli is not None else ""
-        if koli_val == "NAN":
-            koli_val = ""
-        palet_val = str(r.get("Palet Numarası", r.get("palet_no", "")))
-        uretim_val = str(r.get("Üretim Tarihi", r.get("uretim_tarihi", "")))
-        skt_val = str(r.get("Son Kullanma Tarihi", r.get("skt", r.get("SKT", ""))))
-        
-        rows_to_insert.append((gtin_val, urun_val, seri_val, parti_val, koli_val, palet_val, uretim_val, skt_val, qr_val, username, now_str))
-            
-    c.executemany('''INSERT INTO bkst_depo_verileri_staging
-        (gtin, urun_adi, seri_no, parti_no, koli_no, palet_no, uretim_tarihi, skt, tam_karekod, kullanici_adi, guncelleme_tarihi)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', rows_to_insert)
-    conn.commit()
 
     try:
-        if username:
-            c.execute("DELETE FROM bkst_depo_verileri WHERE kullanici_adi = ?", (username,))
-            c.execute('''INSERT INTO bkst_depo_verileri
-                (gtin, urun_adi, seri_no, parti_no, koli_no, palet_no, uretim_tarihi, skt, tam_karekod, kullanici_adi, guncelleme_tarihi)
-                SELECT gtin, urun_adi, seri_no, parti_no, koli_no, palet_no, uretim_tarihi, skt, tam_karekod, kullanici_adi, guncelleme_tarihi
-                FROM bkst_depo_verileri_staging WHERE kullanici_adi = ?''', (username,))
-            c.execute("DELETE FROM bkst_depo_verileri_staging WHERE kullanici_adi = ?", (username,))
+        c.execute("BEGIN IMMEDIATE")
+        c.execute("DELETE FROM bkst_depo_verileri_staging WHERE kullanici_adi = ?", (username,))
+
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        if isinstance(df, pd.DataFrame):
+            koli_col = find_koli_column(df.columns)
+            records = df.to_dict(orient="records")
         else:
-            c.execute("DELETE FROM bkst_depo_verileri")
-            c.execute('''INSERT INTO bkst_depo_verileri
-                (gtin, urun_adi, seri_no, parti_no, koli_no, palet_no, uretim_tarihi, skt, tam_karekod, kullanici_adi, guncelleme_tarihi)
-                SELECT gtin, urun_adi, seri_no, parti_no, koli_no, palet_no, uretim_tarihi, skt, tam_karekod, kullanici_adi, guncelleme_tarihi
-                FROM bkst_depo_verileri_staging''')
-            c.execute("DELETE FROM bkst_depo_verileri_staging")
+            koli_col = None
+            records = df
+
+        rows_to_insert = []
+        for r in records:
+            qr_val = normalize_qr(str(r.get("Karekod", r.get("tam_karekod", r.get("QR", "")))))
+            gtin_val = ""
+            for k in ("Gtin Numarası", "Gtin / Barkod", "Gtin/Barkod", "gtin", "GTIN", "BARKOD", "Barkod", "BARCODE", "Barcode"):
+                v = r.get(k)
+                if v is not None and str(v).strip() and str(v).strip().upper() != "NAN":
+                    gtin_val = str(v).strip()
+                    break
+            if not gtin_val and qr_val:
+                parsed = parse_gs1_qr(qr_val)
+                if parsed and parsed.get("gtin"):
+                    gtin_val = str(parsed["gtin"]).strip()
+
+            urun_val = str(r.get("Ürün Adı", r.get("urun_adi", r.get("URUNADI", "")))).strip()
+            seri_val = str(r.get("Seri Numarası", r.get("seri_no", r.get("SERIALNUMBER", "")))).strip()
+            parti_val = str(r.get("Parti Numarası", r.get("parti_no", r.get("SARJNO", "")))).strip()
+            raw_koli = r.get(koli_col) if koli_col else (r.get("Koli Numarası") or r.get("koli_no") or r.get("PAKETNO") or r.get("KOLINO"))
+            koli_val = str(raw_koli).strip().upper() if raw_koli is not None else ""
+            if koli_val in ("NAN", "NONE", "NULL"):
+                koli_val = ""
+            palet_val = str(r.get("Palet Numarası", r.get("palet_no", ""))).strip()
+            uretim_val = str(r.get("Üretim Tarihi", r.get("uretim_tarihi", ""))).strip()
+            skt_val = str(r.get("Son Kullanma Tarihi", r.get("skt", r.get("SKT", "")))).strip()
+
+            rows_to_insert.append((gtin_val, urun_val, seri_val, parti_val, koli_val, palet_val, uretim_val, skt_val, qr_val, username, now_str))
+
+        c.executemany('''INSERT INTO bkst_depo_verileri_staging
+            (gtin, urun_adi, seri_no, parti_no, koli_no, palet_no, uretim_tarihi, skt, tam_karekod, kullanici_adi, guncelleme_tarihi)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', rows_to_insert)
+
+        c.execute("DELETE FROM bkst_depo_verileri WHERE kullanici_adi = ?", (username,))
+        c.execute('''INSERT INTO bkst_depo_verileri
+            (gtin, urun_adi, seri_no, parti_no, koli_no, palet_no, uretim_tarihi, skt, tam_karekod, kullanici_adi, guncelleme_tarihi)
+            SELECT gtin, urun_adi, seri_no, parti_no, koli_no, palet_no, uretim_tarihi, skt, tam_karekod, kullanici_adi, guncelleme_tarihi
+            FROM bkst_depo_verileri_staging WHERE kullanici_adi = ?''', (username,))
+        c.execute("DELETE FROM bkst_depo_verileri_staging WHERE kullanici_adi = ?", (username,))
         conn.commit()
     except Exception as e:
         logger.error(f"save_bkst_data_to_db transaction error: {e}", exc_info=True)
-        conn.rollback()
-        conn.close()
-        # Otomatik onarımı tetikle
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         ensure_db_schema()
         raise e
-    conn.close()
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
     user_key = username or "default_user"
     with _state_lock:
@@ -366,6 +399,24 @@ def ensure_db_schema(conn=None):
             except Exception as e:
                 logger.warning(f"Could not add column {col} to bkst_depo_verileri_staging: {e}")
 
+    # 4. satis_arsivi tablosu (Kalıcı Satış & İstatistik Arşivi)
+    c.execute('''CREATE TABLE IF NOT EXISTS satis_arsivi (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        tarih         TEXT NOT NULL DEFAULT '',
+        urun_adi      TEXT,
+        barkod        TEXT,
+        koli_no       TEXT,
+        seri_no       TEXT,
+        parti_no      TEXT,
+        palet_no      TEXT,
+        uretim_tarihi TEXT,
+        skt           TEXT,
+        ham_karekod   TEXT,
+        tekrar_uyari  INTEGER DEFAULT 0,
+        kullanici_adi TEXT,
+        durum         TEXT DEFAULT 'CIKIS_YAPILDI'
+    )''')
+
     # İndeksler
     try:
         c.execute("CREATE INDEX IF NOT EXISTS idx_ham_karekod ON cikis_kayitlari(ham_karekod)")
@@ -373,8 +424,33 @@ def ensure_db_schema(conn=None):
         c.execute("CREATE INDEX IF NOT EXISTS idx_bkst_karekod ON bkst_depo_verileri(tam_karekod)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_bkst_gtin ON bkst_depo_verileri(gtin)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_bkst_kullanici ON bkst_depo_verileri(kullanici_adi)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_satis_arsivi_tarih ON satis_arsivi(tarih)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_satis_arsivi_qr ON satis_arsivi(ham_karekod)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_satis_arsivi_seri ON satis_arsivi(seri_no)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_satis_arsivi_urun ON satis_arsivi(urun_adi)")
     except Exception:
         pass
+
+    # Otomatik ilk aktarım: cikis_kayitlari'ndan satis_arsivi'ne tek seferlik ilk geçiş aktarımı
+    try:
+        c.execute("CREATE TABLE IF NOT EXISTS schema_migrations (key TEXT PRIMARY KEY, migrated_at TEXT)")
+        c.execute("SELECT 1 FROM schema_migrations WHERE key = 'v315_initial_archive_backfill'")
+        if not c.fetchone():
+            c.execute('''
+                INSERT INTO satis_arsivi (tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no, uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi, durum)
+                SELECT tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no, uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi, 'CIKIS_YAPILDI'
+                FROM cikis_kayitlari ck
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM satis_arsivi sa 
+                    WHERE sa.tarih = ck.tarih 
+                      AND sa.ham_karekod = ck.ham_karekod 
+                      AND (sa.seri_no = ck.seri_no OR (sa.seri_no IS NULL AND ck.seri_no IS NULL))
+                )
+            ''')
+            c.execute("INSERT OR REPLACE INTO schema_migrations (key, migrated_at) VALUES ('v315_initial_archive_backfill', ?)", 
+                      (datetime.now().strftime('%Y-%m-%d %H:%M:%S'),))
+    except Exception as e_backfill:
+        logger.warning(f"satis_arsivi backfill notice: {e_backfill}")
 
     conn.commit()
     if close_at_end:
@@ -402,8 +478,39 @@ def init_db():
                 parsed = parse_gs1_qr(qr_code)
                 if parsed and parsed.get("gtin"):
                     c.execute("UPDATE cikis_kayitlari SET barkod = ? WHERE id = ?", (str(parsed["gtin"]), row_id))
+
+        # bkst_depo_verileri içindeki eşleşen tam_karekod'u cikis_kayitlari'na yaz (seri no ile okutulmuş kayıtları onar)
+        c.execute('''
+            SELECT ck.id, bv.tam_karekod
+            FROM cikis_kayitlari ck
+            JOIN bkst_depo_verileri bv ON LOWER(ck.seri_no) = LOWER(bv.seri_no)
+            WHERE (ck.ham_karekod IS NULL OR length(ck.ham_karekod) < 20 OR ck.ham_karekod = ck.seri_no)
+              AND bv.tam_karekod IS NOT NULL AND length(bv.tam_karekod) >= 20
+        ''')
+        for ck_id, full_qr in c.fetchall():
+            c.execute("UPDATE cikis_kayitlari SET ham_karekod = ? WHERE id = ?", (full_qr, ck_id))
+
+        # Yinelenen seri numarası veya karekod durumunda tekrar_uyari flag'lerini onar:
+        # İlk çıkış (en küçük id) -> 0, sonraki çıkışlar (büyük id'ler) -> 1
+        c.execute("SELECT id, seri_no, ham_karekod, barkod FROM cikis_kayitlari ORDER BY id ASC")
+        rows = c.fetchall()
+        seen_keys = set()
+        for r_id, s_no, qr_val, b_val in rows:
+            key_qr = f"qr:{qr_val.strip().casefold()}" if qr_val and len(qr_val.strip()) >= 16 else None
+            key_seri = f"seri:{s_no.strip().casefold()}_{b_val or ''}" if s_no and s_no.strip() else None
+
+            is_duplicate = False
+            if key_qr and key_qr in seen_keys:
+                is_duplicate = True
+            if key_seri and key_seri in seen_keys:
+                is_duplicate = True
+
+            if key_qr: seen_keys.add(key_qr)
+            if key_seri: seen_keys.add(key_seri)
+
+            c.execute("UPDATE cikis_kayitlari SET tekrar_uyari = ? WHERE id = ?", (1 if is_duplicate else 0, r_id))
     except Exception as e:
-        logger.error(f"GTIN backfill migration error: {e}")
+        logger.error(f"GTIN and duplicate backfill migration error: {e}")
 
     conn.commit()
     conn.close()
@@ -509,7 +616,8 @@ def inject_global_template_vars():
         bkst_online=bkst_online,
         is_system_active=not is_offline,
         system_status_text=system_status_text,
-        system_status_cls=system_status_cls
+        system_status_cls=system_status_cls,
+        local_session_token=LOCAL_SESSION_TOKEN
     )
 
 def normalize_qr(qr):
@@ -678,6 +786,112 @@ def get_bkst_cache():
     return res
 
 init_db()
+
+def check_is_parti_no(code, df):
+    if not code or df is None or df.empty:
+        return False, 0, ""
+    code_clean = str(code).strip()
+    candidates = [code_clean.casefold()]
+    if code_clean.startswith("(10)") and len(code_clean) > 4:
+        candidates.append(code_clean[4:].strip().casefold())
+    elif code_clean.startswith("10") and len(code_clean) > 2:
+        candidates.append(code_clean[2:].strip().casefold())
+
+    for cand in candidates:
+        if not cand:
+            continue
+        matches = [
+            r for r in df.to_dict(orient="records")
+            if str(r.get("Parti Numarası", "")).strip().casefold() == cand
+        ]
+        if matches:
+            urun_adi = str(matches[0].get("Ürün Adı", "")).strip()
+            return True, len(matches), urun_adi
+
+    return False, 0, ""
+
+def check_is_gtin_no(code, df, gtin_map):
+    if not code or df is None or df.empty:
+        return False, 0, ""
+    code_str = str(code).strip()
+
+    # Tam bir GS1 karekod ise (içinde seri numarası varsa), bu saf GTIN değildir!
+    parsed = parse_gs1_qr(code_str)
+    if parsed and parsed.get('seri_no'):
+        return False, 0, ""
+
+    norm = normalize_qr(code_str)
+    candidates = [norm]
+    if norm.isdigit():
+        candidates.append(norm.lstrip('0'))
+        if len(norm) == 13:
+            candidates.append('0' + norm)
+        elif len(norm) == 14 and norm.startswith('0'):
+            candidates.append(norm[1:])
+
+    matched_name = ""
+    for cand in candidates:
+        if cand and gtin_map and cand in gtin_map:
+            matched_name = str(gtin_map[cand].get('Ürün Adı', '')).strip()
+            break
+
+    if not matched_name and norm.isdigit() and len(norm) in (8, 12, 13, 14):
+        for r in df.to_dict(orient="records"):
+            r_gtin = normalize_qr(str(r.get("Gtin Numarası") or r.get("Gtin / Barkod") or r.get("gtin") or ""))
+            if r_gtin in candidates:
+                matched_name = str(r.get("Ürün Adı", "")).strip()
+                break
+
+    if matched_name:
+        count = sum(
+            1 for r in df.to_dict(orient="records")
+            if normalize_qr(str(r.get("Gtin Numarası") or r.get("Gtin / Barkod") or r.get("gtin") or "")) in candidates
+        )
+        return True, count, matched_name
+
+    return False, 0, ""
+
+def resolve_product_from_cache(code, df, qr_map, gtin_map):
+    if not code:
+        return None
+    code_norm = normalize_qr(code)
+    code_case = code_norm.casefold()
+
+    # Parti Numarası tekil kutu olarak asla eşleşmemelidir
+    is_parti, _, _ = check_is_parti_no(code_norm, df)
+    if is_parti:
+        return None
+
+    # GTIN / Barkod tekil kutu olarak asla eşleşmemelidir
+    is_gtin, _, _ = check_is_gtin_no(code_norm, df, gtin_map)
+    if is_gtin:
+        return None
+
+    # 1. Tam karekod eşleşmesi
+    if qr_map and code_norm in qr_map:
+        return qr_map[code_norm]
+
+    # 2. GS1 Karekod ayrıştırma denemesi (Karekod içindeki seri ve gtin)
+    parsed = parse_gs1_qr(code_norm)
+    if parsed and parsed.get('seri_no'):
+        p_seri = str(parsed['seri_no']).strip().casefold()
+        p_gtin = str(parsed.get('gtin', '')).strip().casefold()
+        if df is not None and not df.empty:
+            for r in df.to_dict(orient="records"):
+                r_seri = str(r.get("Seri Numarası", "")).strip().casefold()
+                if r_seri and r_seri == p_seri:
+                    r_gtin = str(r.get("Gtin Numarası") or r.get("Gtin / Barkod") or "").strip().casefold()
+                    if not p_gtin or not r_gtin or p_gtin == r_gtin:
+                        return r
+
+    # 3. Seri Numarası doğrudan eşleşmesi (Kullanıcı barkod yerine seri no okuttuysa)
+    if df is not None and not df.empty:
+        for r in df.to_dict(orient="records"):
+            r_seri = str(r.get("Seri Numarası", "")).strip().casefold()
+            if r_seri and r_seri == code_case:
+                return r
+
+    return None
 
 def build_gtin_name_map():
     mapping = {}
@@ -857,6 +1071,11 @@ def depo_kabul_page():
 def kullaniciya_satis_page():
     return render_template('kullaniciya_satis.html')
 
+@app.route('/istatistikler')
+@app.route('/raporlar')
+def istatistikler_page():
+    return render_template('istatistikler.html')
+
 # ── STOK KARŞILAŞTIRMA & RAPORLAMA API ──────────────────────────────────────
 @app.route('/api/compare', methods=['POST'])
 def api_compare():
@@ -946,9 +1165,11 @@ def api_compare():
             p_name = item["product_name"]
             initial_counts[p_name] = initial_counts.get(p_name, 0) + 1
 
+        username_cred, _, _, _ = read_bkst_credentials()
+        user_key = username_cred or "_anon"
+
         with _state_lock:
-            global cached_results
-            cached_results = {
+            _compare_cache_map[user_key] = {
                 "matched_sales": matched_sales,
                 "unmatched_sales": unmatched_sales,
                 "remaining_inventory": remaining_inventory,
@@ -983,10 +1204,13 @@ def api_compare():
 @app.route('/api/download/sales', methods=['GET'])
 @app.route('/api/download/full_report', methods=['GET'])
 def download_sales():
+    username_cred, _, _, _ = read_bkst_credentials()
+    user_key = username_cred or "_anon"
     with _state_lock:
-        if not cached_results:
+        cached_data = _compare_cache_map.get(user_key)
+        if not cached_data:
             return "No comparison run yet", 400
-        res_copy = dict(cached_results)
+        res_copy = dict(cached_data)
         
     matched_rows = []
     for item in res_copy.get("matched_sales", []):
@@ -1083,10 +1307,13 @@ def download_sales():
 
 @app.route('/api/download/remaining', methods=['GET'])
 def download_remaining():
+    username_cred, _, _, _ = read_bkst_credentials()
+    user_key = username_cred or "_anon"
     with _state_lock:
-        if not cached_results:
+        cached_data = _compare_cache_map.get(user_key)
+        if not cached_data:
             return "No comparison run yet", 400
-        res_copy = dict(cached_results)
+        res_copy = dict(cached_data)
         
     rows = []
     for item in res_copy.get("remaining_inventory", []):
@@ -1640,7 +1867,25 @@ def api_depo_stoklari():
             df_clean = df.fillna("")
             for col in df_clean.columns:
                 df_clean[col] = df_clean[col].astype(str)
-            rows = df_clean.to_dict(orient="records")
+            raw_rows = df_clean.to_dict(orient="records")
+            for r in raw_rows:
+                gtin_val = r.get('Gtin Numarası') or r.get('Gtin / Barkod') or r.get('gtin') or r.get('GTIN') or r.get('BARCODE') or r.get('barkod') or ''
+                karekod_str = r.get('Karekod') or r.get('tam_karekod') or r.get('ham_karekod') or r.get('KAREKOD') or ''
+                if (not gtin_val or gtin_val in ('-', 'None', 'nan', 'null', 'BELİRSİZ')) and karekod_str:
+                    parsed = parse_gs1_qr(karekod_str)
+                    if parsed and parsed.get('gtin'):
+                        gtin_val = str(parsed['gtin'])
+                    elif karekod_str.startswith('01') and len(karekod_str) >= 16:
+                        gtin_val = karekod_str[2:16]
+                    else:
+                        m14 = re.findall(r'\d{14}', karekod_str)
+                        if m14:
+                            gtin_val = m14[0]
+                r['Gtin Numarası'] = gtin_val
+                r['Gtin / Barkod'] = gtin_val
+                r['gtin'] = gtin_val
+                r['GTIN'] = gtin_val
+                rows.append(r)
 
         return jsonify({
             "success": True,
@@ -1667,23 +1912,6 @@ def cikis_okut():
         barkod_norm = normalize_qr(barkod_raw)
         username, _, _, _ = read_bkst_credentials()
 
-        conn = sqlite3.connect(DB_PATH, timeout=30.0)
-        c = conn.cursor()
-        if username:
-            c.execute('SELECT id, tarih, urun_adi FROM cikis_kayitlari WHERE ham_karekod = ? AND (kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = "")', (barkod_norm, username))
-        else:
-            c.execute('SELECT id, tarih, urun_adi FROM cikis_kayitlari WHERE ham_karekod = ?', (barkod_norm,))
-        existing = c.fetchone()
-        conn.close()
-
-        if existing:
-            ex_id, ex_tarih, ex_urun = existing
-            return jsonify({
-                'success': False,
-                'already_exited': True,
-                'error': f'Bu ürün zaten depodan çıkarılmış! Ürün: {ex_urun} (Tarih: {ex_tarih})'
-            })
-
         df, qr_map, gtin_map, koli_map = get_bkst_cache()
         if df is None or df.empty:
             return jsonify({
@@ -1691,29 +1919,115 @@ def cikis_okut():
                 'error': 'Bakanlık depo verisi bulunamadı. Lütfen önce verileri çekin.'
             })
 
-        match_row = qr_map.get(barkod_norm) if qr_map else None
-        if match_row is None and gtin_map:
-            match_row = gtin_map.get(barkod_norm)
+        # Koli / Palet toplu okutma kontrolü
+        koli_key = barkod_norm.upper()
+        if koli_map and (koli_key in koli_map or barkod_norm in koli_map):
+            koli_items = koli_map.get(koli_key) or koli_map.get(barkod_norm) or []
+            if koli_items:
+                conn = sqlite3.connect(DB_PATH, timeout=30.0)
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA synchronous=NORMAL")
+                c = conn.cursor()
+                if username:
+                    c.execute('SELECT ham_karekod FROM cikis_kayitlari WHERE kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = ""', (username,))
+                else:
+                    c.execute('SELECT ham_karekod FROM cikis_kayitlari')
+                existing_set = set((row[0] or "").casefold() for row in c.fetchall() if row[0])
 
-        if match_row is None and qr_map:
-            for k_qr, r_dict in qr_map.items():
-                if barkod_norm in k_qr or k_qr in barkod_norm:
-                    match_row = r_dict
-                    break
+                tarih = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                insert_rows = []
+                inserted_records = []
+                last_inserted = None
+                has_any_tekrar = False
 
+                for r_item in koli_items:
+                    item_qr = normalize_qr(str(r_item.get("Karekod", "")))
+                    if not item_qr:
+                        continue
+                    item_is_tekrar = item_qr.casefold() in existing_set
+                    if item_is_tekrar:
+                        has_any_tekrar = True
+                    existing_set.add(item_qr.casefold())
+
+                    u_adi = str(r_item.get('Ürün Adı', '')).strip()
+                    b_col = str(r_item.get('Gtin Numarası') or r_item.get('Gtin / Barkod') or r_item.get('gtin') or '').strip()
+                    k_no  = str(r_item.get('Koli Numarası', '')).strip()
+                    s_no  = str(r_item.get('Seri Numarası', '')).strip()
+                    p_no  = str(r_item.get('Parti Numarası', '')).strip()
+                    pal_no = str(r_item.get('Palet Numarası', '')).strip()
+                    ur_t  = str(r_item.get('Üretim Tarihi', '')).strip()
+                    sk_t  = str(r_item.get('Son Kullanma Tarihi', '')).strip()
+
+                    insert_rows.append((tarih, u_adi, b_col, k_no, s_no, p_no, pal_no, ur_t, sk_t, item_qr, 1 if item_is_tekrar else 0, username))
+                    rec = {
+                        'tarih': tarih, 'urun_adi': u_adi, 'barkod': b_col, 'koli_no': k_no,
+                        'seri_no': s_no, 'parti_no': p_no, 'palet_no': pal_no, 'uretim_tarihi': ur_t,
+                        'skt': sk_t, 'ham_karekod': item_qr, 'tekrar_uyari': 1 if item_is_tekrar else 0
+                    }
+                    inserted_records.append(rec)
+                    last_inserted = rec
+
+                if insert_rows:
+                    c.executemany('''INSERT INTO cikis_kayitlari
+                        (tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no,
+                         uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', insert_rows)
+
+                    c.execute("SELECT max(id) FROM cikis_kayitlari")
+                    max_id = c.fetchone()[0] or len(insert_rows)
+                    first_id = max_id - len(insert_rows) + 1
+                    for idx, r_rec in enumerate(inserted_records):
+                        r_rec['id'] = first_id + idx
+
+                    # Kalıcı satış ve istatistik arşivine de ekle
+                    c.executemany('''INSERT INTO satis_arsivi
+                        (tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no,
+                         uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi, durum)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CIKIS_YAPILDI')''',
+                        insert_rows)
+                    conn.commit()
+                conn.close()
+
+                return jsonify({
+                    'success': True,
+                    'is_bulk': True,
+                    'tekrar_uyari': has_any_tekrar,
+                    'count': len(insert_rows),
+                    'message': f'{koli_key} kolisindeki {len(insert_rows)} adet ürün başarıyla çıkış yapıldı.',
+                    'kayit': last_inserted,
+                    'kayitlar': inserted_records
+                })
+
+        # Parti Numarası kontrolü: Parti numarası tekil kutuyu değil tüm partiyi temsil eder
+        is_parti, p_count, p_urun = check_is_parti_no(barkod_norm, df)
+        if is_parti:
+            return jsonify({
+                'success': False,
+                'is_parti_no': True,
+                'error': f'"{barkod_raw}" bir Parti Numarasıdır ({p_urun} - Depoda bu partiye ait {p_count} adet ürün var). Parti numarası üretimdeki bir grubu temsil eder ve tekil bir kutuya ait değildir. Çıkış yapabilmek için lütfen kutu üzerindeki Karekodu veya Seri Numarasını okutunuz.'
+            })
+
+        # GTIN Barkod kontrolü: GTIN tekil kutuyu değil genel ürün tanımını temsil eder
+        is_gtin, g_count, g_urun = check_is_gtin_no(barkod_norm, df, gtin_map)
+        if is_gtin:
+            return jsonify({
+                'success': False,
+                'is_gtin_no': True,
+                'error': f'"{barkod_raw}" bir GTIN / Çizgi Barkod numarasıdır ({g_urun} - Depoda bu barkoda ait {g_count} adet ürün var). Bu numara tekil bir kutuya ait karekod değildir. Çıkış yapabilmek için lütfen kutu üzerindeki Karekodu (DataMatrix) veya Seri Numarasını okutunuz.'
+            })
+
+        # Tekil ürün kontrolü: Önce ürünü Bakanlık deposundan tam eşleştir
+        match_row = resolve_product_from_cache(barkod_norm, df, qr_map, gtin_map)
         if match_row is None:
             return jsonify({
                 'success': False,
-                'error': f'"{barkod_raw}" barkoduna ait ürün Bakanlık depo verisinde bulunamadı.'
+                'error': f'"{barkod_raw}" barkoduna / seri numarasına ait ürün Bakanlık depo verisinde bulunamadı.'
             })
 
         tarih         = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         urun_adi      = str(match_row.get('Ürün Adı', '')).strip()
         barkod_col    = str(match_row.get('Gtin Numarası') or match_row.get('Gtin / Barkod') or match_row.get('gtin') or match_row.get('BARKOD') or match_row.get('barkod') or '').strip()
-        if not barkod_col:
-            parsed = parse_gs1_qr(barkod_norm)
-            if parsed and parsed.get('gtin'):
-                barkod_col = str(parsed['gtin']).strip()
+        real_karekod  = str(match_row.get('Karekod') or '').strip() or barkod_norm
         koli_no       = str(match_row.get('Koli Numarası', '')).strip()
         seri_no       = str(match_row.get('Seri Numarası', '')).strip()
         parti_no      = str(match_row.get('Parti Numarası', '')).strip()
@@ -1721,23 +2035,93 @@ def cikis_okut():
         uretim_tarihi = str(match_row.get('Üretim Tarihi', '')).strip()
         skt           = str(match_row.get('Son Kullanma Tarihi', '')).strip()
 
+        if not barkod_col and real_karekod:
+            parsed = parse_gs1_qr(real_karekod)
+            if parsed and parsed.get('gtin'):
+                barkod_col = str(parsed['gtin']).strip()
+        if not seri_no and real_karekod:
+            parsed = parse_gs1_qr(real_karekod)
+            if parsed and parsed.get('seri_no'):
+                seri_no = str(parsed['seri_no']).strip()
+
         conn = sqlite3.connect(DB_PATH, timeout=30.0)
         c = conn.cursor()
+
+        # Çıkış kayıtlarında bu ürünün daha önce çıkış yapılıp yapılmadığını denetle:
+        # 1) Gerçek tam karekod ile eşleşme
+        # 2) Okutulan ham değer ile eşleşme
+        # 3) Aynı Seri Numarası + GTIN ile eşleşme (kullanıcı ister karekod ister seri no okutmuş olsun yakalar)
+        if username:
+            c.execute('''
+                SELECT id, tarih, urun_adi, ham_karekod, seri_no
+                FROM (
+                    SELECT id, tarih, urun_adi, ham_karekod, seri_no, kullanici_adi, barkod FROM cikis_kayitlari
+                    UNION ALL
+                    SELECT id, tarih, urun_adi, ham_karekod, seri_no, kullanici_adi, barkod FROM satis_arsivi
+                )
+                WHERE (kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = "")
+                  AND (
+                      LOWER(ham_karekod) = LOWER(?)
+                      OR LOWER(ham_karekod) = LOWER(?)
+                      OR (
+                          seri_no IS NOT NULL AND seri_no != ""
+                          AND LOWER(seri_no) = LOWER(?)
+                          AND (? = "" OR barkod = ? OR barkod IS NULL OR barkod = "")
+                      )
+                  )
+                ORDER BY id ASC LIMIT 1
+            ''', (username, real_karekod, barkod_norm, seri_no, barkod_col, barkod_col))
+        else:
+            c.execute('''
+                SELECT id, tarih, urun_adi, ham_karekod, seri_no
+                FROM (
+                    SELECT id, tarih, urun_adi, ham_karekod, seri_no, kullanici_adi, barkod FROM cikis_kayitlari
+                    UNION ALL
+                    SELECT id, tarih, urun_adi, ham_karekod, seri_no, kullanici_adi, barkod FROM satis_arsivi
+                )
+                WHERE (
+                    LOWER(ham_karekod) = LOWER(?)
+                    OR LOWER(ham_karekod) = LOWER(?)
+                    OR (
+                        seri_no IS NOT NULL AND seri_no != ""
+                        AND LOWER(seri_no) = LOWER(?)
+                        AND (? = "" OR barkod = ? OR barkod IS NULL OR barkod = "")
+                    )
+                )
+                ORDER BY id ASC LIMIT 1
+            ''', (real_karekod, barkod_norm, seri_no, barkod_col, barkod_col))
+
+        existing = c.fetchone()
+        is_tekrar = False
+        ex_tarih = ""
+        if existing:
+            is_tekrar = True
+            ex_tarih = existing[1] or ""
+
         c.execute("PRAGMA journal_mode=WAL")
         c.execute("PRAGMA synchronous=NORMAL")
+        # Karekod sütununa kullanıcının girdiği seri no yerine ürünün GERÇEK TAM KAREKODU kaydedilir
         c.execute('''INSERT INTO cikis_kayitlari
             (tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no,
              uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)''',
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
             (tarih, urun_adi, barkod_col, koli_no, seri_no, parti_no, palet_no,
-             uretim_tarihi, skt, barkod_norm, username))
+             uretim_tarihi, skt, real_karekod, 1 if is_tekrar else 0, username))
         new_id = c.lastrowid
+
+        # Kalıcı satış & istatistik arşivine de ekle
+        c.execute('''INSERT INTO satis_arsivi
+            (tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no,
+             uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi, durum)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CIKIS_YAPILDI')''',
+            (tarih, urun_adi, barkod_col, koli_no, seri_no, parti_no, palet_no,
+             uretim_tarihi, skt, real_karekod, 1 if is_tekrar else 0, username))
         conn.commit()
         conn.close()
 
-        return jsonify({
+        res_obj = {
             'success': True,
-            'tekrar_uyari': False,
+            'tekrar_uyari': is_tekrar,
             'kayit': {
                 'id': new_id,
                 'tarih': tarih,
@@ -1749,9 +2133,14 @@ def cikis_okut():
                 'palet_no': palet_no,
                 'uretim_tarihi': uretim_tarihi,
                 'skt': skt,
-                'ham_karekod': barkod_norm
+                'ham_karekod': real_karekod,
+                'tekrar_uyari': 1 if is_tekrar else 0
             }
-        })
+        }
+        if is_tekrar:
+            res_obj['warning'] = f'Bu ürün daha önce depodan çıkarılmış! (Önceki çıkış tarihi: {ex_tarih})'
+        return jsonify(res_obj)
+
     except Exception as e:
         logger.error(f"cikis_okut error: {e}", exc_info=True)
         return jsonify({'success': False, 'error': f'Kayıt sırasında hata: {str(e)}'})
@@ -1773,10 +2162,12 @@ def cikis_toplu_ekle():
         c = conn.cursor()
 
         if username:
-            c.execute('SELECT ham_karekod FROM cikis_kayitlari WHERE kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = ""', (username,))
+            c.execute('SELECT ham_karekod, seri_no, barkod FROM cikis_kayitlari WHERE kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = ""', (username,))
         else:
-            c.execute('SELECT ham_karekod FROM cikis_kayitlari')
-        existing_set = set(row[0] for row in c.fetchall() if row[0])
+            c.execute('SELECT ham_karekod, seri_no, barkod FROM cikis_kayitlari')
+        existing_rows = c.fetchall()
+        existing_qr_set = set((row[0] or "").casefold() for row in existing_rows if row[0])
+        existing_seri_set = set((row[1] or "").casefold() for row in existing_rows if row[1])
 
         insert_rows = []
         added_count = 0
@@ -1784,28 +2175,36 @@ def cikis_toplu_ekle():
         tarih = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
         for barkod_raw in items:
-            barkod_norm = normalize_qr(str(barkod_raw).strip())
-            if not barkod_norm:
+            raw_str = str(barkod_raw).strip()
+            if not raw_str:
                 continue
 
-            if barkod_norm in existing_set:
-                already_count += 1
+            # Parti Numarası tekil ürün olarak listeye eklenmemelidir
+            is_parti, _, _ = check_is_parti_no(raw_str, df)
+            if is_parti:
+                logger.warning(f"cikis_toplu_ekle: '{raw_str}' parti numarası olduğu için tekil çıkışa eklenmedi.")
                 continue
 
-            existing_set.add(barkod_norm)
+            # GTIN / Barkod tekil ürün olarak listeye eklenmemelidir
+            is_gtin, _, _ = check_is_gtin_no(raw_str, df, gtin_map)
+            if is_gtin:
+                logger.warning(f"cikis_toplu_ekle: '{raw_str}' GTIN numarası olduğu için tekil çıkışa eklenmedi.")
+                continue
 
-            match_row = qr_map.get(barkod_norm) if qr_map else None
-            if match_row is None and gtin_map:
-                match_row = gtin_map.get(barkod_norm)
-
-            if match_row is None and qr_map:
-                for k_qr, r_dict in qr_map.items():
-                    if barkod_norm in k_qr or k_qr in barkod_norm:
-                        match_row = r_dict
-                        break
-
-            if match_row is None:
-                parsed = parse_gs1_qr(barkod_norm)
+            match_row = resolve_product_from_cache(raw_str, df, qr_map, gtin_map)
+            if match_row:
+                real_karekod = str(match_row.get('Karekod') or '').strip() or normalize_qr(raw_str)
+                urun_adi = str(match_row.get('Ürün Adı', '')).strip()
+                barkod_col = str(match_row.get('Gtin Numarası') or match_row.get('Gtin / Barkod') or match_row.get('gtin') or '').strip()
+                koli_no = str(match_row.get('Koli Numarası', '')).strip()
+                seri_no = str(match_row.get('Seri Numarası', '')).strip()
+                parti_no = str(match_row.get('Parti Numarası', '')).strip()
+                palet_no = str(match_row.get('Palet Numarası', '')).strip()
+                uretim_tarihi = str(match_row.get('Üretim Tarihi', '')).strip()
+                skt = str(match_row.get('Son Kullanma Tarihi', '')).strip()
+            else:
+                real_karekod = normalize_qr(raw_str)
+                parsed = parse_gs1_qr(real_karekod)
                 urun_adi = "Tanımsız Ürün"
                 barkod_col = str(parsed.get('gtin') or '').strip()
                 koli_no = ""
@@ -1814,22 +2213,17 @@ def cikis_toplu_ekle():
                 palet_no = ""
                 uretim_tarihi = str(parsed.get('uretim_tarihi') or '').strip()
                 skt = str(parsed.get('skt') or '').strip()
-            else:
-                urun_adi      = str(match_row.get('Ürün Adı', '')).strip()
-                barkod_col    = str(match_row.get('Gtin Numarası') or match_row.get('Gtin / Barkod') or match_row.get('gtin') or match_row.get('BARKOD') or match_row.get('barkod') or '').strip()
-                if not barkod_col:
-                    parsed = parse_gs1_qr(barkod_norm)
-                    if parsed and parsed.get('gtin'):
-                        barkod_col = str(parsed['gtin']).strip()
-                koli_no       = str(match_row.get('Koli Numarası', '')).strip()
-                seri_no       = str(match_row.get('Seri Numarası', '')).strip()
-                parti_no      = str(match_row.get('Parti Numarası', '')).strip()
-                palet_no      = str(match_row.get('Palet Numarası', '')).strip()
-                uretim_tarihi = str(match_row.get('Üretim Tarihi', '')).strip()
-                skt           = str(match_row.get('Son Kullanma Tarihi', '')).strip()
+
+            is_tekrar = (real_karekod.casefold() in existing_qr_set) or (seri_no and seri_no.casefold() in existing_seri_set)
+            if is_tekrar:
+                already_count += 1
+
+            existing_qr_set.add(real_karekod.casefold())
+            if seri_no:
+                existing_seri_set.add(seri_no.casefold())
 
             insert_rows.append((tarih, urun_adi, barkod_col, koli_no, seri_no, parti_no, palet_no,
-                                uretim_tarihi, skt, barkod_norm, 0, username))
+                                uretim_tarihi, skt, real_karekod, 1 if is_tekrar else 0, username))
             added_count += 1
 
         if insert_rows:
@@ -1837,6 +2231,12 @@ def cikis_toplu_ekle():
                 (tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no,
                  uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', insert_rows)
+            # Kalıcı satış & istatistik arşivine de ekle
+            c.executemany('''INSERT INTO satis_arsivi
+                (tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no,
+                 uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi, durum)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CIKIS_YAPILDI')''',
+                [r + ('CIKIS_YAPILDI',) for r in insert_rows])
             conn.commit()
 
         conn.close()
@@ -1859,10 +2259,14 @@ def cikis_toplu_ekle():
 @app.route('/api/cikis/listesi', methods=['GET'])
 def cikis_listesi_api():
     try:
+        username, _, _, _ = read_bkst_credentials()
         conn = sqlite3.connect(DB_PATH, timeout=30.0)
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
-        c.execute('SELECT * FROM cikis_kayitlari ORDER BY id DESC')
+        if username:
+            c.execute('SELECT * FROM cikis_kayitlari WHERE kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = "" ORDER BY id DESC', (username,))
+        else:
+            c.execute('SELECT * FROM cikis_kayitlari ORDER BY id DESC')
         rows = [dict(r) for r in c.fetchall()]
         conn.close()
 
@@ -1870,7 +2274,10 @@ def cikis_listesi_api():
         for row in rows:
             clean_row = {}
             for k, v in row.items():
-                clean_row[k] = "" if v is None else str(v)
+                if k == 'tekrar_uyari':
+                    clean_row['tekrar_uyari'] = 1 if (v in (1, '1', True)) else 0
+                else:
+                    clean_row[k] = "" if v is None else str(v)
             if not clean_row.get('barkod') and clean_row.get('ham_karekod'):
                 parsed = parse_gs1_qr(clean_row['ham_karekod'])
                 if parsed and parsed.get('gtin'):
@@ -1953,6 +2360,654 @@ def cikis_indir():
     fname = f'cikis_listesi_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
     return send_file(output, as_attachment=True, download_name=fname,
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+# ── İSTATİSTİKLER & SATIŞ RAPORLARI API ──────────────────────────────────────
+@app.route('/api/istatistikler/ozet', methods=['GET'])
+def api_istatistikler_ozet():
+    try:
+        yil = request.args.get('yil', 'tum').strip()
+        baslangic = request.args.get('baslangic', '').strip()
+        bitis = request.args.get('bitis', '').strip()
+        username, _, _, _ = read_bkst_credentials()
+
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+
+        # Mevcut tüm yılları topla
+        c.execute("""
+            SELECT DISTINCT substr(tarih, 1, 4) as yr
+            FROM satis_arsivi
+            WHERE tarih IS NOT NULL AND length(tarih) >= 4 AND substr(tarih, 1, 4) GLOB '[1-2][0-9][0-9][0-9]'
+            ORDER BY yr DESC
+        """)
+        db_years = [r['yr'] for r in c.fetchall() if r['yr']]
+        default_years = ['2026', '2025', '2024', '2023']
+        all_years = sorted(list(set(db_years + default_years)), reverse=True)
+
+        where_parts = []
+        params = []
+        if username:
+            where_parts.append('(kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = "")')
+            params.append(username)
+        if yil and yil != 'tum':
+            where_parts.append("substr(tarih, 1, 4) = ?")
+            params.append(yil)
+        if baslangic:
+            where_parts.append("substr(tarih, 1, 10) >= ?")
+            params.append(baslangic)
+        if bitis:
+            where_parts.append("substr(tarih, 1, 10) <= ?")
+            params.append(bitis)
+
+        where_sql = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
+
+        # KPI Özeti
+        c.execute(f"""
+            SELECT 
+                COUNT(*) as toplam_adet,
+                COUNT(DISTINCT urun_adi) as tekil_urun,
+                COUNT(CASE WHEN tekrar_uyari = 1 THEN 1 END) as tekrar_adet,
+                COUNT(CASE WHEN koli_no IS NOT NULL AND koli_no != '' THEN 1 END) as koli_adet,
+                COUNT(CASE WHEN palet_no IS NOT NULL AND palet_no != '' THEN 1 END) as palet_adet,
+                COUNT(DISTINCT substr(tarih, 1, 10)) as aktif_gun,
+                MIN(tarih) as ilk_tarih,
+                MAX(tarih) as son_tarih
+            FROM satis_arsivi
+            {where_sql}
+        """, params)
+        kpi_raw = dict(c.fetchone() or {})
+        toplam_adet = kpi_raw.get('toplam_adet') or 0
+        tekil_urun = kpi_raw.get('tekil_urun') or 0
+        tekrar_adet = kpi_raw.get('tekrar_adet') or 0
+        koli_adet = kpi_raw.get('koli_adet') or 0
+        palet_adet = kpi_raw.get('palet_adet') or 0
+        tekil_adet = max(0, toplam_adet - koli_adet - palet_adet)
+        aktif_gun = kpi_raw.get('aktif_gun') or 0
+        gunluk_ort = round(toplam_adet / max(1, aktif_gun), 1) if aktif_gun else 0
+        tekrar_orani = round((tekrar_adet / max(1, toplam_adet)) * 100, 1)
+
+        # Lider Ürün
+        c.execute(f"""
+            SELECT urun_adi, COUNT(*) as adet
+            FROM satis_arsivi
+            {where_sql}
+            GROUP BY urun_adi
+            ORDER BY adet DESC
+            LIMIT 1
+        """, params)
+        lider_row = c.fetchone()
+        lider_urun = lider_row['urun_adi'] if lider_row else "Veri Yok"
+        lider_adet = lider_row['adet'] if lider_row else 0
+
+        # Aylık Dağılım (12 Ay: Ocak - Aralık)
+        ay_isimleri = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
+        aylik_sayilar = [0] * 12
+        c.execute(f"""
+            SELECT substr(tarih, 6, 2) as ay_no, COUNT(*) as adet
+            FROM satis_arsivi
+            {where_sql}
+            GROUP BY ay_no
+            ORDER BY ay_no ASC
+        """, params)
+        for r in c.fetchall():
+            ay_str = r['ay_no']
+            if ay_str and ay_str.isdigit():
+                idx = int(ay_str) - 1
+                if 0 <= idx < 12:
+                    aylik_sayilar[idx] = r['adet']
+
+        # Yıllık Karşılaştırma (Tüm Yıllar)
+        u_filter = "WHERE (kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = '')" if username else ""
+        u_p = [username] if username else []
+        c.execute(f"""
+            SELECT substr(tarih, 1, 4) as yr, COUNT(*) as adet
+            FROM satis_arsivi
+            {u_filter}
+            GROUP BY yr
+            HAVING yr IS NOT NULL AND length(yr) = 4 AND yr GLOB '[1-2][0-9][0-9][0-9]'
+            ORDER BY yr ASC
+        """, u_p)
+        yillik_dict = {str(y): 0 for y in all_years}
+        for r in c.fetchall():
+            yillik_dict[str(r['yr'])] = r['adet']
+        yillik_labels = sorted(yillik_dict.keys())
+        yillik_values = [yillik_dict[y] for y in yillik_labels]
+
+        # En Çok Satan Ürünler (Top 30)
+        c.execute(f"""
+            SELECT 
+                urun_adi, 
+                COALESCE(barkod, '') as barkod,
+                COUNT(*) as adet,
+                COUNT(CASE WHEN koli_no != '' THEN 1 END) as koli_sayisi,
+                COUNT(CASE WHEN palet_no != '' THEN 1 END) as palet_sayisi,
+                MAX(tarih) as son_cikis
+            FROM satis_arsivi
+            {where_sql}
+            GROUP BY urun_adi, barkod
+            ORDER BY adet DESC
+            LIMIT 30
+        """, params)
+        top_urunler = []
+        for r in c.fetchall():
+            ad = r['adet']
+            pct = round((ad / max(1, toplam_adet)) * 100, 1)
+            top_urunler.append({
+                'urun_adi': r['urun_adi'] or 'İsimsiz Ürün',
+                'barkod': r['barkod'] or '-',
+                'adet': ad,
+                'koli_sayisi': r['koli_sayisi'],
+                'palet_sayisi': r['palet_sayisi'],
+                'yuzde': pct,
+                'son_cikis': r['son_cikis'] or ''
+            })
+
+        # Haftanın Günleri
+        gunluk_dagilim = [0] * 7
+        c.execute(f"""
+            SELECT strftime('%w', tarih) as gun_no, COUNT(*) as adet
+            FROM satis_arsivi
+            {where_sql}
+            GROUP BY gun_no
+        """, params)
+        for r in c.fetchall():
+            g = r['gun_no']
+            if g is not None and str(g).isdigit():
+                idx = int(g)
+                if 0 <= idx < 7:
+                    gunluk_dagilim[idx] = r['adet']
+        hafta_gunleri = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
+        hafta_degerleri = gunluk_dagilim[1:] + gunluk_dagilim[:1]
+
+        # Parti Dağılımı
+        parti_where = (where_sql + " AND parti_no IS NOT NULL AND parti_no != ''") if where_sql else "WHERE parti_no IS NOT NULL AND parti_no != ''"
+        c.execute(f"""
+            SELECT 
+                COALESCE(parti_no, 'Belirtilmemiş') as parti,
+                urun_adi,
+                COUNT(*) as adet,
+                MAX(skt) as skt
+            FROM satis_arsivi
+            {parti_where}
+            GROUP BY parti, urun_adi
+            ORDER BY adet DESC
+            LIMIT 20
+        """, params)
+        top_partiler = [dict(r) for r in c.fetchall()]
+
+        # Depo Stoğu Karşılaştırması
+        c.execute("SELECT COUNT(*) as depo_toplam, COUNT(DISTINCT urun_adi) as depo_kalem FROM bkst_depo_verileri")
+        depo_row = dict(c.fetchone() or {})
+
+        conn.close()
+
+        return jsonify({
+            'success': True,
+            'filtre': {
+                'yil': yil,
+                'baslangic': baslangic,
+                'bitis': bitis
+            },
+            'mevcut_yillar': all_years,
+            'kpi': {
+                'toplam_cikis': toplam_adet,
+                'tekil_urun_sayisi': tekil_urun,
+                'lider_urun': lider_urun,
+                'lider_adet': lider_adet,
+                'koli_adet': koli_adet,
+                'palet_adet': palet_adet,
+                'tekil_adet': tekil_adet,
+                'koli_orani': round((koli_adet / max(1, toplam_adet)) * 100, 1),
+                'tekil_orani': round((tekil_adet / max(1, toplam_adet)) * 100, 1),
+                'gunluk_ortalama': gunluk_ort,
+                'aktif_gun': aktif_gun,
+                'tekrar_adet': tekrar_adet,
+                'tekrar_orani': tekrar_orani,
+                'depo_mevcut_stok': depo_row.get('depo_toplam', 0),
+                'depo_kalem_sayisi': depo_row.get('depo_kalem', 0)
+            },
+            'aylik_grafik': {
+                'etiketler': ay_isimleri,
+                'veriler': aylik_sayilar
+            },
+            'yillik_grafik': {
+                'etiketler': yillik_labels,
+                'veriler': yillik_values
+            },
+            'haftalik_grafik': {
+                'etiketler': hafta_gunleri,
+                'veriler': hafta_degerleri
+            },
+            'en_cok_satanlar': top_urunler,
+            'parti_dagilimi': top_partiler
+        })
+    except Exception as e:
+        logger.error(f"api_istatistikler_ozet error: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/istatistikler/excel_indir', methods=['GET'])
+def api_istatistikler_excel_indir():
+    try:
+        yil = request.args.get('yil', 'tum').strip()
+        baslangic = request.args.get('baslangic', '').strip()
+        bitis = request.args.get('bitis', '').strip()
+        username, _, _, _ = read_bkst_credentials()
+
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+
+        where_parts = []
+        params = []
+        if username:
+            where_parts.append('(kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = "")')
+            params.append(username)
+        if yil and yil != 'tum':
+            where_parts.append("substr(tarih, 1, 4) = ?")
+            params.append(yil)
+        if baslangic:
+            where_parts.append("substr(tarih, 1, 10) >= ?")
+            params.append(baslangic)
+        if bitis:
+            where_parts.append("substr(tarih, 1, 10) <= ?")
+            params.append(bitis)
+
+        where_sql = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
+
+        # Fetch detail rows
+        c.execute(f"""
+            SELECT id, tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no, uretim_tarihi, skt, ham_karekod, tekrar_uyari
+            FROM satis_arsivi
+            {where_sql}
+            ORDER BY id DESC
+        """, params)
+        detail_rows = [dict(r) for r in c.fetchall()]
+
+        # Fetch top products
+        c.execute(f"""
+            SELECT urun_adi, COALESCE(barkod, '') as barkod, COUNT(*) as adet,
+                   COUNT(CASE WHEN koli_no != '' THEN 1 END) as koli_adet,
+                   COUNT(CASE WHEN koli_no = '' AND palet_no = '' THEN 1 END) as tekil_adet,
+                   MAX(tarih) as son_cikis
+            FROM satis_arsivi
+            {where_sql}
+            GROUP BY urun_adi, barkod
+            ORDER BY adet DESC
+        """, params)
+        top_products = [dict(r) for r in c.fetchall()]
+
+        # Monthly counts
+        c.execute(f"""
+            SELECT substr(tarih, 6, 2) as ay_no, COUNT(*) as adet
+            FROM satis_arsivi
+            {where_sql}
+            GROUP BY ay_no
+            ORDER BY ay_no ASC
+        """, params)
+        monthly_map = {r['ay_no']: r['adet'] for r in c.fetchall()}
+
+        conn.close()
+
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+        wb = openpyxl.Workbook()
+        
+        # Style helpers
+        font_title = Font(name='Segoe UI', size=14, bold=True, color='0F172A')
+        font_sub = Font(name='Segoe UI', size=10, italic=True, color='64748B')
+        font_hdr = Font(name='Segoe UI', size=10, bold=True, color='FFFFFF')
+        font_bold = Font(name='Segoe UI', size=10, bold=True, color='0F172A')
+        font_norm = Font(name='Segoe UI', size=10, color='1E293B')
+        fill_hdr = PatternFill(start_color='1E293B', end_color='1E293B', fill_type='solid')
+        fill_zebra = PatternFill(start_color='F8FAFC', end_color='F8FAFC', fill_type='solid')
+        border_thin = Side(border_style='thin', color='CBD5E1')
+        cell_border = Border(left=border_thin, right=border_thin, top=border_thin, bottom=border_thin)
+
+        # SHEET 1: ÖZET RAPOR
+        ws1 = wb.active
+        ws1.title = "Genel Özet"
+        ws1.views.sheetView[0].showGridLines = True
+        ws1['A1'] = "QR COMPARE - SATIŞ VE ÇIKIŞ İSTATİSTİK RAPORU"
+        ws1['A1'].font = font_title
+        period_str = f"Filtre Dönemi: Yıl: {yil if yil != 'tum' else 'Tüm Yıllar'}"
+        if baslangic or bitis:
+            period_str += f" | {baslangic or 'İlk'} - {bitis or 'Son'}"
+        ws1['A2'] = f"{period_str} | Rapor Tarihi: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+        ws1['A2'].font = font_sub
+
+        total_cnt = len(detail_rows)
+        kpi_data = [
+            ("Toplam Çıkış Adedi (Kutu)", total_cnt),
+            ("Çıkış Yapılan Kalem Sayısı", len(top_products)),
+            ("Koli İle Çıkış Yapılan Adet", sum(r.get('koli_adet', 0) for r in top_products)),
+            ("Tekil Kutu Çıkış Adedi", sum(r.get('tekil_adet', 0) for r in top_products)),
+            ("En Çok Satan Ürün", top_products[0]['urun_adi'] if top_products else "-"),
+            ("En Çok Satan Ürün Satış Adedi", top_products[0]['adet'] if top_products else 0),
+        ]
+        ws1.cell(row=4, column=1, value="METRİK").fill = fill_hdr
+        ws1.cell(row=4, column=1).font = font_hdr
+        ws1.cell(row=4, column=2, value="DEĞER").fill = fill_hdr
+        ws1.cell(row=4, column=2).font = font_hdr
+
+        for idx, (m_label, m_val) in enumerate(kpi_data, start=5):
+            c1 = ws1.cell(row=idx, column=1, value=m_label)
+            c2 = ws1.cell(row=idx, column=2, value=m_val)
+            c1.font = font_bold
+            c2.font = font_norm
+            c1.border = cell_border
+            c2.border = cell_border
+            if idx % 2 == 1:
+                c1.fill = fill_zebra
+                c2.fill = fill_zebra
+
+        ws1.column_dimensions['A'].width = 35
+        ws1.column_dimensions['B'].width = 25
+
+        # SHEET 2: ÜRÜN BAZLI SATIŞLAR
+        ws2 = wb.create_sheet(title="Ürün Bazlı Satışlar")
+        ws2.views.sheetView[0].showGridLines = True
+        hdrs2 = ["Sıra", "Ürün Adı", "GTIN / Barkod", "Toplam Adet", "Pazar Payı (%)", "Koli Çıkışı", "Tekil Çıkış", "Son Çıkış Tarihi"]
+        for c_idx, h_text in enumerate(hdrs2, start=1):
+            cell = ws2.cell(row=1, column=c_idx, value=h_text)
+            cell.font = font_hdr
+            cell.fill = fill_hdr
+            cell.alignment = Alignment(horizontal='center' if c_idx in [1, 4, 5, 6, 7] else 'left')
+
+        for r_idx, p in enumerate(top_products, start=2):
+            pct = round((p['adet'] / max(1, total_cnt)) * 100, 1)
+            vals = [
+                r_idx - 1,
+                p['urun_adi'],
+                p['barkod'],
+                p['adet'],
+                f"%{pct}",
+                p.get('koli_adet', 0),
+                p.get('tekil_adet', 0),
+                p.get('son_cikis', '')
+            ]
+            for col_idx, val in enumerate(vals, start=1):
+                cell = ws2.cell(row=r_idx, column=col_idx, value=val)
+                cell.font = font_norm
+                cell.border = cell_border
+                if r_idx % 2 == 1:
+                    cell.fill = fill_zebra
+
+        ws2.column_dimensions['A'].width = 8
+        ws2.column_dimensions['B'].width = 35
+        ws2.column_dimensions['C'].width = 20
+        ws2.column_dimensions['D'].width = 15
+        ws2.column_dimensions['E'].width = 15
+        ws2.column_dimensions['F'].width = 15
+        ws2.column_dimensions['G'].width = 15
+        ws2.column_dimensions['H'].width = 22
+
+        # SHEET 3: AYLIK SATIŞ DAĞILIMI
+        ws3 = wb.create_sheet(title="Aylık Dağılım")
+        ws3.views.sheetView[0].showGridLines = True
+        ws3.cell(row=1, column=1, value="Ay Numarası").fill = fill_hdr
+        ws3.cell(row=1, column=1).font = font_hdr
+        ws3.cell(row=1, column=2, value="Ay Adı").fill = fill_hdr
+        ws3.cell(row=1, column=2).font = font_hdr
+        ws3.cell(row=1, column=3, value="Satış Adedi (Kutu)").fill = fill_hdr
+        ws3.cell(row=1, column=3).font = font_hdr
+        ws3.cell(row=1, column=4, value="Yüzde Pay (%)").fill = fill_hdr
+        ws3.cell(row=1, column=4).font = font_hdr
+
+        ay_adlari = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
+        for m_idx in range(1, 13):
+            m_str = f"{m_idx:02d}"
+            cnt = monthly_map.get(m_str, 0)
+            pct = round((cnt / max(1, total_cnt)) * 100, 1)
+            row_num = m_idx + 1
+            ws3.cell(row=row_num, column=1, value=m_idx).border = cell_border
+            ws3.cell(row=row_num, column=2, value=ay_adlari[m_idx - 1]).border = cell_border
+            ws3.cell(row=row_num, column=3, value=cnt).border = cell_border
+            ws3.cell(row=row_num, column=4, value=f"%{pct}").border = cell_border
+            if row_num % 2 == 1:
+                for c_i in range(1, 5):
+                    ws3.cell(row=row_num, column=c_i).fill = fill_zebra
+
+        ws3.column_dimensions['A'].width = 14
+        ws3.column_dimensions['B'].width = 18
+        ws3.column_dimensions['C'].width = 22
+        ws3.column_dimensions['D'].width = 16
+
+        # SHEET 4: TÜM ÇIKIŞ KAYITLARI
+        ws4 = wb.create_sheet(title="Ham Çıkış Kayıtları")
+        ws4.views.sheetView[0].showGridLines = True
+        hdrs4 = ["ID", "Tarih/Saat", "Ürün Adı", "GTIN/Barkod", "Seri No", "Parti No", "Koli No", "Palet No", "Üretim Tarihi", "SKT", "Tam Karekod", "Tekrar"]
+        for c_idx, h_text in enumerate(hdrs4, start=1):
+            cell = ws4.cell(row=1, column=c_idx, value=h_text)
+            cell.font = font_hdr
+            cell.fill = fill_hdr
+
+        for r_idx, row in enumerate(detail_rows, start=2):
+            vals = [
+                row.get('id', ''),
+                row.get('tarih', ''),
+                row.get('urun_adi', ''),
+                row.get('barkod', ''),
+                row.get('seri_no', ''),
+                row.get('parti_no', ''),
+                row.get('koli_no', ''),
+                row.get('palet_no', ''),
+                row.get('uretim_tarihi', ''),
+                row.get('skt', ''),
+                row.get('ham_karekod', ''),
+                'EVET' if row.get('tekrar_uyari') == 1 else 'HAYIR'
+            ]
+            for col_idx, val in enumerate(vals, start=1):
+                cell = ws4.cell(row=r_idx, column=col_idx, value=val)
+                cell.font = font_norm
+                cell.border = cell_border
+
+        for col_l in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L']:
+            ws4.column_dimensions[col_l].width = 18
+        ws4.column_dimensions['C'].width = 30
+        ws4.column_dimensions['K'].width = 40
+
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        filename = f"satis_istatistik_raporu_{yil}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        return send_file(output, as_attachment=True, download_name=filename,
+                         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    except Exception as e:
+        logger.error(f"api_istatistikler_excel_indir error: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/istatistikler/ornek_gecmis_ekle', methods=['POST'])
+def api_istatistikler_ornek_gecmis_ekle():
+    try:
+        username, _, _, _ = read_bkst_credentials()
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        c = conn.cursor()
+
+        # Depodaki gerçek ürünlerden örnek al
+        c.execute("SELECT DISTINCT gtin, urun_adi, parti_no, uretim_tarihi, skt FROM bkst_depo_verileri LIMIT 15")
+        warehouse_prods = c.fetchall()
+
+        if not warehouse_prods:
+            warehouse_prods = [
+                ("08699258170119", "Agnoround 20x1 LT", "A6868148", "05.08.2024", "05.08.2028"),
+                ("08693814003187", "KORTAC 100 EC 1 LT", "K992011", "12.02.2024", "12.02.2027"),
+                ("08681128520308", "EMALDA 1000 ML.", "EM88291", "10.04.2024", "10.04.2028"),
+                ("08699514012014", "DORADO 500 SC 1 LT", "D77124", "01.06.2024", "01.06.2028"),
+                ("08680123456789", "TEBUCONAZOLE 250 EW", "TB5521", "15.01.2024", "15.01.2027")
+            ]
+
+        import random
+        demo_rows = []
+        serial_counter = 500000
+
+        for year in [2024, 2025]:
+            for month in range(1, 13):
+                monthly_count = random.randint(12, 32)
+                for _ in range(monthly_count):
+                    serial_counter += 1
+                    prod = random.choice(warehouse_prods)
+                    gtin, u_name, p_no, ur_t, sk_t = prod[0], prod[1], prod[2], prod[3], prod[4]
+                    day = random.randint(1, 28)
+                    hour = random.randint(8, 18)
+                    minute = random.randint(0, 59)
+                    second = random.randint(0, 59)
+                    tarih = f"{year}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}"
+
+                    is_koli = random.random() < 0.65
+                    koli_no = f"004869{random.randint(1000000000, 9999999999)}" if is_koli else ""
+                    seri_no = f"{serial_counter}"
+                    tam_qr = f"DEMO_HISTORICAL_{gtin}_{seri_no}_{p_no}"
+
+                    demo_rows.append((
+                        tarih, u_name, gtin, koli_no, seri_no, p_no, "",
+                        ur_t, sk_t, tam_qr, 0, username or "demo_gecmis"
+                    ))
+
+        c.executemany("""
+            INSERT INTO satis_arsivi 
+            (tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no, uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, demo_rows)
+        conn.commit()
+        conn.close()
+
+        return jsonify({
+            'success': True,
+            'message': f'2024 ve 2025 yıllarına ait toplam {len(demo_rows)} adet gerçekçi geçmiş satış kaydı başarıyla eklendi.',
+            'eklenen_adet': len(demo_rows)
+        })
+    except Exception as e:
+        logger.error(f"api_istatistikler_ornek_gecmis_ekle error: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/istatistikler/ornek_gecmis_temizle', methods=['POST'])
+def api_istatistikler_ornek_gecmis_temizle():
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        c = conn.cursor()
+        c.execute("DELETE FROM satis_arsivi WHERE ham_karekod LIKE 'DEMO_HISTORICAL_%'")
+        deleted_cnt = c.rowcount
+        conn.commit()
+        conn.close()
+        return jsonify({
+            'success': True,
+            'message': f'Örnek geçmiş satış verileri temizlendi ({deleted_cnt} kayıt silindi).',
+            'silinen_adet': deleted_cnt
+        })
+    except Exception as e:
+        logger.error(f"api_istatistikler_ornek_gecmis_temizle error: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/istatistikler/sifirla', methods=['POST'])
+def api_istatistikler_sifirla():
+    try:
+        data = request.get_json(silent=True) or {}
+        yil = str(data.get('yil', 'tum')).strip()
+        username, _, _, _ = read_bkst_credentials()
+
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        c = conn.cursor()
+
+        if yil and yil != 'tum':
+            c.execute("DELETE FROM satis_arsivi WHERE substr(tarih, 1, 4) = ?", (yil,))
+            msg = f"{yil} yılına ait tüm satış ve istatistik kayıtları başarıyla sıfırlandı."
+        else:
+            c.execute("DELETE FROM satis_arsivi")
+            msg = "Kalıcı satış arşivi ve tüm geçmiş istatistik verileri başarıyla sıfırlandı."
+
+        deleted_cnt = c.rowcount
+        conn.commit()
+        conn.close()
+
+        logger.info(f"api_istatistikler_sifirla: {deleted_cnt} kayıt silindi (yil={yil})")
+        return jsonify({
+            'success': True,
+            'message': msg,
+            'silinen_adet': deleted_cnt
+        })
+    except Exception as e:
+        logger.error(f"api_istatistikler_sifirla error: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/istatistikler/excel_yukle', methods=['POST'])
+def api_istatistikler_excel_yukle():
+    try:
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': 'Lütfen bir Excel dosyası seçin.'})
+        f = request.files['file']
+        if not f.filename:
+            return jsonify({'success': False, 'error': 'Dosya adı boş olamaz.'})
+
+        username, _, _, _ = read_bkst_credentials()
+        df = pd.read_excel(f)
+        if df.empty:
+            return jsonify({'success': False, 'error': 'Yüklenen dosya boş.'})
+
+        col_map = {}
+        for c in df.columns:
+            c_str = str(c).strip().lower()
+            if 'tarih' in c_str or 'date' in c_str: col_map['tarih'] = c
+            elif 'ürün' in c_str or 'urun' in c_str or 'name' in c_str: col_map['urun_adi'] = c
+            elif 'barkod' in c_str or 'gtin' in c_str or 'barcode' in c_str: col_map['barkod'] = c
+            elif 'seri' in c_str or 'serial' in c_str: col_map['seri_no'] = c
+            elif 'parti' in c_str or 'lot' in c_str: col_map['parti_no'] = c
+            elif 'koli' in c_str: col_map['koli_no'] = c
+            elif 'palet' in c_str: col_map['palet_no'] = c
+            elif 'karekod' in c_str or 'qr' in c_str: col_map['ham_karekod'] = c
+
+        if 'urun_adi' not in col_map:
+            return jsonify({'success': False, 'error': "Excel dosyasında 'Ürün Adı' sütunu bulunamadı."})
+
+        insert_rows = []
+        for _, r in df.iterrows():
+            t_val = str(r.get(col_map.get('tarih', ''), '')).strip() if 'tarih' in col_map else ''
+            if not t_val or t_val in ('NaT', 'nan', 'None'):
+                t_val = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            u_val = str(r.get(col_map['urun_adi'], '')).strip()
+            if not u_val or u_val in ('nan', 'None'): continue
+
+            b_val = str(r.get(col_map.get('barkod', ''), '')).strip() if 'barkod' in col_map else ''
+            s_val = str(r.get(col_map.get('seri_no', ''), '')).strip() if 'seri_no' in col_map else ''
+            p_val = str(r.get(col_map.get('parti_no', ''), '')).strip() if 'parti_no' in col_map else ''
+            k_val = str(r.get(col_map.get('koli_no', ''), '')).strip() if 'koli_no' in col_map else ''
+            pal_val = str(r.get(col_map.get('palet_no', ''), '')).strip() if 'palet_no' in col_map else ''
+            qr_val = str(r.get(col_map.get('ham_karekod', ''), '')).strip() if 'ham_karekod' in col_map else f"IMPORT_{b_val}_{s_val}"
+
+            insert_rows.append((
+                t_val, u_val, b_val, k_val, s_val, p_val, pal_val,
+                "", "", qr_val, 0, username or ""
+            ))
+
+        if not insert_rows:
+            return jsonify({'success': False, 'error': 'Excel dosyasında geçerli kayıt bulunamadı.'})
+
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        c = conn.cursor()
+        c.executemany("""
+            INSERT INTO satis_arsivi
+            (tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no, uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, insert_rows)
+        conn.commit()
+        conn.close()
+
+        return jsonify({
+            'success': True,
+            'message': f'Excel dosyasından toplam {len(insert_rows)} adet geçmiş satış kaydı başarıyla sisteme aktarıldı.',
+            'eklenen_adet': len(insert_rows)
+        })
+    except Exception as e:
+        logger.error(f"api_istatistikler_excel_yukle error: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 # ── BKST AUTHENTICATED SESSION HELPER ────────────────────────────────────────
 def get_bkst_authenticated_session():
@@ -2123,12 +3178,7 @@ def bkst_recetesiz_satis():
             if not norm_qr:
                 continue
 
-            match_row = qr_map.get(norm_qr) or gtin_map.get(norm_qr) if qr_map else None
-            if match_row is None and qr_map:
-                for k_qr, r_dict in qr_map.items():
-                    if norm_qr in k_qr or k_qr in norm_qr:
-                        match_row = r_dict
-                        break
+            match_row = resolve_product_from_cache(norm_qr, df_cache, qr_map, gtin_map)
 
             gtin = str(match_row.get('Gtin Numarası', '')).strip() if match_row else ""
             seri = str(match_row.get('Seri Numarası', '')).strip() if match_row else ""
@@ -2232,60 +3282,105 @@ def api_depo_kabul_gelen_listesi():
     if err:
         return jsonify({"success": False, "error": err})
 
+    # Token'ı ReceivedNotificationList sayfasından al
+    try:
+        r_page = session.get("https://bkst.tarbil.gov.tr/Main/ReceivedNotificationList", verify=False, timeout=(5, 10))
+        token_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', r_page.text)
+        if token_match:
+            token2 = token_match.group(1)
+    except Exception:
+        pass
+
     notifications = []
     try:
-        endpoints = [
-            "https://bkst.tarbil.gov.tr/Main/GetReceivedNotificationList",
-            "https://bkst.tarbil.gov.tr/Main/GetNotificationList",
-            "https://bkst.tarbil.gov.tr/Main/ReceivedNotificationList"
-        ]
-        
-        for ep in endpoints:
-            try:
-                res = session.post(ep, data={
-                    "CompanyAddressId": gln_guid,
-                    "NotificationType": "1",
-                    "NotificationDirection": "1",
-                    "HeaderState": "0",
-                    "__RequestVerificationToken": token2
-                }, verify=False, timeout=(5, 12))
-                
-                if res.status_code == 200:
-                    try:
-                        jdata = res.json()
-                        raw_list = jdata.get("Data") if isinstance(jdata, dict) else (jdata if isinstance(jdata, list) else [])
-                        if isinstance(raw_list, list) and len(raw_list) > 0:
-                            for item in raw_list:
-                                op = str(item.get("OPERATION") or item.get("OperationName") or item.get("ISLEMTIPI") or item.get("NotificationType") or item.get("DESCR") or item.get("Operation") or "").upper()
-                                direction = str(item.get("NotificationDirection") or item.get("DIRECTION") or item.get("YON") or "").upper()
+        payload = {
+            "CompanyAddressId": gln_guid,
+            "SenderGln": "",
+            "DocumentNo": "",
+            "StartDate": "",
+            "EndDate": "",
+            "NotificationType": "",
+            "page": 1,
+            "pageSize": 100,
+            "__RequestVerificationToken": token2
+        }
+        res = session.post("https://bkst.tarbil.gov.tr/Main/GetReceivedNotificationList", data=payload, verify=False, timeout=(5, 15))
+        if res.status_code == 200:
+            jdata = res.json()
+            raw_list = jdata.get("Data") if isinstance(jdata, dict) else (jdata if isinstance(jdata, list) else [])
+            for item in raw_list:
+                state = str(item.get("HEADERSTATE") or item.get("StateDescription") or "").upper()
+                if "IPTAL" in state or "İPTAL" in state:
+                    continue
 
-                                if any(x in op for x in ["SATIS", "SATIŞ", "CIKIS", "ÇIKIŞ", "DEVR", "GÖNDER", "SATIŞA"]):
-                                    continue
-                                if direction in ["2", "OUT", "OUTGOING", "GİDEN", "GIDEN"]:
-                                    continue
+                op_raw = str(item.get("OPERATION") or "MALALIM").upper()
+                op_display = "MAL ALIM" if op_raw in ["SATIS", "MALALIM"] else op_raw
 
-                                notifications.append({
-                                    "HEADERID": item.get("HEADERID") or item.get("Id") or item.get("ID") or str(item.get("WAYBILLNUMBER", "")),
-                                    "WAYBILLNUMBER": item.get("WAYBILLNUMBER") or item.get("WaybillNumber") or item.get("BELGENO") or "-",
-                                    "WAYBILLDATE": format_date_val(item.get("WAYBILLDATE") or item.get("WaybillDate") or item.get("TARIH")),
-                                    "SENDER": item.get("CompanyTitle") or item.get("SENDER") or item.get("GonderenFirma") or item.get("FIRMA") or "Tedarikçi / Üretici",
-                                    "PRODUCTCOUNT": item.get("PRODUCTCOUNT") or item.get("ProductCount") or item.get("ADET") or 0,
-                                    "HEADERSTATE": item.get("HEADERSTATE") or item.get("StateDescription") or "Bekliyor",
-                                    "OPERATION": "MALALIM",
-                                    "products": item.get("products") or []
-                                })
-                            break
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                notifications.append({
+                    "HEADERID": item.get("HEADERID") or item.get("Id") or item.get("ID") or str(item.get("WAYBILLNUMBER", "")),
+                    "WAYBILLNUMBER": item.get("WAYBILLNUMBER") or item.get("WaybillNumber") or item.get("BELGENO") or "-",
+                    "WAYBILLDATE": format_date_val(item.get("WAYBILLDATE") or item.get("WaybillDate") or item.get("TARIH")),
+                    "SENDER": item.get("CompanyTitle") or item.get("SENDER") or item.get("GonderenFirma") or item.get("FIRMA") or "Tedarikçi / Üretici",
+                    "PRODUCTCOUNT": item.get("PRODUCTCOUNT") or item.get("ProductCount") or item.get("ADET") or 0,
+                    "HEADERSTATE": "Stoğa Alınmış",
+                    "OPERATION": op_display,
+                    "products": []
+                })
+
+            # Her bildirimin ürün detaylarını sorgulayarak 'Kabul Bekliyor' mu yoksa 'Stoğa Alınmış' mı olduğunu belirle
+            def resolve_header_state(notif):
+                h_id = notif.get("HEADERID")
+                if not h_id:
+                    return h_id, "Stoğa Alınmış", 0
+                try:
+                    r = session.post(
+                        "https://bkst.tarbil.gov.tr/Main/GetNotificationDetailList",
+                        data={"CompanyAddressId": gln_guid, "HeaderId": h_id, "__RequestVerificationToken": token2},
+                        verify=False,
+                        timeout=(3, 8)
+                    )
+                    if r.status_code == 200:
+                        d = r.json()
+                        d_list = d if isinstance(d, list) else (d.get("Data", []) if isinstance(d, dict) else [])
+                        waiting_cnt = sum(1 for x in d_list if "ALIMA UYGUN" in str(x.get("DETAILSTATE", "")).upper() and "DEĞİL" not in str(x.get("DETAILSTATE", "")).upper() and "DEGIL" not in str(x.get("DETAILSTATE", "")).upper())
+                        if waiting_cnt > 0:
+                            return h_id, "Kabul Bekliyor", waiting_cnt
+                        return h_id, "Stoğa Alınmış", 0
+                except Exception:
+                    pass
+                return h_id, "Stoğa Alınmış", 0
+
+            # Bildirimleri hızlıca eşzamanlı sorgula (tüm liste)
+            state_map = {}
+            with concurrent.futures.ThreadPoolExecutor(max_workers=25) as executor:
+                for h_id, state_str, w_cnt in executor.map(resolve_header_state, notifications):
+                    state_map[h_id] = (state_str, w_cnt)
+
+            for n in notifications:
+                h_id = n.get("HEADERID")
+                if h_id in state_map:
+                    st, w_cnt = state_map[h_id]
+                    n["HEADERSTATE"] = st
+                    n["WAITINGCOUNT"] = w_cnt
+                else:
+                    n["HEADERSTATE"] = "Stoğa Alınmış"
+                    n["WAITINGCOUNT"] = 0
+
+            # Kabul Bekleyen bildirimleri en başa getir (kullanıcı hemen görsün)
+            notifications.sort(key=lambda x: 0 if x.get("HEADERSTATE") == "Kabul Bekliyor" else 1)
+
     except Exception as e:
-        logger.error(f"BKST gelen bildirim hatası: {e}")
+        logger.error(f"BKST gelen bildirim hatası: {e}", exc_info=True)
+        return jsonify({"success": False, "error": f"BKST sunucusundan bildirimler çekilirken hata oluştu: {str(e)}"})
+
+    kabul_bekleyen_sayisi = sum(1 for n in notifications if n.get("HEADERSTATE") == "Kabul Bekliyor")
+    msg = f"Toplam {len(notifications)} bildirim incelendi. ({kabul_bekleyen_sayisi} adet Kabul Bekliyor, {len(notifications)-kabul_bekleyen_sayisi} adet Stoğa Alınmış)" if notifications else "Gelen/bekleyen bildirim bulunamadı."
 
     return jsonify({
         "success": True,
         "notifications": notifications,
-        "message": f"Sadece Tipi 'MAL ALIM' (Gelen) olan {len(notifications)} adet bildirim filtreler ile listelendi." if notifications else "Gelen/bekleyen MAL ALIM bildirimi bulunamadı."
+        "kabul_bekleyen_sayisi": kabul_bekleyen_sayisi,
+        "message": msg
     })
 
 @app.route('/api/depo_kabul/detay/<header_id>', methods=['GET'])
@@ -2294,41 +3389,71 @@ def api_depo_kabul_detay(header_id):
     if err:
         return jsonify({"success": False, "error": err, "products": []})
 
-    products = []
     try:
-        endpoints = [
-            "https://bkst.tarbil.gov.tr/Main/GetReceivedNotificationDetailList",
+        r_page = session.get("https://bkst.tarbil.gov.tr/Main/ReceivedNotificationList", verify=False, timeout=(5, 10))
+        token_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', r_page.text)
+        if token_match:
+            token2 = token_match.group(1)
+    except Exception:
+        pass
+
+    products = []
+    waiting_count = 0
+    in_stock_count = 0
+    try:
+        res = session.post(
             "https://bkst.tarbil.gov.tr/Main/GetNotificationDetailList",
-            "https://bkst.tarbil.gov.tr/Main/GetNotificationDetail"
-        ]
-        for ep in endpoints:
-            try:
-                res = session.post(ep, data={"HeaderId": header_id, "CompanyAddressId": gln_guid, "__RequestVerificationToken": token2}, verify=False, timeout=(5, 12))
-                if res.status_code == 200:
-                    jdata = res.json()
-                    raw_list = jdata.get("Data") if isinstance(jdata, dict) else (jdata if isinstance(jdata, list) else [])
-                    if isinstance(raw_list, list) and len(raw_list) > 0:
-                        for item in raw_list:
-                            products.append({
-                                "Koli Numarası": item.get("PAKETNO") or item.get("KOLINO") or item.get("PALETNO") or "",
-                                "Ürün Adı": item.get("STOCKNAME") or item.get("URUNADI") or item.get("ProductName") or "",
-                                "Karekod": item.get("KAREKOD") or item.get("HAMKAREKOD") or item.get("Barcode") or "",
-                                "Gtin / Barkod": item.get("BARCODE") or item.get("GTIN") or item.get("Gtin") or "",
-                                "Seri Numarası": item.get("SERIALNUMBER") or item.get("SERINO") or item.get("SerialNumber") or "",
-                                "Parti Numarası": item.get("SARJNO") or item.get("LOT") or item.get("BatchNumber") or "",
-                                "Palet Numarası": item.get("PALETNO") or "",
-                                "Üretim Tarihi": format_date_val(item.get("URETIMTARIHI") or item.get("ProductionDate")),
-                                "Son Kullanma Tarihi": format_date_val(item.get("SKT") or item.get("ExpirationDate"))
-                            })
-                        break
-            except Exception:
-                pass
+            data={"CompanyAddressId": gln_guid, "HeaderId": header_id, "__RequestVerificationToken": token2},
+            verify=False,
+            timeout=(5, 15)
+        )
+        if res.status_code == 200:
+            jdata = res.json()
+            raw_list = jdata if isinstance(jdata, list) else (jdata.get("Data", []) if isinstance(jdata, dict) else [])
+            for item in raw_list:
+                gtin = item.get("BARCODE") or item.get("GTIN") or item.get("Gtin") or ""
+                qr = item.get("KAREKOD") or item.get("HAMKAREKOD") or item.get("Barcode") or ""
+                seri = item.get("SERIALNUMBER") or item.get("SERINO") or item.get("SerialNumber") or ""
+                parti = item.get("LOTNUMBER") or item.get("SARJNO") or item.get("LOT") or item.get("BatchNumber") or ""
+                koli = item.get("CARRIERLABEL1") or item.get("PAKETNO") or item.get("KOLINO") or ""
+                palet = item.get("CARRIERLABEL2") or item.get("PALETNO") or ""
+                urun_adi = item.get("STOCKNAME") or item.get("URUNADI") or item.get("ProductName") or "Bitki Koruma Ürünü"
+                ur_tarih = format_date_val(item.get("PRODUCTIONDATE") or item.get("URETIMTARIHI") or item.get("ProductionDate"))
+                skt_val = format_date_val(item.get("SKT") or item.get("ExpirationDate"))
+
+                d_state = str(item.get("DETAILSTATE") or "").upper()
+                if "ALIMA UYGUN" in d_state and "DEĞİL" not in d_state and "DEGIL" not in d_state:
+                    product_durum = "Kabul Bekliyor"
+                    waiting_count += 1
+                else:
+                    product_durum = "Stoğa Alınmış"
+                    in_stock_count += 1
+
+                products.append({
+                    "Koli Numarası": koli,
+                    "Ürün Adı": urun_adi,
+                    "Karekod": qr,
+                    "Gtin / Barkod": gtin,
+                    "gtin": gtin,
+                    "Seri Numarası": seri,
+                    "Parti Numarası": parti,
+                    "Palet Numarası": palet,
+                    "Üretim Tarihi": ur_tarih,
+                    "Son Kullanma Tarihi": skt_val,
+                    "durum": product_durum
+                })
     except Exception as e:
-        logger.error(f"Detail fetch error: {e}")
+        logger.error(f"Detail fetch error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": f"Detay çekilirken hata oluştu: {str(e)}", "products": []})
+
+    overall_status = "Kabul Bekliyor" if waiting_count > 0 else "Stoğa Alınmış"
 
     return jsonify({
         "success": True,
-        "products": products
+        "products": products,
+        "overall_status": overall_status,
+        "bekleyen_adet": waiting_count,
+        "stoktaki_adet": in_stock_count
     })
 
 @app.route('/api/depo_kabul/onayla', methods=['POST'])
@@ -2338,8 +3463,24 @@ def api_depo_kabul_onayla():
     incoming_products = req_data.get('products') or []
 
     session, gln_guid, token2, err = get_bkst_authenticated_session()
+
+    # Eğer ön yüzden ürün listesi boş geldiyse arka planda detay servisini çağır
+    if not incoming_products and header_id and session and gln_guid:
+        try:
+            r_detail = session.post(
+                "https://bkst.tarbil.gov.tr/Main/GetNotificationDetailList",
+                data={"CompanyAddressId": gln_guid, "HeaderId": header_id, "__RequestVerificationToken": token2},
+                verify=False,
+                timeout=(5, 15)
+            )
+            if r_detail.status_code == 200:
+                jd = r_detail.json()
+                incoming_products = jd if isinstance(jd, list) else (jd.get("Data", []) if isinstance(jd, dict) else [])
+        except Exception as e_fetch:
+            logger.warning(f"api_depo_kabul_onayla: Otomatik detay çekme hatası: {e_fetch}")
+
     bkst_msg = ""
-    if session and gln_guid and token2:
+    if session and gln_guid and token2 and header_id:
         accept_endpoints = [
             "https://bkst.tarbil.gov.tr/Main/NotificationAccept",
             "https://bkst.tarbil.gov.tr/Main/SaveNotificationAccept",
@@ -2350,7 +3491,7 @@ def api_depo_kabul_onayla():
             try:
                 res = session.post(ep, data={"HeaderId": header_id, "CompanyAddressId": gln_guid, "__RequestVerificationToken": token2}, verify=False, timeout=(5, 12))
                 if res.status_code == 200:
-                    bkst_msg = "Bakanlık (BKST) mal alım bildirimi onaylandı."
+                    bkst_msg = "Bakanlık (BKST) bildirimi onaylandı."
                     break
             except Exception:
                 pass
@@ -2358,16 +3499,15 @@ def api_depo_kabul_onayla():
     username, _, _, _ = read_bkst_credentials()
     df_existing, _, _, _ = get_bkst_cache()
     
-    cols = ["Koli Numarası", "Ürün Adı", "Karekod", "Gtin / Barkod", "Seri Numarası", "Parti Numarası", "Palet Numarası", "Üretim Tarihi", "Son Kullanma Tarihi"]
     existing_karekods = set()
     if df_existing is not None and not df_existing.empty and 'Karekod' in df_existing.columns:
-        existing_karekods = set(df_existing['Karekod'].dropna().astype(str).str.strip())
+        existing_karekods = set(str(k).strip().casefold() for k in df_existing['Karekod'].dropna() if str(k).strip())
     
     new_rows = []
     added_count = 0
     for p in incoming_products:
         qr = str(p.get("Karekod") or p.get("KAREKOD") or "").strip()
-        if qr and qr in existing_karekods:
+        if qr and qr.casefold() in existing_karekods:
             continue
         
         gtin_parsed = p.get("Gtin Numarası") or p.get("Gtin / Barkod") or p.get("BARCODE") or p.get("GTIN") or ""
@@ -2377,21 +3517,21 @@ def api_depo_kabul_onayla():
                 gtin_parsed = parsed_qr["gtin"]
 
         row = {
-            "Koli Numarası": p.get("Koli Numarası") or p.get("PAKETNO") or p.get("KOLINO") or "",
+            "Koli Numarası": p.get("Koli Numarası") or p.get("CARRIERLABEL1") or p.get("PAKETNO") or p.get("KOLINO") or "",
             "Ürün Adı": p.get("Ürün Adı") or p.get("STOCKNAME") or p.get("URUNADI") or "",
             "Karekod": qr,
             "Gtin Numarası": gtin_parsed,
             "Gtin / Barkod": gtin_parsed,
             "gtin": gtin_parsed,
             "Seri Numarası": p.get("Seri Numarası") or p.get("SERIALNUMBER") or p.get("SERINO") or "",
-            "Parti Numarası": p.get("Parti Numarası") or p.get("SARJNO") or p.get("LOT") or "",
-            "Palet Numarası": p.get("Palet Numarası") or p.get("PALETNO") or "",
-            "Üretim Tarihi": format_date_val(p.get("Üretim Tarihi") or p.get("URETIMTARIHI")),
+            "Parti Numarası": p.get("Parti Numarası") or p.get("LOTNUMBER") or p.get("SARJNO") or p.get("LOT") or "",
+            "Palet Numarası": p.get("Palet Numarası") or p.get("CARRIERLABEL2") or p.get("PALETNO") or "",
+            "Üretim Tarihi": format_date_val(p.get("Üretim Tarihi") or p.get("PRODUCTIONDATE") or p.get("URETIMTARIHI")),
             "Son Kullanma Tarihi": format_date_val(p.get("Son Kullanma Tarihi") or p.get("SKT"))
         }
         new_rows.append(row)
         if qr:
-            existing_karekods.add(qr)
+            existing_karekods.add(qr.casefold())
         added_count += 1
 
     if new_rows:
@@ -2401,6 +3541,9 @@ def api_depo_kabul_onayla():
         else:
             updated_df = new_df
         save_bkst_data_to_db(updated_df, username)
+        # Önbelleği temizle ki yeni ürünler anında depomdaki stoklar ve çıkışta aktif olsun
+        with _state_lock:
+            _user_cache_map.pop(username or "_anon", None)
 
     msg = f"🟢 Mal Alım bildirimi kabul edildi ve {added_count} adet ürün yerel veritabanınıza eklendi."
     if bkst_msg:
@@ -2510,34 +3653,30 @@ def api_system_login():
         return jsonify({'success': True, 'message': 'Giriş başarılı ve kaydedildi.', 'user_name': user_name, 'token': LOCAL_SESSION_TOKEN})
 
     except Exception as e:
-        logger.warning(f"api_system_login offline fallback: {e}")
-        lines = [
-            "# ==============================================================================",
-            "# BAKANLIK BKST GİRİŞ BİLGİLERİ",
-            "# ==============================================================================",
-            f"KULLANICI_ADI={username}",
-            f"SIFRE={password}",
-            f"ADRES_ID={address_id}",
-            f"KULLANICI_ISIM={user_name}",
-            ""
-        ]
-        with open(cred_file, 'w', encoding='utf-8') as f:
-            f.write("\n".join(lines))
+        logger.warning(f"api_system_login offline fallback check: {e}")
+        is_net_error = isinstance(e, (requests.ConnectionError, requests.Timeout,
+                                      requests.RequestException, socket.gaierror,
+                                      urllib3.exceptions.HTTPError))
+        if not is_net_error:
+            return jsonify({'success': False, 'error': f'Giriş hatası: {str(e)}'})
 
-        return jsonify({
-            'success': True,
-            'offline_mode': True,
-            'message': 'İnternet bağlantısı yok veya Bakanlık sunucusu erişilemiyor. Yerel Çevrimdışı (Offline) Modda Giriş Yapıldı.',
-            'user_name': clean_user_name(user_name),
-            'token': LOCAL_SESSION_TOKEN
-        })
+        saved_u, saved_p, saved_name, saved_a = read_bkst_credentials()
+        if saved_u == username and saved_p == password:
+            return jsonify({
+                'success': True,
+                'offline_mode': True,
+                'message': 'İnternet bağlantısı yok. Kayıtlı bilgilerle çevrimdışı (offline) modda giriş yapıldı.',
+                'user_name': clean_user_name(saved_name or username),
+                'token': LOCAL_SESSION_TOKEN
+            })
+        return jsonify({'success': False, 'error': 'Bakanlık sunucusuna bağlanılamadı ve girilen bilgiler kayıtlı çevrimdışı bilgilerle eşleşmiyor.'})
 
 @app.route('/api/system/user_info', methods=['GET'])
 def api_system_user_info():
     cred_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bakanlik_giris_bilgileri.txt")
     username, password, address_id, api_key = read_bkst_credentials()
     if not username:
-        return jsonify({'success': True, 'username': '', 'user_name': 'Giriş Yapılmadı', 'token': LOCAL_SESSION_TOKEN})
+        return jsonify({'success': True, 'username': '', 'user_name': 'Giriş Yapılmadı'})
 
     user_name = username
     if os.path.exists(cred_file):
@@ -2556,8 +3695,7 @@ def api_system_user_info():
     return jsonify({
         'success': True,
         'username': username,
-        'user_name': display_name,
-        'token': LOCAL_SESSION_TOKEN
+        'user_name': display_name
     })
 
 @app.route('/api/system/sync_status', methods=['GET'])
@@ -2573,6 +3711,12 @@ _cached_update_response = {'has_update': False}
 @app.route('/api/system/check_update', methods=['GET'])
 def api_system_check_update():
     global _last_update_check_time, _cached_update_response
+
+    # Geliştirici modu kontrolü (.dev_mode dosyası veya DEV_MODE env)
+    dev_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".dev_mode")
+    if os.path.exists(dev_path) or os.environ.get("DEV_MODE") == "1":
+        return jsonify({'has_update': False})
+
     now = time.time()
     # Son 3 dakika içinde kontrol edildiyse önbellekten dön (gereksiz ağ gecikmesini önler)
     if now - _last_update_check_time < 180 and _cached_update_response is not None:
@@ -2600,7 +3744,19 @@ def api_system_check_update():
             remote_commit = str(rdata.get("commit", "")).strip()
             remote_version = str(rdata.get("version", "v1.0")).strip()
             _last_update_check_time = now
-            if remote_commit and remote_commit != local_commit:
+
+            def _parse_version_tuple(v_str):
+                try:
+                    clean = re.sub(r'[^0-9.]', '', str(v_str))
+                    parts = [int(p) for p in clean.split('.') if p.isdigit()]
+                    return tuple(parts)
+                except Exception:
+                    return (0, 0, 0)
+
+            remote_tup = _parse_version_tuple(remote_version)
+            local_tup = _parse_version_tuple(cur_code)
+
+            if remote_tup > local_tup:
                 _cached_update_response = {
                     'has_update': True,
                     'current_version': cur_code,

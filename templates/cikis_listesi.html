@@ -207,6 +207,10 @@
                     <i class="fa-solid fa-boxes-packing"></i>
                     <span>Depoya Kabul Et</span>
                 </a>
+                <a href="/istatistikler" class="sidebar-link">
+                    <i class="fa-solid fa-chart-pie"></i>
+                    <span>İstatistikler & Raporlar</span>
+                </a>
                 <a href="/kullaniciya-satis" class="sidebar-link">
                     <i class="fa-solid fa-user-tag"></i>
                     <span>Kullanıcıya Satış (Demo)</span>
@@ -254,7 +258,8 @@
             <div style="font-size: 0.88rem; color: var(--text-muted); line-height: 1.6;">
                 • <b>Arama:</b> Arama kutusuna ürün adı veya koli no yazın.<br>
                 • <b>Excel İndir:</b> Sağ üstteki <b>"Excel İndir"</b> butonundan tüm çıkışları bilgisayara aktarın.<br>
-                • <b>Silme (Geri Alma):</b> İlgili satırın yanındaki 🔴 <b>Çöp Kovası</b> butonuna basarak kaydı silin.
+                • <b>Silme (Geri Alma):</b> İlgili satırın yanındaki 🔴 <b>Çöp Kovası</b> butonuna basarak kaydı silin.<br>
+                • <b style="color: #60a5fa;">💡 Kalıcı İstatistik Güvencesi:</b> Bu çalışma listesinden satır silseniz veya <b>"Tümünü Sil"</b> yapsanız dahi, tüm çıkışlar <b>"İstatistikler & Raporlar"</b> bölümündeki kalıcı satış veri tabanında korunur; yıllık satış istatistikleriniz asla kaybolmaz.
             </div>
         </div>
 
@@ -405,11 +410,16 @@ async function loadList() {
     }
 }
 
+function isTekrarKayit(r) {
+    if (!r) return false;
+    return r.tekrar_uyari === 1 || r.tekrar_uyari === '1';
+}
+
 function updateStats() {
     document.getElementById('stat-toplam').textContent = allData.length;
     const tekilSet = new Set(allData.map(r => r.ham_karekod));
     document.getElementById('stat-tekil').textContent  = tekilSet.size;
-    document.getElementById('stat-tekrar').textContent = allData.filter(r => r.tekrar_uyari).length;
+    document.getElementById('stat-tekrar').textContent = allData.filter(r => isTekrarKayit(r)).length;
 }
 
 function render() {
@@ -446,14 +456,16 @@ function render() {
         return;
     }
 
-    tbody.innerHTML = filtered.map((r, i) => `
-        <tr class="${r.tekrar_uyari ? 'warn-row' : ''}" data-id="${r.id}">
+    tbody.innerHTML = filtered.map((r, i) => {
+        const isTekrar = isTekrarKayit(r);
+        return `
+        <tr class="${isTekrar ? 'warn-row' : ''}" data-id="${r.id}">
 
             <!-- # + Silme butonu -->
             <td>
                 <div class="td-sira">
                     <span class="badge-sira">${i + 1}</span>
-                    <button class="btn-del" onclick="silKayit(${r.id}, this)"
+                    <button class="btn-del" data-id="${r.id}" onclick="silKayit(${r.id}, this)"
                             title="Bu kaydı sil">
                         <i class="fa-solid fa-trash-can"></i>
                     </button>
@@ -465,7 +477,7 @@ function render() {
 
             <!-- Ürün Adı -->
             <td style="max-width:220px; overflow:hidden; text-overflow:ellipsis;" title="${esc(r.urun_adi)}">
-                ${r.tekrar_uyari ? '<span class="tekrar-badge">TEKRAR</span> ' : ''}${esc(r.urun_adi||'—')}
+                ${isTekrar ? '<span class="tekrar-badge">TEKRAR</span> ' : ''}${esc(r.urun_adi||'—')}
             </td>
 
             <td>${esc(r.koli_no||'—')}</td>
@@ -476,7 +488,8 @@ function render() {
             <td>${esc(r.uretim_tarihi||'—')}</td>
             <td>${esc(r.skt||'—')}</td>
             <td style="font-size:.76rem; color:var(--text-muted);">${esc(r.tarih||'—')}</td>
-        </tr>`).join('');
+        </tr>`;
+    }).join('');
 }
 
 function sortBy(col) {
@@ -493,27 +506,53 @@ function sortBy(col) {
 
 async function silKayit(id, btn) {
     if (!confirm('Bu kaydı silmek istiyor musunuz?')) return;
-    btn.disabled = true;
-    const res  = await fetch(`/api/cikis/sil/${id}`, {method: 'DELETE'});
-    const data = await res.json();
-    if (data.success) {
-        allData = allData.filter(r => r.id !== id);
-        updateStats();
-        render();
-    } else {
-        btn.disabled = false;
-        alert('Silme işlemi başarısız.');
+    if (btn) btn.disabled = true;
+    try {
+        const fetchFn = window.apiFetch || fetch;
+        const res  = await fetchFn(`/api/cikis/sil/${id}`, {method: 'DELETE'});
+        const data = await res.json();
+        if (data.success) {
+            allData = allData.filter(r => String(r.id) !== String(id));
+            updateStats();
+            render();
+        } else {
+            if (btn) btn.disabled = false;
+            alert('Silme işlemi başarısız: ' + (data.error || ''));
+        }
+    } catch (e) {
+        if (btn) btn.disabled = false;
+        alert('Silme hatası: ' + e.message);
     }
 }
 
+// Delegated delete listener on tbody
+const mainTbody = document.getElementById('main-tbody');
+if (mainTbody) {
+    mainTbody.addEventListener('click', async (e) => {
+        const btn = e.target.closest('.btn-del');
+        if (!btn) return;
+        const id = btn.getAttribute('data-id');
+        if (id) {
+            await silKayit(id, btn);
+        }
+    });
+}
+
 document.getElementById('btn-tumunu-sil').addEventListener('click', async () => {
-    if (!confirm(`Toplam ${allData.length} kaydın TAMAMI silinecek. Emin misiniz?`)) return;
-    const res  = await fetch('/api/cikis/temizle', {method: 'POST'});
-    const data = await res.json();
-    if (data.success) {
-        allData = [];
-        updateStats();
-        render();
+    if (!confirm(`Çıkış yapılacaklar listesindeki ${allData.length} kayıt temizlenecek.\n\n💡 Not: Bu işlem genel satış ve rapor istatistiklerinizi etkilemez; istatistikleriniz kalıcı arşivde saklanmaya devam eder.\n\nOnaylıyor musunuz?`)) return;
+    try {
+        const fetchFn = window.apiFetch || fetch;
+        const res  = await fetchFn('/api/cikis/temizle', {method: 'POST'});
+        const data = await res.json();
+        if (data.success) {
+            allData = [];
+            updateStats();
+            render();
+        } else {
+            alert('Temizleme hatası: ' + (data.error || ''));
+        }
+    } catch (e) {
+        alert('İşlem hatası: ' + e.message);
     }
 });
 
@@ -521,11 +560,13 @@ document.getElementById('search-input').addEventListener('input', render);
 document.getElementById('filter-col').addEventListener('change', render);
 
 function esc(str) {
+    if (window.esc) return window.esc(str);
     return String(str||'')
         .replace(/&/g,'&amp;')
         .replace(/</g,'&lt;')
         .replace(/>/g,'&gt;')
-        .replace(/"/g,'&quot;');
+        .replace(/"/g,'&quot;')
+        .replace(/'/g,'&#39;');
 }
     </script>
 

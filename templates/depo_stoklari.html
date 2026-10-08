@@ -159,6 +159,10 @@
                     <i class="fa-solid fa-boxes-packing"></i>
                     <span>Depoya Kabul Et</span>
                 </a>
+                <a href="/istatistikler" class="sidebar-link">
+                    <i class="fa-solid fa-chart-pie"></i>
+                    <span>İstatistikler & Raporlar</span>
+                </a>
                 <a href="/kullaniciya-satis" class="sidebar-link">
                     <i class="fa-solid fa-user-tag"></i>
                     <span>Kullanıcıya Satış (Demo)</span>
@@ -382,6 +386,26 @@
     </div>
 
     <script>
+        window.LOCAL_SESSION_TOKEN = "{{ local_session_token }}";
+        if (window.LOCAL_SESSION_TOKEN && window.LOCAL_SESSION_TOKEN !== 'undefined') {
+            localStorage.setItem('local_session_token', window.LOCAL_SESSION_TOKEN);
+        } else if (localStorage.getItem('local_session_token') === 'undefined' || localStorage.getItem('local_session_token') === 'null') {
+            localStorage.removeItem('local_session_token');
+        }
+
+        function getAuthHeaders(extraHeaders = {}) {
+            const token = window.LOCAL_SESSION_TOKEN || localStorage.getItem('local_session_token') || '';
+            const headers = {
+                'X-Requested-With': 'XMLHttpRequest',
+                ...extraHeaders
+            };
+            if (token && token !== 'undefined' && token !== 'null') {
+                headers['X-Local-Token'] = token;
+                headers['X-Session-Token'] = token;
+            }
+            return headers;
+        }
+
         let allProducts = [];
         let currentMode = 'kalem'; // 'kalem', 'kutu', 'skt'
         let currentModalProducts = [];
@@ -402,7 +426,9 @@
 
         async function loadDepoStoklari() {
             try {
-                const res = await fetch('/api/depo_stoklari');
+                const res = await fetch('/api/depo_stoklari', {
+                    headers: getAuthHeaders()
+                });
                 const data = await res.json();
                 if (data.success && data.products) {
                     allProducts = data.products;
@@ -489,6 +515,27 @@
             return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         }
 
+        function getGtin(p) {
+            if (!p) return '-';
+            let g = p['Gtin Numarası'] || p['Gtin / Barkod'] || p.GTIN || p.gtin || p.BARCODE || p.barkod || '';
+            g = String(g).trim();
+            if (g && g !== '-' && g !== 'None' && g !== 'nan' && g !== 'null' && g !== 'BELİRSİZ') {
+                return g;
+            }
+            let qr = String(p['Karekod'] || p.tam_karekod || p.ham_karekod || p.KAREKOD || '').trim();
+            if (qr.startsWith(']d2') || qr.startsWith(']Q3')) {
+                qr = qr.substring(3);
+            }
+            if (qr.startsWith('01') && qr.length >= 16 && /^\d{14}$/.test(qr.substring(2, 16))) {
+                return qr.substring(2, 16);
+            }
+            const match = qr.match(/(?:^|\D)01(\d{14})/);
+            if (match) return match[1];
+            const d14 = qr.match(/\d{14}/);
+            if (d14) return d14[0];
+            return '-';
+        }
+
         function updateSummaryStats() {
             statTotal.textContent = allProducts.length;
 
@@ -496,9 +543,9 @@
             let sktCriticalCount = 0;
 
             allProducts.forEach(p => {
-                const gtin = p['Gtin / Barkod'] || p.BARCODE || p.GTIN || 'BELİRSİZ';
+                const gtin = getGtin(p);
                 const name = p['Ürün Adı'] || p.STOCKNAME || p.URUNADI || 'İsimsiz Ürün';
-                const key = gtin + '___' + name;
+                const key = (gtin !== '-' ? gtin : '') + '___' + name;
 
                 if (!gtinGroupMap[key]) {
                     gtinGroupMap[key] = [];
@@ -538,7 +585,7 @@
                     const searchStr = [
                         p['Ürün Adı'], p.STOCKNAME, p.URUNADI,
                         p['Karekod'], p.KAREKOD,
-                        p['Gtin / Barkod'], p.BARCODE, p.GTIN,
+                        getGtin(p), p['Gtin Numarası'], p['Gtin / Barkod'], p.BARCODE, p.GTIN,
                         p['Seri Numarası'], p.SERIALNUMBER, p.SERINO,
                         p['Parti Numarası'], p.SARJNO, p.LOT,
                         p['Koli Numarası'], p.PAKETNO
@@ -581,12 +628,14 @@
 
             const groups = {};
             items.forEach(p => {
-                const gtin = p['Gtin / Barkod'] || p.BARCODE || p.GTIN || '-';
                 const name = p['Ürün Adı'] || p.STOCKNAME || p.URUNADI || 'Tanımsız Ürün';
-                const key = gtin + '___' + name;
+                const gtin = getGtin(p);
+                const key = (gtin !== '-' ? gtin : '') + '___' + name;
 
                 if (!groups[key]) {
                     groups[key] = { gtin, name, key, products: [] };
+                } else if (groups[key].gtin === '-' && gtin !== '-') {
+                    groups[key].gtin = gtin;
                 }
                 groups[key].products.push(p);
             });
@@ -619,12 +668,12 @@
                     <tr>
                         <td style="text-align:center;"><span class="badge-sira">${idx + 1}</span></td>
                         <td>
-                            <a class="product-link-btn" onclick="openDetailModal('${esc(key)}')">
+                            <a class="product-link-btn btn-open-detail" data-group-key="${escAttr(key)}" style="cursor:pointer;">
                                 <i class="fa-solid fa-box-open" style="color:#38bdf8;"></i>
                                 <span class="prod-name-clamp" title="${esc(g.name)}"><b>${esc(g.name)}</b></span>
                             </a>
                         </td>
-                        <td class="nowrap-cell"><span style="font-family:monospace;">${esc(g.gtin)}</span></td>
+                        <td class="nowrap-cell"><span style="font-family:monospace; font-weight:600; color:#38bdf8;">${esc(g.gtin)}</span></td>
                         <td style="text-align:center;" class="nowrap-cell">
                             <span style="background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); padding:4px 12px; border-radius:8px; font-weight:800; font-size:0.9rem;">
                                 ${count} Adet
@@ -632,7 +681,7 @@
                         </td>
                         <td class="nowrap-cell">${sktBadge}</td>
                         <td style="text-align:center;" class="nowrap-cell">
-                            <button class="btn btn-outline btn-sm" onclick="openDetailModal('${esc(key)}')">
+                            <button class="btn btn-outline btn-sm btn-open-detail" data-group-key="${escAttr(key)}" type="button">
                                 <i class="fa-solid fa-magnifying-glass-plus"></i> Karekodları Gör (${count})
                             </button>
                         </td>
@@ -666,7 +715,7 @@
             tbody.innerHTML = items.map((p, idx) => {
                 const qr = p['Karekod'] || p.KAREKOD || '-';
                 const name = p['Ürün Adı'] || p.STOCKNAME || p.URUNADI || '-';
-                const gtin = p['Gtin / Barkod'] || p.BARCODE || p.GTIN || '-';
+                const gtin = getGtin(p);
                 const seri = p['Seri Numarası'] || p.SERIALNUMBER || p.SERINO || '-';
                 const parti = p['Parti Numarası'] || p.SARJNO || p.LOT || '-';
                 const koli = p['Koli Numarası'] || p.PAKETNO || p.KOLINO || '-';
@@ -685,7 +734,7 @@
                         <td style="text-align:center;"><span class="badge-sira">${idx + 1}</span></td>
                         <td><span class="prod-name-clamp" title="${esc(name)}"><b>${esc(name)}</b></span></td>
                         <td style="font-family:monospace; font-size:0.78rem; color:#38bdf8;" class="nowrap-cell">${esc(qr)}</td>
-                        <td class="nowrap-cell">${esc(gtin)}</td>
+                        <td class="nowrap-cell" style="font-family:monospace; color:#38bdf8; font-weight:600;">${esc(gtin)}</td>
                         <td class="nowrap-cell">${esc(seri)}</td>
                         <td class="nowrap-cell">${esc(parti)}</td>
                         <td class="nowrap-cell"><span style="font-family:monospace; color:#fbbf24;">${esc(koli)}</span></td>
@@ -712,6 +761,15 @@
             renderModalTable(currentModalProducts);
             document.getElementById('productDetailModal').style.display = 'block';
         };
+
+        // Event delegation for opening detail modal
+        tbody.addEventListener('click', (e) => {
+            const trigger = e.target.closest('.btn-open-detail');
+            if (trigger) {
+                const groupKey = trigger.getAttribute('data-group-key');
+                if (groupKey) openDetailModal(groupKey);
+            }
+        });
 
         function renderModalTable(items) {
             const modalTbody = document.getElementById('modal-tbody-details');
@@ -783,7 +841,12 @@
         });
 
         function esc(str) {
-            return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+            if (window.esc) return window.esc(str);
+            return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g, '&#39;');
+        }
+        function escAttr(str) {
+            if (window.escAttr) return window.escAttr(str);
+            return String(str || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
         }
 
         loadDepoStoklari();

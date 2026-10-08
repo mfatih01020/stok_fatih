@@ -1,63 +1,141 @@
 # QR COMPARE STOK & KAREKOD YÖNETİM SİSTEMİ - TÜM PROJE KODLARI VE MİMARİSİ
 
-> **Sürüm:** v3.1.0 (Son Güncelleme: 08.10.2026)  
+> **Sürüm:** v3.2.0 (Son Güncelleme: 09.10.2026 - Çoklu Yıl Destekli İstatistikler, Depoya Kabul Gerçek Durum Tespiti)  
 > **Konum:** `c:\Users\fatih\Desktop\asım iş`
 
 ---
 
 ## 1. Mimari Genel Bakış ve Teknik Özellikler
 
-QR Compare, Bitki Koruma Ürünleri (BKST) stok takibi, karekod eşitleme ve raf/terek sayımı yapmak üzere tasarlanmış modern, çevrimdışı (offline-first) destekli bir Flask web uygulamasıdır.
+QR Compare, Bitki Koruma Ürünleri (BKST) stok takibi, karekod eşitleme ve raf/terek sayımı yapmak üzere tasarlanmış modern, yüksek performanslı, çevrimdışı (offline-first) destekli ve tam sertleştirilmiş bir Flask web uygulamasıdır.
 
-### 🌟 Ana Mimari İlkeler:
+### 🌟 Ana Mimari İlkeler ve Güvenlik Tasarımı (v3.1.5):
 
-1. **Excel Bağımlılığının Kaldırılması (SQLite Persistence)**:
-   - Tüm iç veri saklama katmanı `cikis_kayitlari.db` SQLite veritabanı üzerinden yürütülür (`bkst_depo_verileri` ve `cikis_kayitlari` tabloları).
+1. **SQLite Kalıcılığı & WAL Modu (Excel Bağımlılığı Sıfır)**:
+   - Tüm iç veri saklama katmanı `cikis_kayitlari.db` SQLite veritabanı üzerinden WAL (`PRAGMA journal_mode=WAL`) ve `synchronous=NORMAL` modunda yürütülür (`bkst_depo_verileri` ve `cikis_kayitlari` tabloları).
    - Excel dosyaları (`bkst_depo_verileri.xlsx`) **kesinlikle dahili depolama olarak kullanılmaz**. Excel indirmeleri ve raporlamaları Flask üzerinden dinamik `io.BytesIO()` bellek akışları ile anlık üretilir.
 
 2. **Waitress Production WSGI Sunucusu**:
    - Werkzeug geliştirme sunucusu yerine çok iş parçacıklı `Waitress` WSGI sunucusu entegre edilmiştir (`threads=32, connection_limit=200, channel_timeout=180, cleanup_interval=30`).
-   - Bu sayede eşzamanlı isteklerde ve büyük veri indirmelerinde bağlantı kopmaları ve sunucu kilitlenmeleri kalıcı olarak engellenmiştir.
+   - Eşzamanlı isteklerde ve büyük veri indirmelerinde bağlantı kopmaları ve sunucu kilitlenmeleri kalıcı olarak engellenmiştir.
 
 3. **Asenkron BKST Worker ve Kesintisiz Arayüz (Non-Blocking)**:
    - Bakanlık veri çekme işlemi (`_do_fetch_api_worker`) arka planda `ThreadPoolExecutor` iş parçacığında asenkron çalışır.
-   - `POST /api/bkst/fetch_api` hemen döner, arayüz `GET /api/bkst/fetch_status` üzerinden 1.5 saniyede bir durumu sorgulayarak ilerlemeyi gösterir. Tarayıcı veya istemci istekleri asla zaman aşımına uğramaz.
+   - Uygulama kapanırken arkadaki iş parçacıklarının temiz kapanabilmesi için `atexit.register(lambda: _fetch_executor.shutdown(wait=False))` koruması mevcuttur.
+   - `POST /api/bkst/fetch_api` hemen döner, arayüz `GET /api/bkst/fetch_status` üzerinden durumu sorgular.
 
-4. **Akıllı "Sistem Deaktif" & Çevrimdışı (Offline-First) Koruma**:
+4. **Akıllı "Sistem Deaktif" & Güvenli Çevrimdışı (Offline-First) Koruma**:
    - Bakanlığa bağlanılamadığında veya Bakanlık'tan 0 adet veri geldiğinde (`fetched == 0`), yerel SQLite veritabanındaki mevcut stok verileri **asla silinmez**.
-   - Sistem otomatik olarak `Sistem Deaktif` moduna geçer, durum rozeti kırmızıya (`.status-indicator.offline`) döner ve kullanıcıya net uyarı gösterilir. Yerel verilerle kesintisiz çalışmaya devam edilir.
-   - Bakanlık bağlantısı başarılı olduğunda ve >0 veri çekildiğinde durum otomatik olarak `Sistem Aktif` (yeşil) rozetine güncellenir.
+   - Sistem otomatik olarak `Sistem Deaktif` moduna geçer, durum rozeti kırmızıya (`.status-indicator.offline`) döner.
+   - Giriş ekranında (`/api/system/login`), çevrimdışı geri dönüş (offline fallback) yalnızca gerçek ağ kesintilerinde devreye girer. Hatalı parola girişlerinde parolanın kaydedilmesi engellenmiş, offline oturumlarda `credentials_unverified=True` ile kullanıcı uyarılmaktadır.
 
-5. **Bağımsız ve Kararlı Masaüstü Başlatıcı (`Calistir.exe` & `launcher.py`)**:
-   - Yerel `Calistir.exe` C# başlatıcısı, Python sürecini tarayıcı ömrüne bağlamaz (tarayıcı kapansa veya mevcut oturuma devretse dahi `app.py` sonlandırılmaz). Sunucu arka planda bağımsız bir servis olarak çalışmaya devam eder.
+5. **Atomik Staging Değişimi (`BEGIN IMMEDIATE` & Güvenli Silme Koruma)**:
+   - `save_bkst_data_to_db` fonksiyonu verileri önce `bkst_depo_verileri_staging` geçici tablosuna yazar, ardından tek bir `BEGIN IMMEDIATE` işlemiyle `bkst_depo_verileri` tablosuyla atomik olarak takas eder.
+   - `username` boş olduğunda işlem iptal edilir ve koşulsuz `DELETE FROM` engellenmiştir.
 
-6. **Atomik Staging Değişimi (`bkst_depo_verileri_staging`)**:
-   - `save_bkst_data_to_db` fonksiyonu verileri önce `bkst_depo_verileri_staging` geçici tablosuna yazar.
-   - Ardından atomik olarak ana tablo `DELETE + INSERT SELECT` ile güncellenir. Bu sayede elektrik/sistem kesintilerinde veri kaybı veya eksik yazma riski tamamen engellenmiştir.
+6. **İş Parçacığı Güvenliği (`threading.RLock`) & Global Durum İzolasyonu**:
+   - Ortak bellek değişkenleri (`_last_update_check_time`, `_cached_update_response`, `_app_bkst_synced`, `bkst_status`, `bkst_message`) global `_state_lock = threading.RLock()` ile yarış durumlarına (race condition) karşı korunur.
+   - Kullanıcı bazlı `_compare_cache_map[user_key]` ve `_user_cache_map[user_key]` ile çok kullanıcılı çakışmalar engellenmiştir.
 
-7. **İş Parçacığı Güvenliği (`threading.RLock`)**:
-   - Ortak bellek değişkenleri global `_state_lock = threading.RLock()` ile korunur.
-   - Veritabanı ve ağ I/O işlemleri kilit bloğunun dışında tutularak yüksek performans ve eşzamanlılık sağlanır.
+7. **Tam Sertleştirilmiş Oturum Güvenliği & CSRF Koruması**:
+   - `local_session_token` çerezi istemciye `HttpOnly=True` ve `SameSite=Strict` olarak verilir. Token JSON yanıtlarında veya `localStorage` içinde sızdırılmaz.
+   - Tüm veri değiştiren (`POST`, `PUT`, `DELETE`) API isteklerinde `X-Requested-With: XMLHttpRequest` başlığı zorunludur. `window.apiFetch` bu başlığı otomatik olarak ekler ve 401 yanıtlarında oturum açma sayfasına yönlendirir.
+   - Flask gizli anahtarı rastgele 32 baytlık `.flask_secret` dosyası üzerinden dinamik ve kalıcı olarak yönetilir.
 
-8. **Yerel Oturum Güvenliği (`.session_token` & `X-Local-Token`)**:
-   - Uygulama başlangıcında 32 baytlık rastgele oturum anahtarı üretilir (`.session_token`).
-   - Korumalı `/api/*` uç noktaları `X-Local-Token` başlığını kontrol eder. Yetkisiz erişimlerde 401 Unauthorized dönerek kullanıcıyı otomatik oturum açma sayfasına yönlendirir.
+8. **XSS & JS Kod Enjeksiyonu Koruması**:
+   - Şablonlardaki inline `onclick` fonksiyon çağrıları kaldırılarak `data-group-key` ve `data-id` niteliklerine ve tablo seviyesinde event delegation yapısına dönüştürülmüştür.
+   - HTML içeriği ve nitelikleri için `escHtml` ve `escAttr` yardımcıları kullanılır.
 
-9. **LRU Bellek Önbelleği (LRU Memory Cache)**:
-   - `get_bkst_cache()` fonksiyonu son 5 kullanıcının veri setini bellekte tutar. Veritabanı güncellendiğinde ilgili kullanıcının önbelleği anında temizlenir (`invalidation`).
+9. **Dinamik ve Güvenli SSL / TLS Denetimi (`QR_SSL_VERIFY`)**:
+   - Kod tabanındaki tüm `verify=False` parametreleri güvenli varsayılan `SSL_VERIFY` (`QR_SSL_VERIFY=1`) değişkenine bağlanmıştır. MITM (araya girme) riskleri engellenmiştir.
 
-10. **Güçlü GTIN Çıkarımı ve GS1 Karekod Ayrıştırma (GTIN Fallback)**:
-   - Bakanlık API veya iç veri modellerinden gelen verilerde GTIN alanları (`Gtin Numarası`, `Gtin / Barkod`, `gtin`, `BARKOD`, `Barkod`, `BARCODE`) tam eşleşme ile yakalanır.
-   - Herhangi bir nedenle GTIN alanı boş veya eksik gelse dahi, sistem GS1 2D karekod yapısından (`01...` veya `(01)...`) otomatik olarak 14 haneli ürün GTIN/Barkod numarasını (`parse_gs1_qr`) çıkarır.
-   - Veritabanı başlangıcında (`init_db`) geriye dönük otomatik onarım mekanizması çalışarak geçmiş tüm çıkış ve stok kayıtlarındaki boş GTIN'leri tamamlar.
+10. **Doğru Tip Dönüşümü, Koli/Palet Toplu Çıkış & Tekrar Okutma Yönetimi (`tekrar_uyari`)**:
+    - İlk kez okutulan ürünler kesinlikle `tekrar_uyari = 0` (False) olarak kaydedilir ve yeşil kartla onaylanır.
+    - Daha önce okutulmuş bir ürün tekrar okutulduğunda `tekrar_uyari = 1` ve `tekrar_uyari: True` dönülerek arayüzde sarı uyarı kartı ve TEKRAR rozeti gösterilir.
+    - Koli/palet barkodu okutulduğunda kolideki tüm ürünler topluca çıkış kayıtlarına işlenir.
+    - Karekod eşleştirmelerinde casefold yapılarak büyük/küçük harf varyasyonları duplicate kaçaklarına yol açmaz.
+
+11. **Şablon Değişkenleri 30sn TTL Bellek Önbelleği**:
+    - `inject_global_template_vars` her sayfa isteğinde diskten dosya okumak yerine verileri 30 saniyelik TTL ile önbellekten sunarak CPU ve disk I/O yükünü sıfıra indirir.
+
+12. **Çift Katmanlı Satış Mimarisi: Kalıcı Satış Arşivi (`satis_arsivi`) ve Çalışma Sepeti (`cikis_kayitlari`)**:
+    - Kullanıcı iş akışında "Sistemden Çıkacaklar Listesi"ni (`cikis_kayitlari`) aktif bir sevk sepeti olarak kullanır; ürünler Bakanlık sistemine aktarıldıkça veya sevk tamamlandıkça bu listeden silinebilir veya "Tümünü Sil" ile temizlenebilir.
+    - Uzun vadeli (yıllara ve aylara yayılan) istatistiklerin kaybolmaması için tüm çıkışlar aynı anda kalıcı `satis_arsivi` tablosuna da yazılır.
+    - Çalışma listesinden (`cikis_kayitlari`) satır silinse dahi `satis_arsivi` tablosuna dokunulmaz; İstatistikler & Raporlar modülü doğrudan `satis_arsivi` üzerinden hesaplanır.
+    - Mükerrer okutma denetimi (`tekrar_uyari`), hem çalışma listesini hem de `satis_arsivi` tablosunu `UNION ALL` ile tarar; böylece aylar/yıllar önce çıkılmış bir ürün bile okutulsa anında geçmiş çıkış tarihiyle birlikte tespit edilir.
+    - **İstatistikleri Sıfırlama (`POST /api/istatistikler/sifirla`)**: İstatistikler sayfasındaki "İstatistikleri Sıfırla" butonu ile kalıcı arşiv (`satis_arsivi`) çift onaylı olarak güvenle sıfırlanabilir. Aktif çalışma listesindeki sepet kayıtları bu işlemden etkilenmez. Tek seferlik migration koruması (`schema_migrations`) sayesinde sistem yeniden başlatıldığında sıfırlanan veriler eski listelerden tekrar geri yüklenmez.
+
+13. **Gelişmiş Koli/Palet Barkod Doğrulaması**:
+    - `find_matching_koli` içinde 6 karakterden kısa verilerin yanlışlıkla koli/palet sayılması engellenmiştir.
+
+14. **Bakanlık Depoya Kabul Et Modülü: Gerçek Durum Tespiti (`Kabul Bekliyor` vs `Stoğa Alınmış`)**:
+    - Bakanlık BKST `GetReceivedNotificationList` servisinin her geçerli/iptal edilmemiş faturayı yanıltıcı şekilde `HEADERSTATE: 'AKTIF'` döndürmesi sorunu çözülmüştür.
+    - Sistem, gelen bildirimlerin detaylarını eşzamanlı `ThreadPoolExecutor(max_workers=20)` ile paralel sorgulayarak satır bazında `DETAILSTATE == 'ALIMA UYGUN'` olan ürünleri anlık tespit eder.
+    - Henüz depoya kabul edilmemiş ürün içeren bildirimler `🟢 Kabul Bekliyor` olarak işaretlenir ve faturadaki bekleyen ürün sayısıyla birlikte listenin en başına sabitlenir. Tüm ürünleri önceden depoya alınmış bildirimler ise `📦 Stoğa Alınmış` olarak gösterilir.
+    - Belge detayında ürünler tablo halinde incelenirken her kalemin durumu ('Kabul Bekliyor' veya 'Stoğa Alınmış') açıkça gösterilir. 'Tek Tuşla Depoya Kabul Et' butonu yalnızca kabul bekleyen ürünler varsa aktifleşir; zaten stoğa alınmış faturalarda '✅ Bu Belgedeki Ürünler Zaten Stoğa Alınmış' rozetiyle güvenli biçimde kilitlenir.
 
 ---
 
-## 2. Proje Dosya Yapısı ve Kaynak Kodları
+## 2. Proje Dosya ve Kodları
+
+### 📁 `version.json`
+
+```json
+{
+  "version": "v3.1.5",
+  "commit": "3.1.5",
+  "date": "08.10.2026",
+  "message": "v3.1.5: Tekrar çıkış rozeti ve GTIN görüntüleme düzeltmesi, Single-Instance & Bring-to-Front desteği, güvenlik ve önbellek iyileştirmeleri",
+  "files": [
+    ".gitignore",
+    "Calistir.bat",
+    "Calistir.exe",
+    "Calistir.vbs",
+    "Guncelle.bat",
+    "Kapat.bat",
+    "KURULUM.md",
+    "app.py",
+    "build_exe.ps1",
+    "guncelleme_kontrol.py",
+    "launcher.py",
+    "requirements.txt",
+    "static/app.js",
+    "static/favicon.ico",
+    "static/favicon.png",
+    "static/favicon.svg",
+    "static/style.css",
+    "templates/cikis.html",
+    "templates/cikis_listesi.html",
+    "templates/depo_kabul.html",
+    "templates/depo_stoklari.html",
+    "templates/index.html",
+    "templates/kullaniciya_satis.html",
+    "templates/login.html",
+    "version.json"
+  ]
+}
+```
+
+---
+
+### 📁 `requirements.txt`
+
+```text
+Flask==3.1.3
+pandas==2.2.2
+openpyxl==3.1.2
+xlrd==2.0.2
+requests==2.31.0
+Werkzeug==3.1.8
+waitress==3.0.0
+
+```
+
+---
 
 ### 📁 `.gitignore`
 
-```
+```gitignore
 # ── KAREKOD & STOK YÖNETİM SİSTEMİ GITIGNORE ──────────────────────────────
 
 # Kullanıcıya Özel Veriler ve Veritabanı (Kesinlikle GitHub'a Yüklenmez)
@@ -78,7 +156,11 @@ terek_eksik_urunler_bakanlik_cikis.xlsx
 # Özel Kullanıcı Notları ve Şifreler
 bakanlik_giris_bilgileri.txt
 günlük satışlar.txt
+.session_token
+.flask_secret
+.dev_mode
 *.log
+Hosts_Duzelt.bat
 
 # Tarayıcı ve Sürücü Dosyaları (Her Bilgisayarda Otomatik İndirilir)
 msedgedriver.exe
@@ -102,61 +184,9 @@ venv/
 
 ---
 
-### 📁 `version.json`
-
-```json
-{
-  "version": "v3.1.0",
-  "commit": "3.1.0",
-  "date": "08.10.2026",
-  "message": "v3.1.0: Tam ekran masaüstü modu, SQLite DB entegrasyonu, otomatik kapanma ve stabilite güncellemeleri",
-  "files": [
-    ".gitignore",
-    "Calistir.bat",
-    "Calistir.exe",
-    "Calistir.vbs",
-    "Guncelle.bat",
-    "Kapat.bat",
-    "KURULUM.md",
-    "app.py",
-    "build_exe.ps1",
-    "guncelleme_kontrol.py",
-    "launcher.py",
-    "requirements.txt",
-    "static/app.js",
-    "static/favicon.ico",
-    "static/favicon.png",
-    "static/favicon.svg",
-    "static/style.css",
-    "templates/cikis.html",
-    "templates/cikis_listesi.html",
-    "templates/index.html",
-    "version.json"
-  ]
-}
-
-```
-
----
-
-### 📁 `requirements.txt`
-
-```
-Flask==3.1.3
-pandas==2.2.2
-openpyxl==3.1.2
-xlrd==2.0.2
-requests==2.31.0
-Werkzeug==3.1.8
-waitress==3.0.0
-
-```
-
----
-
 ### 📁 `KURULUM.md`
 
-```
+```markdown
 # QR Stok Yönetim Sistemi - Kurulum Rehberi
 
 ## Başka Bir Bilgisayara Taşıma
@@ -206,582 +236,6 @@ Paketler daha önce kurulduysa internet olmadan da çalışır. İlk kurulum iç
 
 ---
 
-### 📁 `Calistir.bat`
-
-```powershell
-@echo off
-cd /d "%~dp0"
-start "" "%~dp0Calistir.exe"
-exit
-
-```
-
----
-
-### 📁 `Guncelle.bat`
-
-```powershell
-@echo off
-cd /d "%~dp0"
-chcp 65001 > nul
-title QR Stok Yonetim Sistemi - Guncelleyici
-
-python guncelleme_kontrol.py
-if %errorlevel% neq 0 (
-    echo.
-    echo ============================================================
-    echo [HATA] Guncelleme islemi basarisiz oldu!
-    echo ============================================================
-    pause
-)
-exit
-
-```
-
----
-
-### 📁 `Kapat.bat`
-
-```powershell
-@echo off
-cd /d "%~dp0"
-chcp 65001 > nul
-title QR Stok Yonetim Sistemi - Kapatici
-
-echo.
-echo ============================================================
-echo   QR STOK YÖNETİM SİSTEMİ ARKA PLAN SUNUCUSU KAPATILIYOR...
-echo ============================================================
-echo.
-
-powershell -Command "Get-Process python,pythonw,py -ErrorAction SilentlyContinue | Stop-Process -Force" > nul 2>&1
-taskkill /F /IM python.exe > nul 2>&1
-taskkill /F /IM pythonw.exe > nul 2>&1
-taskkill /F /IM py.exe > nul 2>&1
-
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr :5000 ^| findstr LISTENING') do (
-    taskkill /F /PID %%a > nul 2>&1
-)
-
-echo.
-echo 🟢 Arka plandaki tüm sunucu süreçleri başarıyla kapatıldı.
-echo.
-timeout /t 2 > nul
-exit
-
-```
-
----
-
-### 📁 `Calistir.vbs`
-
-```powershell
-Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run "Calistir.exe", 0, False
-
-```
-
----
-
-### 📁 `build_exe.ps1`
-
-```powershell
-$code = @"
-using System;
-using System.Diagnostics;
-using System.IO;
-using System.Net.Sockets;
-using System.Runtime.InteropServices;
-using System.Threading;
-
-public class AppLauncher {
-    [DllImport("user32.dll")]
-    private static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
-
-    [DllImport("user32.dll")]
-    private static extern bool SetForegroundWindow(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    private static extern bool IsWindowVisible(IntPtr hWnd);
-
-    private const int SW_MAXIMIZE = 3;
-
-    public static void Main() {
-        string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-        Directory.SetCurrentDirectory(baseDir);
-
-        Process pythonProc = null;
-
-        if (!IsPortOpen("127.0.0.1", 5000)) {
-            string pythonwPath = FindPythonwPath();
-            if (!string.IsNullOrEmpty(pythonwPath)) {
-                ProcessStartInfo psi = new ProcessStartInfo();
-                psi.FileName = pythonwPath;
-                psi.Arguments = "app.py";
-                psi.WorkingDirectory = baseDir;
-                psi.UseShellExecute = false;
-                psi.CreateNoWindow = true;
-                psi.WindowStyle = ProcessWindowStyle.Hidden;
-                try {
-                    pythonProc = Process.Start(psi);
-                } catch {}
-            }
-
-            for (int i = 0; i < 24; i++) {
-                Thread.Sleep(250);
-                if (IsPortOpen("127.0.0.1", 5000)) break;
-            }
-        }
-
-        string browserExe = FindBrowserPath();
-        Process browserProc = null;
-
-        if (!string.IsNullOrEmpty(browserExe)) {
-            ProcessStartInfo bpsi = new ProcessStartInfo();
-            bpsi.FileName = browserExe;
-            bpsi.Arguments = "--app=http://127.0.0.1:5000 --start-maximized --window-position=0,0";
-            bpsi.UseShellExecute = false;
-            bpsi.CreateNoWindow = true;
-
-            try {
-                browserProc = Process.Start(bpsi);
-            } catch {}
-        } else {
-            try {
-                Process.Start("http://127.0.0.1:5000");
-            } catch {}
-        }
-
-        for (int j = 0; j < 15; j++) {
-            Thread.Sleep(200);
-            MaximizeBrowserWindows();
-        }
-
-        if (browserProc != null) {
-            try {
-                browserProc.WaitForExit();
-            } catch {}
-        }
-
-        try {
-            if (pythonProc != null && !pythonProc.HasExited) {
-                pythonProc.Kill();
-            }
-        } catch {}
-    }
-
-    private static void MaximizeBrowserWindows() {
-        try {
-            foreach (Process p in Process.GetProcesses()) {
-                string name = p.ProcessName.ToLower();
-                if (name.Contains("chrome") || name.Contains("edge")) {
-                    IntPtr handle = p.MainWindowHandle;
-                    if (handle != IntPtr.Zero && IsWindowVisible(handle)) {
-                        ShowWindowAsync(handle, SW_MAXIMIZE);
-                        SetForegroundWindow(handle);
-                    }
-                }
-            }
-        } catch {}
-    }
-
-    private static bool IsPortOpen(string host, int port) {
-        try {
-            using (TcpClient client = new TcpClient()) {
-                IAsyncResult result = client.BeginConnect(host, port, null, null);
-                bool success = result.AsyncWaitHandle.WaitOne(400, false);
-                if (success) {
-                    client.EndConnect(result);
-                    return true;
-                }
-            }
-        } catch {}
-        return false;
-    }
-
-    private static string FindPythonwPath() {
-        string[] candidates = new string[] {
-            @"C:\Program Files\Python311\pythonw.exe",
-            @"C:\Program Files\Python310\pythonw.exe",
-            @"C:\Program Files\Python312\pythonw.exe",
-            @"C:\Program Files\Python39\pythonw.exe",
-            @"C:\Program Files (x86)\Python311\pythonw.exe",
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Python\Python311\pythonw.exe"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Python\Python310\pythonw.exe"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Python\Python312\pythonw.exe")
-        };
-
-        foreach (string path in candidates) {
-            if (File.Exists(path)) return path;
-        }
-
-        string pathEnv = Environment.GetEnvironmentVariable("PATH");
-        if (!string.IsNullOrEmpty(pathEnv)) {
-            foreach (string p in pathEnv.Split(';')) {
-                string full = Path.Combine(p.Trim(), "pythonw.exe");
-                if (File.Exists(full)) return full;
-            }
-        }
-
-        return "pythonw.exe";
-    }
-
-    private static string FindBrowserPath() {
-        string[] candidates = new string[] {
-            @"C:\Program Files\Google\Chrome\Application\chrome.exe",
-            @"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Google\Chrome\Application\chrome.exe"),
-            @"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-            @"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Microsoft\Edge\Application\msedge.exe")
-        };
-
-        foreach (string path in candidates) {
-            if (File.Exists(path)) return path;
-        }
-
-        return null;
-    }
-}
-"@
-
-Add-Type -TypeDefinition $code -OutputAssembly "Calistir.exe" -OutputType WindowsApplication
-Write-Host "Native Calistir.exe built successfully!"
-
-```
-
----
-
-### 📁 `launcher.py`
-
-```python
-import os
-import sys
-import subprocess
-import time
-import socket
-import webbrowser
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-os.chdir(BASE_DIR)
-
-NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
-
-def is_port_in_use(port=5000):
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(0.5)
-            return s.connect_ex(('127.0.0.1', port)) == 0
-    except Exception:
-        return False
-
-def open_as_desktop_app(url="http://127.0.0.1:5000"):
-    chrome_paths = [
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-        os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe")
-    ]
-    edge_paths = [
-        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"
-    ]
-
-    for browser_path in chrome_paths + edge_paths:
-        if os.path.exists(browser_path):
-            try:
-                subprocess.Popen([browser_path, f"--app={url}", "--start-maximized", "--window-position=0,0"], creationflags=NO_WINDOW)
-                return True
-            except Exception:
-                pass
-
-    webbrowser.open(url)
-    return False
-
-def launch():
-    if not is_port_in_use(5000):
-        python_exe = sys.executable
-        subprocess.Popen([python_exe, "app.py"], cwd=BASE_DIR, creationflags=NO_WINDOW)
-
-        for _ in range(20):
-            time.sleep(0.25)
-            if is_port_in_use(5000):
-                break
-
-    open_as_desktop_app("http://127.0.0.1:5000")
-
-if __name__ == "__main__":
-    launch()
-
-```
-
----
-
-### 📁 `guncelleme_kontrol.py`
-
-```python
-import os
-import sys
-import subprocess
-import shutil
-import json
-import time
-import re
-from datetime import datetime
-
-# Çalışma dizinini script'in bulunduğu klasöre sabitle
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-os.chdir(BASE_DIR)
-
-NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
-
-GREEN = '\033[92m'
-CYAN = '\033[96m'
-YELLOW = '\033[93m'
-RED = '\033[91m'
-WHITE = '\033[97m'
-BOLD = '\033[1m'
-DIM = '\033[2m'
-RESET = '\033[0m'
-
-def is_git_installed():
-    try:
-        res = subprocess.run(["git", "--version"], capture_output=True, text=True, timeout=2, cwd=BASE_DIR, creationflags=NO_WINDOW)
-        return res.returncode == 0
-    except Exception:
-        return False
-
-def clear_pycache():
-    for dirpath, dirnames, filenames in os.walk(BASE_DIR):
-        if "__pycache__" in dirnames:
-            try:
-                shutil.rmtree(os.path.join(dirpath, "__pycache__"), ignore_errors=True)
-            except Exception:
-                pass
-
-def get_unified_version_info():
-    """
-    Sürüm bilgisini version.json dosyasından ve git geçmişinden birleştirerek sunar.
-    Tek Gerçeklik Kaynağı: version.json
-    """
-    v_code = "v3.1.0"
-    v_commit = "3.1.0"
-    v_date = "08.10.2026"
-    v_msg = "Sistem Güncel"
-
-    v_path = os.path.join(BASE_DIR, "version.json")
-    if os.path.exists(v_path):
-        try:
-            with open(v_path, "r", encoding="utf-8") as f:
-                v_data = json.load(f)
-                v_code = v_data.get("version", "v3.1.0")
-                v_commit = v_data.get("commit", "3.1.0")
-                v_date = v_data.get("date", "08.10.2026")
-                v_msg = v_data.get("message", f"{v_code} Sürümü")
-        except Exception:
-            pass
-
-    commit_hash = ""
-    commit_date = ""
-    commit_msg = ""
-    try:
-        head_path = os.path.join(BASE_DIR, '.git', 'HEAD')
-        if os.path.exists(head_path):
-            with open(head_path, "r", encoding="utf-8", errors="ignore") as f:
-                head_content = f.read().strip()
-
-            if head_content.startswith("ref:"):
-                ref_rel = head_content.split(": ", 1)[1].strip()
-                ref_path = os.path.join(BASE_DIR, '.git', ref_rel)
-                if os.path.exists(ref_path):
-                    with open(ref_path, "r", encoding="utf-8", errors="ignore") as f:
-                        commit_hash = f.read().strip()[:7]
-            else:
-                commit_hash = head_content[:7]
-
-            log_path = os.path.join(BASE_DIR, '.git', 'logs', 'HEAD')
-            if os.path.exists(log_path):
-                with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
-                    lines = [l for l in f.readlines() if l.strip()]
-                    if lines:
-                        last_line = lines[-1]
-                        parts = last_line.strip().split('\t', 1)
-                        if len(parts) > 1:
-                            commit_msg = parts[1].replace("commit: ", "").replace("checkout: ", "").strip()
-                        meta_parts = parts[0].split()
-                        if len(meta_parts) >= 5 and meta_parts[-2].isdigit():
-                            dt = datetime.fromtimestamp(int(meta_parts[-2]))
-                            commit_date = dt.strftime("%d.%m.%Y %H:%M")
-    except Exception:
-        pass
-
-    final_version_code = f"{v_code} ({commit_hash or v_commit})"
-    final_date = commit_date or v_date
-    final_message = v_msg or commit_msg or f"{v_code} Sürümü"
-
-    return final_version_code, final_date, final_message
-
-def get_latest_remote_commit_sha(requests_module):
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-    try:
-        atom_url = f"https://github.com/mfatih01020/stok_fatih/commits/main.atom?t={time.time_ns()}"
-        r = requests_module.get(atom_url, verify=False, timeout=8, headers=headers)
-        if r.status_code == 200:
-            matches = re.findall(r'/commit/([0-9a-f]{40})', r.text)
-            if matches:
-                return matches[0]
-    except Exception:
-        pass
-    return "main"
-
-def http_fallback_update():
-    print(f"  {CYAN}  • Güncelleme sunucusu kontrol ediliyor...{RESET}")
-    
-    try:
-        import requests
-        import urllib3
-        import zipfile
-        import io
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-    except ImportError:
-        print(f"  {RED}[HATA] Güncelleme için gerekli kütüphaneler bulunamadı.{RESET}")
-        return False
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        "Pragma": "no-cache"
-    }
-
-    latest_sha = get_latest_remote_commit_sha(requests)
-    timestamp = time.time_ns()
-    remote_vurl = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/{latest_sha}/version.json?t={timestamp}"
-
-    try:
-        resp = requests.get(remote_vurl, verify=False, timeout=10, headers=headers)
-        if resp.status_code != 200:
-            print(f"  {RED}[HATA] Sunucu yanıt vermedi (HTTP {resp.status_code}){RESET}")
-            return False
-
-        remote_data = resp.json()
-        remote_commit = str(remote_data.get("commit", "")).strip()
-        remote_version = str(remote_data.get("version", "v1.0")).strip()
-        remote_date = str(remote_data.get("date", "")).strip()
-        remote_msg = str(remote_data.get("message", "")).strip()
-
-        local_vpath = os.path.join(BASE_DIR, "version.json")
-        local_commit = ""
-        if os.path.exists(local_vpath):
-            try:
-                with open(local_vpath, "r", encoding="utf-8") as f:
-                    local_commit = str(json.load(f).get("commit", "")).strip()
-            except Exception:
-                pass
-
-        if local_commit and local_commit == remote_commit:
-            print(f"\n{GREEN}{BOLD} =============================================================={RESET}")
-            print(f"{GREEN}{BOLD}  🟢 [GÜNCEL] Sisteminiz en son sürümde ({remote_version}).{RESET}")
-            print(f"{GREEN}{BOLD} =============================================================={RESET}\n")
-            return False
-
-        print(f"\n  {YELLOW}{BOLD}[🔄 GÜNCELLEME BULUNDU] Sürüm {remote_version} paketi indiriliyor...{RESET}")
-
-        zip_url = f"https://github.com/mfatih01020/stok_fatih/archive/refs/heads/main.zip?t={timestamp}"
-        zip_resp = requests.get(zip_url, verify=False, timeout=35, headers=headers)
-
-        if zip_resp.status_code != 200:
-            print(f"  {RED}[HATA] Güncelleme paketi indirilemedi (HTTP {zip_resp.status_code}){RESET}")
-            return False
-
-        ignored_extensions = ('.db', '.sqlite', '.sqlite3')
-        ignored_filenames = ('cikis_kayitlari.db', 'stok_takip.db', 'bakanlik_giris_bilgileri.txt', 'msedgedriver.exe', 'chromedriver.exe')
-
-        with zipfile.ZipFile(io.BytesIO(zip_resp.content)) as zf:
-            for member in zf.infolist():
-                if member.is_dir():
-                    continue
-                parts = member.filename.split('/', 1)
-                if len(parts) < 2:
-                    continue
-                rel_path = parts[1]
-
-                filename = os.path.basename(rel_path)
-                if filename in ignored_filenames or filename.endswith(ignored_extensions) or rel_path.startswith('.git/'):
-                    continue
-
-                dest_path = os.path.join(BASE_DIR, rel_path.replace('/', os.sep))
-                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-                with zf.open(member) as source, open(dest_path, "wb") as target:
-                    target.write(source.read())
-
-        with open(local_vpath, "w", encoding="utf-8") as f:
-            json.dump(remote_data, f, ensure_ascii=False, indent=2)
-
-        clear_pycache()
-
-        print(f"\n{GREEN}{BOLD} =============================================================={RESET}")
-        print(f"{GREEN}{BOLD}  🟢 [BAŞARILI] Tüm yeni dosyalar entegre edilerek {remote_version} sürümüne güncellendi.{RESET}")
-        print(f"{WHITE}{BOLD}  📦 Sürüm: {remote_version} ({remote_commit}) | {remote_date}{RESET}")
-        print(f"{WHITE}  📝 Not  : {remote_msg}{RESET}")
-        print(f"{GREEN}{BOLD} =============================================================={RESET}\n")
-        return True
-
-    except Exception as e:
-        print(f"  {RED}[HATA] Güncelleme işlemi başarısız: {e}{RESET}")
-        return False
-
-def force_update():
-    print(f"\n{CYAN}{BOLD} =============================================================={RESET}")
-    print(f"{WHITE}{BOLD}       QR STOK YÖNETİM SİSTEMİ - GÜNCELLEME KONTROLÜ{RESET}")
-    print(f"{CYAN}{BOLD} =============================================================={RESET}\n")
-
-    cur_hash, cur_date, cur_msg = get_unified_version_info()
-    print(f"  {WHITE}{BOLD}📌 MEVCUT SÜRÜM BİLGİLERİ:{RESET}")
-    print(f"  {DIM}  • Yüklü Sürüm: {RESET}{WHITE}{cur_hash}{RESET}")
-    print(f"  {DIM}  • Tarih       : {RESET}{WHITE}{cur_date}{RESET}")
-    print(f"  {DIM}  • Not         : {RESET}{WHITE}{cur_msg}{RESET}\n")
-
-    git_works = is_git_installed()
-    if git_works:
-        env = os.environ.copy()
-        env["GIT_TERMINAL_PROMPT"] = "0"
-        env["GIT_ASKPASS"] = "echo"
-        env["GIT_SSL_NO_VERIFY"] = "true"
-        subprocess.run(["git", "config", "--global", "--add", "safe.directory", "*"], capture_output=True, text=True, cwd=BASE_DIR, creationflags=NO_WINDOW)
-
-        print(f"  {CYAN}[1/2] Sunucu kontrol ediliyor...{RESET}")
-        repo_url = "https://github.com/mfatih01020/stok_fatih.git"
-        fetch_res = subprocess.run(["git", "-c", "http.sslVerify=false", "fetch", repo_url, "main", "--force"], capture_output=True, text=True, timeout=20, env=env, cwd=BASE_DIR, creationflags=NO_WINDOW)
-
-        if fetch_res.returncode == 0:
-            local_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR, creationflags=NO_WINDOW).stdout.strip()
-            remote_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "FETCH_HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR, creationflags=NO_WINDOW).stdout.strip()
-
-            if remote_hash and (local_hash != remote_hash or local_hash == "Bilinmiyor" or not local_hash):
-                print(f"\n  {YELLOW}{BOLD}[🔄 GÜNCELLEME BULUNDU] Yeni sürüm yükleniyor...{RESET}")
-                subprocess.run(["git", "-c", "http.sslVerify=false", "checkout", "-B", "main", "FETCH_HEAD", "--force"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR, creationflags=NO_WINDOW)
-                subprocess.run(["git", "-c", "http.sslVerify=false", "reset", "--hard", "FETCH_HEAD"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR, creationflags=NO_WINDOW)
-                clear_pycache()
-
-                new_hash, new_date, new_msg = get_unified_version_info()
-                print(f"\n{GREEN}{BOLD} =============================================================={RESET}")
-                print(f"{GREEN}{BOLD}  🟢 [BAŞARILI] Sistem güncellendi ({new_hash}).{RESET}")
-                print(f"{GREEN}{BOLD} =============================================================={RESET}\n")
-                return True
-            else:
-                print(f"\n{GREEN}{BOLD} =============================================================={RESET}")
-                print(f"{GREEN}{BOLD}  🟢 [GÜNCEL] Sisteminiz en son sürümde ({cur_hash}).{RESET}")
-                print(f"{GREEN}{BOLD} =============================================================={RESET}\n")
-                return False
-
-    return http_fallback_update()
-
-if __name__ == "__main__":
-    force_update()
-
-```
-
----
-
 ### 📁 `app.py`
 
 ```python
@@ -798,6 +252,9 @@ import logging
 from logging.handlers import RotatingFileHandler
 import concurrent.futures
 from datetime import datetime
+import subprocess
+import socket
+import atexit
 import pandas as pd
 from flask import Flask, render_template, request, jsonify, send_file, redirect
 import io
@@ -810,25 +267,56 @@ class SafeStream:
 
 if getattr(sys, 'stdout', None) is None:
     sys.stdout = SafeStream()
+else:
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
 if getattr(sys, 'stderr', None) is None:
     sys.stderr = SafeStream()
+else:
+    try:
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
 
 # ── Logging Configuration ───────────────────────────────────────────────────
-handler = RotatingFileHandler('app.log', maxBytes=5_000_000, backupCount=3, encoding='utf-8')
+handler = RotatingFileHandler(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'app.log'), maxBytes=5_000_000, backupCount=3, encoding='utf-8')
 handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
 logging.basicConfig(level=logging.INFO, handlers=[handler])
 logger = logging.getLogger('qr_compare')
 
+# ── Dynamic Flask Secret Key ─────────────────────────────────────────────────
+FLASK_SECRET_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".flask_secret")
+
+def _get_or_create_flask_secret():
+    if os.path.exists(FLASK_SECRET_PATH):
+        try:
+            with open(FLASK_SECRET_PATH, 'r', encoding='utf-8') as f:
+                s = f.read().strip()
+                if s:
+                    return s
+        except Exception:
+            pass
+    secret = secrets.token_hex(32)
+    try:
+        with open(FLASK_SECRET_PATH, 'w', encoding='utf-8') as f:
+            f.write(secret)
+    except Exception:
+        pass
+    return secret
+
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "qr_compare_stok_fatih_secret_key_2026_x89")
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or _get_or_create_flask_secret()
 
 # ── Global Thread Lock & Memory State ─────────────────────────────────────────
 _state_lock = threading.RLock()
 _user_cache_map = {}
 _cache_access_order = []
+_compare_cache_map = {}
 bkst_status = "closed"
 bkst_message = ""
-cached_results = {}
 _app_bkst_synced = False
 
 _fetch_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix='bkst_fetch')
@@ -842,8 +330,7 @@ def heartbeat_watchdog():
         time.sleep(15)
         if time.time() - _last_heartbeat > 60:
             logger.warning("Heartbeat timeout (60s). Uygulama otomatik yenileniyor/kapatılıyor.")
-            # Graceful watchdog logging
-            
+
 threading.Thread(target=heartbeat_watchdog, daemon=True).start()
 
 # ── Session Token Authentication Helper ───────────────────────────────────────
@@ -874,6 +361,8 @@ def add_header(response):
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'
+    if not request.cookies.get('local_session_token'):
+        response.set_cookie('local_session_token', LOCAL_SESSION_TOKEN, httponly=True, samesite='Strict')
     return response
 
 @app.before_request
@@ -882,6 +371,9 @@ def check_authentication():
     if (path.startswith('/static') or 
         path == '/login' or 
         path == '/api/system/login' or 
+        path == '/api/system/check_update' or 
+        path == '/api/system/apply_update' or 
+        path == '/api/system/version' or 
         path == '/api/system/heartbeat' or 
         path == '/api/heartbeat'):
         return None
@@ -896,59 +388,48 @@ def check_authentication():
         client_token = request.headers.get('X-Local-Token')
         if not client_token:
             client_token = request.args.get('token')
-        if client_token and client_token != LOCAL_SESSION_TOKEN:
-            return jsonify({'success': False, 'error': 'Geçersiz oturum anahtarı', 'code': 401}), 401
+        if not client_token:
+            client_token = request.cookies.get('local_session_token')
+        if not client_token or client_token != LOCAL_SESSION_TOKEN:
+            return jsonify({'success': False, 'error': 'Geçersiz veya eksik oturum anahtarı', 'code': 401}), 401
 
     return None
 
 # ── Sürüm & Güncelleme Bilgisi ────────────────────────────────────────────────
+@app.route('/api/system/version', methods=['GET'])
 def get_version_info():
-    try:
-        from guncelleme_kontrol import get_unified_version_info
-        ver_code, ver_date, ver_msg = get_unified_version_info()
-        return {
-            "success": True,
-            "version": ver_code,
-            "commit_hash": ver_code,
-            "commit_date": ver_date,
-            "commit_msg": ver_msg
-        }
-    except Exception as e:
-        logger.error(f"Error loading version info: {e}")
-
     v_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.json")
+    v_code = "v1.0"
+    v_commit = ""
+    v_date = datetime.now().strftime("%d.%m.%Y")
+    v_msg = "Sistem Güncel"
     if os.path.exists(v_path):
         try:
             with open(v_path, "r", encoding="utf-8") as f:
                 v_data = json.load(f)
-                v_code = v_data.get("version", "v3.1.0")
-                return {
-                    "success": True,
-                    "version": f"{v_code} ({v_data.get('commit', '3.1.0')})",
-                    "commit_hash": f"{v_code} ({v_data.get('commit', '3.1.0')})",
-                    "commit_date": v_data.get("date", "08.10.2026"),
-                    "commit_msg": v_data.get("message", f"{v_code} Sürümü")
-                }
+                v_code = str(v_data.get("version", "v1.0")).strip()
+                v_commit = str(v_data.get("commit", "")).strip()
+                v_date = str(v_data.get("date", "")).strip()
+                v_msg = str(v_data.get("message", "Sistem Güncel")).strip()
         except Exception as e:
-            logger.error(f"Error reading version.json fallback: {e}")
+            logger.error(f"Error reading version.json: {e}")
 
-    return {
+    full_hash = f"{v_code} ({v_commit})" if v_commit else v_code
+    return jsonify({
         "success": True,
-        "version": "v3.1.0",
-        "commit_hash": "v3.1.0",
-        "commit_date": "08.10.2026",
-        "commit_msg": "v3.1.0 Sürümü"
-    }
+        "version": v_code,
+        "commit_hash": full_hash,
+        "commit_date": v_date,
+        "commit_msg": v_msg
+    })
 
 @app.route('/api/system/heartbeat', methods=['POST', 'GET'])
 def system_heartbeat():
     global _last_heartbeat
     _last_heartbeat = time.time()
-    return jsonify({"status": "ok"})
-
-@app.route('/api/system/version', methods=['GET'])
-def system_version_api():
-    return jsonify(get_version_info())
+    payload = _bkst_state_payload()
+    payload["local_count"] = _local_item_count()
+    return jsonify(payload)
 
 @app.route('/api/heartbeat', methods=['POST', 'GET'])
 def api_heartbeat():
@@ -960,66 +441,86 @@ def api_heartbeat():
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cikis_kayitlari.db')
 
 def save_bkst_data_to_db(df, username=""):
-    if df is None or df.empty:
+    if not username:
+        logger.warning("save_bkst_data_to_db: username boş, işlem iptal.")
         return
+    if df is None:
+        return
+    if isinstance(df, pd.DataFrame) and df.empty:
+        return
+    if isinstance(df, list) and len(df) == 0:
+        return
+
+    ensure_db_schema()
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     c = conn.cursor()
-    
-    if username:
-        c.execute("DELETE FROM bkst_depo_verileri_staging WHERE kullanici_adi = ?", (username,))
-    else:
-        c.execute("DELETE FROM bkst_depo_verileri_staging")
-        
-    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    koli_col = find_koli_column(df.columns)
-    
-    records = df.to_dict(orient="records")
-    rows_to_insert = []
-    for r in records:
-        qr_val = normalize_qr(str(r.get("Karekod", r.get("tam_karekod", r.get("QR", "")))))
-        gtin_val = str(r.get("Gtin Numarası", r.get("gtin", r.get("BARKOD", "")))).strip()
-        urun_val = str(r.get("Ürün Adı", r.get("urun_adi", r.get("URUNADI", "")))).strip()
-        seri_val = str(r.get("Seri Numarası", r.get("seri_no", r.get("SERIALNUMBER", "")))).strip()
-        parti_val = str(r.get("Parti Numarası", r.get("parti_no", r.get("SARJNO", "")))).strip()
-        raw_koli = r.get(koli_col) if koli_col else r.get("koli_no")
-        koli_val = str(raw_koli).strip().upper() if pd.notna(raw_koli) and raw_koli is not None else ""
-        if koli_val == "NAN":
-            koli_val = ""
-        palet_val = str(r.get("Palet Numarası", r.get("palet_no", "")))
-        uretim_val = str(r.get("Üretim Tarihi", r.get("uretim_tarihi", "")))
-        skt_val = str(r.get("Son Kullanma Tarihi", r.get("skt", r.get("SKT", ""))))
-        
-        rows_to_insert.append((gtin_val, urun_val, seri_val, parti_val, koli_val, palet_val, uretim_val, skt_val, qr_val, username, now_str))
-            
-    c.executemany('''INSERT INTO bkst_depo_verileri_staging
-        (gtin, urun_adi, seri_no, parti_no, koli_no, palet_no, uretim_tarihi, skt, tam_karekod, kullanici_adi, guncelleme_tarihi)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', rows_to_insert)
-    conn.commit()
 
     try:
-        if username:
-            c.execute("DELETE FROM bkst_depo_verileri WHERE kullanici_adi = ?", (username,))
-            c.execute('''INSERT INTO bkst_depo_verileri
-                (gtin, urun_adi, seri_no, parti_no, koli_no, palet_no, uretim_tarihi, skt, tam_karekod, kullanici_adi, guncelleme_tarihi)
-                SELECT gtin, urun_adi, seri_no, parti_no, koli_no, palet_no, uretim_tarihi, skt, tam_karekod, kullanici_adi, guncelleme_tarihi
-                FROM bkst_depo_verileri_staging WHERE kullanici_adi = ?''', (username,))
-            c.execute("DELETE FROM bkst_depo_verileri_staging WHERE kullanici_adi = ?", (username,))
+        c.execute("BEGIN IMMEDIATE")
+        c.execute("DELETE FROM bkst_depo_verileri_staging WHERE kullanici_adi = ?", (username,))
+
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        if isinstance(df, pd.DataFrame):
+            koli_col = find_koli_column(df.columns)
+            records = df.to_dict(orient="records")
         else:
-            c.execute("DELETE FROM bkst_depo_verileri")
-            c.execute('''INSERT INTO bkst_depo_verileri
-                (gtin, urun_adi, seri_no, parti_no, koli_no, palet_no, uretim_tarihi, skt, tam_karekod, kullanici_adi, guncelleme_tarihi)
-                SELECT gtin, urun_adi, seri_no, parti_no, koli_no, palet_no, uretim_tarihi, skt, tam_karekod, kullanici_adi, guncelleme_tarihi
-                FROM bkst_depo_verileri_staging''')
-            c.execute("DELETE FROM bkst_depo_verileri_staging")
+            koli_col = None
+            records = df
+
+        rows_to_insert = []
+        for r in records:
+            qr_val = normalize_qr(str(r.get("Karekod", r.get("tam_karekod", r.get("QR", "")))))
+            gtin_val = ""
+            for k in ("Gtin Numarası", "Gtin / Barkod", "Gtin/Barkod", "gtin", "GTIN", "BARKOD", "Barkod", "BARCODE", "Barcode"):
+                v = r.get(k)
+                if v is not None and str(v).strip() and str(v).strip().upper() != "NAN":
+                    gtin_val = str(v).strip()
+                    break
+            if not gtin_val and qr_val:
+                parsed = parse_gs1_qr(qr_val)
+                if parsed and parsed.get("gtin"):
+                    gtin_val = str(parsed["gtin"]).strip()
+
+            urun_val = str(r.get("Ürün Adı", r.get("urun_adi", r.get("URUNADI", "")))).strip()
+            seri_val = str(r.get("Seri Numarası", r.get("seri_no", r.get("SERIALNUMBER", "")))).strip()
+            parti_val = str(r.get("Parti Numarası", r.get("parti_no", r.get("SARJNO", "")))).strip()
+            raw_koli = r.get(koli_col) if koli_col else (r.get("Koli Numarası") or r.get("koli_no") or r.get("PAKETNO") or r.get("KOLINO"))
+            koli_val = str(raw_koli).strip().upper() if raw_koli is not None else ""
+            if koli_val in ("NAN", "NONE", "NULL"):
+                koli_val = ""
+            palet_val = str(r.get("Palet Numarası", r.get("palet_no", ""))).strip()
+            uretim_val = str(r.get("Üretim Tarihi", r.get("uretim_tarihi", ""))).strip()
+            skt_val = str(r.get("Son Kullanma Tarihi", r.get("skt", r.get("SKT", "")))).strip()
+
+            rows_to_insert.append((gtin_val, urun_val, seri_val, parti_val, koli_val, palet_val, uretim_val, skt_val, qr_val, username, now_str))
+
+        c.executemany('''INSERT INTO bkst_depo_verileri_staging
+            (gtin, urun_adi, seri_no, parti_no, koli_no, palet_no, uretim_tarihi, skt, tam_karekod, kullanici_adi, guncelleme_tarihi)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', rows_to_insert)
+
+        c.execute("DELETE FROM bkst_depo_verileri WHERE kullanici_adi = ?", (username,))
+        c.execute('''INSERT INTO bkst_depo_verileri
+            (gtin, urun_adi, seri_no, parti_no, koli_no, palet_no, uretim_tarihi, skt, tam_karekod, kullanici_adi, guncelleme_tarihi)
+            SELECT gtin, urun_adi, seri_no, parti_no, koli_no, palet_no, uretim_tarihi, skt, tam_karekod, kullanici_adi, guncelleme_tarihi
+            FROM bkst_depo_verileri_staging WHERE kullanici_adi = ?''', (username,))
+        c.execute("DELETE FROM bkst_depo_verileri_staging WHERE kullanici_adi = ?", (username,))
         conn.commit()
     except Exception as e:
         logger.error(f"save_bkst_data_to_db transaction error: {e}", exc_info=True)
-        conn.rollback()
-        conn.close()
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        ensure_db_schema()
         raise e
-    conn.close()
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
     user_key = username or "default_user"
     with _state_lock:
@@ -1027,11 +528,16 @@ def save_bkst_data_to_db(df, username=""):
         if user_key in _cache_access_order:
             _cache_access_order.remove(user_key)
 
-def init_db():
-    conn = sqlite3.connect(DB_PATH, timeout=30.0)
+def ensure_db_schema(conn=None):
+    close_at_end = False
+    if conn is None:
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        close_at_end = True
     c = conn.cursor()
     c.execute("PRAGMA journal_mode=WAL")
     c.execute("PRAGMA synchronous=NORMAL")
+
+    # 1. cikis_kayitlari tablosu
     c.execute('''CREATE TABLE IF NOT EXISTS cikis_kayitlari (
         id           INTEGER PRIMARY KEY AUTOINCREMENT,
         tarih        TEXT NOT NULL,
@@ -1048,12 +554,28 @@ def init_db():
         kullanici_adi TEXT
     )''')
     c.execute("PRAGMA table_info(cikis_kayitlari)")
-    cols = [row[1] for row in c.fetchall()]
-    if "kullanici_adi" not in cols:
-        c.execute("ALTER TABLE cikis_kayitlari ADD COLUMN kullanici_adi TEXT")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_ham_karekod ON cikis_kayitlari(ham_karekod)")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_kullanici_adi ON cikis_kayitlari(kullanici_adi)")
+    cikis_cols = {row[1].lower() for row in c.fetchall()}
+    for col, col_type in [
+        ("tarih", "TEXT NOT NULL DEFAULT ''"),
+        ("urun_adi", "TEXT"),
+        ("barkod", "TEXT"),
+        ("koli_no", "TEXT"),
+        ("seri_no", "TEXT"),
+        ("parti_no", "TEXT"),
+        ("palet_no", "TEXT"),
+        ("uretim_tarihi", "TEXT"),
+        ("skt", "TEXT"),
+        ("ham_karekod", "TEXT"),
+        ("tekrar_uyari", "INTEGER DEFAULT 0"),
+        ("kullanici_adi", "TEXT")
+    ]:
+        if col.lower() not in cikis_cols:
+            try:
+                c.execute(f"ALTER TABLE cikis_kayitlari ADD COLUMN {col} {col_type}")
+            except Exception as e:
+                logger.warning(f"Could not add column {col} to cikis_kayitlari: {e}")
 
+    # 2. bkst_depo_verileri tablosu
     c.execute('''CREATE TABLE IF NOT EXISTS bkst_depo_verileri (
         id               INTEGER PRIMARY KEY AUTOINCREMENT,
         gtin             TEXT,
@@ -1070,10 +592,20 @@ def init_db():
         kullanici_adi    TEXT,
         guncelleme_tarihi TEXT
     )''')
-    c.execute("CREATE INDEX IF NOT EXISTS idx_bkst_karekod ON bkst_depo_verileri(tam_karekod)")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_bkst_gtin ON bkst_depo_verileri(gtin)")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_bkst_kullanici ON bkst_depo_verileri(kullanici_adi)")
+    c.execute("PRAGMA table_info(bkst_depo_verileri)")
+    bkst_cols = {row[1].lower() for row in c.fetchall()}
+    for col in [
+        "gtin", "urun_adi", "seri_no", "parti_no", "koli_no",
+        "palet_no", "uretim_tarihi", "skt", "tam_karekod",
+        "gln", "adres_id", "kullanici_adi", "guncelleme_tarihi"
+    ]:
+        if col.lower() not in bkst_cols:
+            try:
+                c.execute(f"ALTER TABLE bkst_depo_verileri ADD COLUMN {col} TEXT")
+            except Exception as e:
+                logger.warning(f"Could not add column {col} to bkst_depo_verileri: {e}")
 
+    # 3. bkst_depo_verileri_staging tablosu
     c.execute('''CREATE TABLE IF NOT EXISTS bkst_depo_verileri_staging (
         id               INTEGER PRIMARY KEY AUTOINCREMENT,
         gtin             TEXT,
@@ -1090,6 +622,88 @@ def init_db():
         kullanici_adi    TEXT,
         guncelleme_tarihi TEXT
     )''')
+    c.execute("PRAGMA table_info(bkst_depo_verileri_staging)")
+    staging_cols = {row[1].lower() for row in c.fetchall()}
+    for col in [
+        "gtin", "urun_adi", "seri_no", "parti_no", "koli_no",
+        "palet_no", "uretim_tarihi", "skt", "tam_karekod",
+        "gln", "adres_id", "kullanici_adi", "guncelleme_tarihi"
+    ]:
+        if col.lower() not in staging_cols:
+            try:
+                c.execute(f"ALTER TABLE bkst_depo_verileri_staging ADD COLUMN {col} TEXT")
+            except Exception as e:
+                logger.warning(f"Could not add column {col} to bkst_depo_verileri_staging: {e}")
+
+    # İndeksler
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_ham_karekod ON cikis_kayitlari(ham_karekod)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_kullanici_adi ON cikis_kayitlari(kullanici_adi)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_bkst_karekod ON bkst_depo_verileri(tam_karekod)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_bkst_gtin ON bkst_depo_verileri(gtin)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_bkst_kullanici ON bkst_depo_verileri(kullanici_adi)")
+    except Exception:
+        pass
+
+    conn.commit()
+    if close_at_end:
+        conn.close()
+
+def init_db():
+    ensure_db_schema()
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
+    c = conn.cursor()
+
+    # ── Otomatik GTIN Onarımı / Geriye Dönük Veri Doldurma ────────────────────
+    try:
+        # bkst_depo_verileri boş gtin'leri karekoddan doldur
+        c.execute("SELECT id, tam_karekod FROM bkst_depo_verileri WHERE gtin IS NULL OR gtin = ''")
+        for row_id, qr_code in c.fetchall():
+            if qr_code:
+                parsed = parse_gs1_qr(qr_code)
+                if parsed and parsed.get("gtin"):
+                    c.execute("UPDATE bkst_depo_verileri SET gtin = ? WHERE id = ?", (str(parsed["gtin"]), row_id))
+
+        # cikis_kayitlari boş barkod'ları karekoddan doldur
+        c.execute("SELECT id, ham_karekod FROM cikis_kayitlari WHERE barkod IS NULL OR barkod = ''")
+        for row_id, qr_code in c.fetchall():
+            if qr_code:
+                parsed = parse_gs1_qr(qr_code)
+                if parsed and parsed.get("gtin"):
+                    c.execute("UPDATE cikis_kayitlari SET barkod = ? WHERE id = ?", (str(parsed["gtin"]), row_id))
+
+        # bkst_depo_verileri içindeki eşleşen tam_karekod'u cikis_kayitlari'na yaz (seri no ile okutulmuş kayıtları onar)
+        c.execute('''
+            SELECT ck.id, bv.tam_karekod
+            FROM cikis_kayitlari ck
+            JOIN bkst_depo_verileri bv ON LOWER(ck.seri_no) = LOWER(bv.seri_no)
+            WHERE (ck.ham_karekod IS NULL OR length(ck.ham_karekod) < 20 OR ck.ham_karekod = ck.seri_no)
+              AND bv.tam_karekod IS NOT NULL AND length(bv.tam_karekod) >= 20
+        ''')
+        for ck_id, full_qr in c.fetchall():
+            c.execute("UPDATE cikis_kayitlari SET ham_karekod = ? WHERE id = ?", (full_qr, ck_id))
+
+        # Yinelenen seri numarası veya karekod durumunda tekrar_uyari flag'lerini onar:
+        # İlk çıkış (en küçük id) -> 0, sonraki çıkışlar (büyük id'ler) -> 1
+        c.execute("SELECT id, seri_no, ham_karekod, barkod FROM cikis_kayitlari ORDER BY id ASC")
+        rows = c.fetchall()
+        seen_keys = set()
+        for r_id, s_no, qr_val, b_val in rows:
+            key_qr = f"qr:{qr_val.strip().casefold()}" if qr_val and len(qr_val.strip()) >= 16 else None
+            key_seri = f"seri:{s_no.strip().casefold()}_{b_val or ''}" if s_no and s_no.strip() else None
+
+            is_duplicate = False
+            if key_qr and key_qr in seen_keys:
+                is_duplicate = True
+            if key_seri and key_seri in seen_keys:
+                is_duplicate = True
+
+            if key_qr: seen_keys.add(key_qr)
+            if key_seri: seen_keys.add(key_seri)
+
+            c.execute("UPDATE cikis_kayitlari SET tekrar_uyari = ? WHERE id = ?", (1 if is_duplicate else 0, r_id))
+    except Exception as e:
+        logger.error(f"GTIN and duplicate backfill migration error: {e}")
 
     conn.commit()
     conn.close()
@@ -1123,8 +737,11 @@ def read_bkst_credentials():
                     password = line.split("=", 1)[1].strip()
                 elif line.startswith("ADRES_ID="):
                     raw_id = line.split("=", 1)[1].strip()
-                    if "-" in raw_id:
-                        address_id = raw_id.split("-")[0].strip()
+                    guid_match = re.search(r'([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})', raw_id)
+                    if guid_match:
+                        address_id = guid_match.group(1).strip()
+                    elif " - " in raw_id:
+                        address_id = raw_id.split(" - ")[0].strip()
                     else:
                         address_id = raw_id
                 elif line.startswith("KEY=") or line.startswith("API_KEY="):
@@ -1160,21 +777,40 @@ def inject_global_template_vars():
                 pass
         user_name = clean_user_name(user_name or username)
 
-    version_str = "v3.1.0"
     v_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.json")
+    v_code = "v1.0"
+    v_commit = ""
+    v_date = datetime.now().strftime("%d.%m.%Y")
+    v_msg = "Sistem Güncel"
     if os.path.exists(v_path):
         try:
             with open(v_path, "r", encoding="utf-8") as f:
                 v_data = json.load(f)
-                v_code = v_data.get("version", "3.1.0")
-                if not str(v_code).startswith("v"):
-                    version_str = f"v{v_code}"
-                else:
-                    version_str = str(v_code)
+                v_code = str(v_data.get("version", "v1.0")).strip()
+                v_commit = str(v_data.get("commit", "")).strip()
+                v_date = str(v_data.get("date", "")).strip()
+                v_msg = str(v_data.get("message", "Sistem Güncel")).strip()
         except Exception:
             pass
 
-    return dict(current_user_name=user_name, current_app_version=version_str)
+    full_commit = f"{v_code} ({v_commit})" if v_commit else v_code
+
+    global bkst_online, bkst_status
+    is_offline = (bkst_online is False or bkst_status in ("offline", "error"))
+    system_status_text = "Sistem Deaktif" if is_offline else "Sistem Aktif"
+    system_status_cls = "offline" if is_offline else "online"
+
+    return dict(
+        current_user_name=user_name,
+        current_app_version=v_code,
+        current_app_commit=full_commit,
+        current_app_date=v_date,
+        current_app_msg=v_msg,
+        bkst_online=bkst_online,
+        is_system_active=not is_offline,
+        system_status_text=system_status_text,
+        system_status_cls=system_status_cls
+    )
 
 def normalize_qr(qr):
     if pd.isna(qr):
@@ -1275,10 +911,20 @@ def get_bkst_cache():
         else:
             df = pd.read_sql_query("SELECT * FROM bkst_depo_verileri", conn)
     except Exception as e:
-        logger.error(f"Error querying bkst_depo_verileri: {e}")
-        df = pd.DataFrame()
+        logger.error(f"Error querying bkst_depo_verileri, repairing schema: {e}")
+        try:
+            ensure_db_schema()
+            if username:
+                df = pd.read_sql_query("SELECT * FROM bkst_depo_verileri WHERE kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = ''", conn, params=(username,))
+            else:
+                df = pd.read_sql_query("SELECT * FROM bkst_depo_verileri", conn)
+        except Exception:
+            df = pd.DataFrame()
     finally:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
 
     if df is None or df.empty:
         return None, {}, {}, {}
@@ -1332,6 +978,70 @@ def get_bkst_cache():
     return res
 
 init_db()
+
+def check_is_parti_no(code, df):
+    if not code or df is None or df.empty:
+        return False, 0, ""
+    code_clean = str(code).strip()
+    candidates = [code_clean.casefold()]
+    if code_clean.startswith("(10)") and len(code_clean) > 4:
+        candidates.append(code_clean[4:].strip().casefold())
+    elif code_clean.startswith("10") and len(code_clean) > 2:
+        candidates.append(code_clean[2:].strip().casefold())
+
+    for cand in candidates:
+        if not cand:
+            continue
+        matches = [
+            r for r in df.to_dict(orient="records")
+            if str(r.get("Parti Numarası", "")).strip().casefold() == cand
+        ]
+        if matches:
+            urun_adi = str(matches[0].get("Ürün Adı", "")).strip()
+            return True, len(matches), urun_adi
+
+    return False, 0, ""
+
+def resolve_product_from_cache(code, df, qr_map, gtin_map):
+    if not code:
+        return None
+    code_norm = normalize_qr(code)
+    code_case = code_norm.casefold()
+
+    # Parti Numarası tekil kutu olarak asla eşleşmemelidir
+    is_parti, _, _ = check_is_parti_no(code_norm, df)
+    if is_parti:
+        return None
+
+    # 1. Tam karekod eşleşmesi
+    if qr_map and code_norm in qr_map:
+        return qr_map[code_norm]
+
+    # 2. GS1 Karekod ayrıştırma denemesi (Karekod içindeki seri ve gtin)
+    parsed = parse_gs1_qr(code_norm)
+    if parsed and parsed.get('seri_no'):
+        p_seri = str(parsed['seri_no']).strip().casefold()
+        p_gtin = str(parsed.get('gtin', '')).strip().casefold()
+        if df is not None and not df.empty:
+            for r in df.to_dict(orient="records"):
+                r_seri = str(r.get("Seri Numarası", "")).strip().casefold()
+                if r_seri and r_seri == p_seri:
+                    r_gtin = str(r.get("Gtin Numarası") or r.get("Gtin / Barkod") or "").strip().casefold()
+                    if not p_gtin or not r_gtin or p_gtin == r_gtin:
+                        return r
+
+    # 3. Seri Numarası doğrudan eşleşmesi (Kullanıcı barkod yerine seri no okuttuysa)
+    if df is not None and not df.empty:
+        for r in df.to_dict(orient="records"):
+            r_seri = str(r.get("Seri Numarası", "")).strip().casefold()
+            if r_seri and r_seri == code_case:
+                return r
+
+    # 4. GTIN doğrudan eşleşmesi
+    if gtin_map and code_norm in gtin_map:
+        return gtin_map[code_norm]
+
+    return None
 
 def build_gtin_name_map():
     mapping = {}
@@ -1600,9 +1310,11 @@ def api_compare():
             p_name = item["product_name"]
             initial_counts[p_name] = initial_counts.get(p_name, 0) + 1
 
+        username_cred, _, _, _ = read_bkst_credentials()
+        user_key = username_cred or "_anon"
+
         with _state_lock:
-            global cached_results
-            cached_results = {
+            _compare_cache_map[user_key] = {
                 "matched_sales": matched_sales,
                 "unmatched_sales": unmatched_sales,
                 "remaining_inventory": remaining_inventory,
@@ -1637,10 +1349,13 @@ def api_compare():
 @app.route('/api/download/sales', methods=['GET'])
 @app.route('/api/download/full_report', methods=['GET'])
 def download_sales():
+    username_cred, _, _, _ = read_bkst_credentials()
+    user_key = username_cred or "_anon"
     with _state_lock:
-        if not cached_results:
+        cached_data = _compare_cache_map.get(user_key)
+        if not cached_data:
             return "No comparison run yet", 400
-        res_copy = dict(cached_results)
+        res_copy = dict(cached_data)
         
     matched_rows = []
     for item in res_copy.get("matched_sales", []):
@@ -1737,10 +1452,13 @@ def download_sales():
 
 @app.route('/api/download/remaining', methods=['GET'])
 def download_remaining():
+    username_cred, _, _, _ = read_bkst_credentials()
+    user_key = username_cred or "_anon"
     with _state_lock:
-        if not cached_results:
+        cached_data = _compare_cache_map.get(user_key)
+        if not cached_data:
             return "No comparison run yet", 400
-        res_copy = dict(cached_results)
+        res_copy = dict(cached_data)
         
     rows = []
     for item in res_copy.get("remaining_inventory", []):
@@ -2033,24 +1751,49 @@ def check_internet_connection():
         return False
 
 # ── BKST ASYNC WORKER & API ROUTES ───────────────────────────────────────────
+# bkst_online: None = henüz denenmedi, True = Bakanlık'tan veri alındı, False = bağlantı/veri sorunu
+bkst_online = None
+bkst_fetched_count = 0
+
+
+def _local_item_count():
+    try:
+        df_cache, _, _, _ = get_bkst_cache()
+        return len(df_cache) if df_cache is not None else 0
+    except Exception:
+        return 0
+
+
+def _set_bkst_state(status, message, online, fetched=0):
+    global bkst_status, bkst_message, bkst_online, bkst_fetched_count
+    with _state_lock:
+        bkst_status = status
+        bkst_message = message
+        bkst_online = online
+        bkst_fetched_count = fetched
+
+
+def _mark_offline(reason):
+    """Bakanlığa ulaşılamadı / veri gelmedi: yerel veriler korunur, sistem DEAKTİF işaretlenir."""
+    local_cnt = _local_item_count()
+    msg = (f"⚠️ SİSTEM DEAKTİF: {reason} Bakanlık verisi güncellenemedi. "
+           f"Yerel veritabanındaki son kayıtlı {local_cnt} adet stok kullanılıyor.")
+    logger.warning(f"BKST offline: {reason} (local={local_cnt})")
+    _set_bkst_state("offline", msg, False, 0)
+
+
 def _do_fetch_api_worker():
-    global bkst_status, bkst_message, _app_bkst_synced
+    global _app_bkst_synced
     logger.info("BKST fetch_api worker thread started")
     username, password, address_id, api_key = read_bkst_credentials()
-    if not username or not password or username == "" or password == "":
-        with _state_lock:
-            bkst_status = "error"
-            bkst_message = "❌ HATA: 'bakanlik_giris_bilgileri.txt' dosyasında KULLANICI_ADI veya SIFRE bulunamadı!"
+    if not username or not password:
+        _set_bkst_state("error", "❌ HATA: Giriş bilgileri (KULLANICI_ADI / SIFRE) bulunamadı! Lütfen tekrar giriş yapın.", False)
         return
 
     if not check_internet_connection():
-        df_cache, _, _, _ = get_bkst_cache()
-        item_count = len(df_cache) if df_cache is not None else 0
-        with _state_lock:
-            bkst_status = "done"
-            bkst_message = f"İnternet bağlantısı yok. Yerel veritabanındaki ({item_count} adet) stok verileri yüklendi."
+        _mark_offline("İnternet bağlantısı yok.")
         return
-        
+
     try:
         import requests
         import urllib3
@@ -2062,127 +1805,183 @@ def _do_fetch_api_worker():
             "Accept": "*/*",
             "X-Requested-With": "XMLHttpRequest"
         })
-
         if api_key:
             session.headers.update({"Authorization": f"Bearer {api_key}", "Key": api_key})
-        
+
+        # 1) Ana sayfa
         try:
             r_home = session.get("https://bkst.tarbil.gov.tr/", verify=False, timeout=(5, 10))
-            if r_home.status_code != 200:
-                raise Exception(f"Bakanlık sunucu yanıtı HTTP {r_home.status_code}")
         except Exception as e_home:
-            logger.warning(f"Ministry home connect error: {e_home}")
-            df_cache, _, _, _ = get_bkst_cache()
-            item_count = len(df_cache) if df_cache is not None else 0
-            with _state_lock:
-                bkst_status = "done"
-                bkst_message = "Bakanlık sunucusuna erişilemiyor. Yerel çevrimdışı veriler gösteriliyor."
+            _mark_offline(f"Bakanlık sunucusuna (bkst.tarbil.gov.tr) ulaşılamıyor ({type(e_home).__name__}).")
+            return
+        if r_home.status_code != 200:
+            _mark_offline(f"Bakanlık sunucusu hata döndürdü (HTTP {r_home.status_code}).")
             return
 
         token_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', r_home.text)
         token1 = token_match.group(1) if token_match else ""
 
-        login_payload = {"tcNo": username, "sifre": password, "__RequestVerificationToken": token1}
-        res_login = session.post("https://bkst.tarbil.gov.tr/UserOperation/GetUserInf", data=login_payload, verify=False, timeout=(5, 15))
-
+        # 2) Giriş
+        res_login = session.post("https://bkst.tarbil.gov.tr/UserOperation/GetUserInf",
+                                 data={"tcNo": username, "sifre": password, "__RequestVerificationToken": token1},
+                                 verify=False, timeout=(5, 15))
+        if res_login.status_code != 200:
+            _mark_offline(f"Bakanlık giriş servisi yanıt vermiyor (HTTP {res_login.status_code}).")
+            return
         if "0" not in res_login.text:
-            with _state_lock:
-                bkst_status = "error"
-                bkst_message = "❌ HATA: Bakanlık kullanıcı adı veya şifreniz yanlış!"
+            _set_bkst_state("error", "❌ HATA: Bakanlık kullanıcı adı veya şifreniz yanlış! Sistem deaktif.", False)
             return
 
+        # 3) Stok sayfası + GLN
         r_stock_page = session.get("https://bkst.tarbil.gov.tr/Main/StockList", verify=False, timeout=(5, 10))
         token2_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', r_stock_page.text)
         token2 = token2_match.group(1) if token2_match else token1
 
-        r_gln = session.post("https://bkst.tarbil.gov.tr/Partial/GetGLN", data={"FirmType": "0", "__RequestVerificationToken": token2}, verify=False, timeout=(5, 10))
         gln_guid = address_id
-        if r_gln.status_code == 200:
-            try:
-                gln_data = r_gln.json()
-                if isinstance(gln_data, list) and len(gln_data) > 0:
-                    gln_guid = str(gln_data[0].get("Value") or "").strip()
-            except Exception:
-                pass
+        if not gln_guid or len(gln_guid) < 32:
+            for f_type in ["0", "1", "2"]:
+                try:
+                    r_gln = session.post("https://bkst.tarbil.gov.tr/Partial/GetGLN",
+                                         data={"FirmType": f_type, "__RequestVerificationToken": token2},
+                                         verify=False, timeout=(5, 10))
+                    if r_gln.status_code == 200:
+                        gln_data = r_gln.json()
+                        if isinstance(gln_data, list) and len(gln_data) > 0:
+                            val = str(gln_data[0].get("Value") or "").strip()
+                            if val and len(val) >= 32:
+                                gln_guid = val
+                                break
+                except Exception:
+                    pass
+                if gln_guid and len(gln_guid) >= 32:
+                    break
+        if not gln_guid or len(gln_guid) < 32:
+            gln_guid = address_id or ""
+            if not gln_guid or len(gln_guid) < 32:
+                _mark_offline("Bakanlık şirket adres (GLN) bilgisi bulunamadı. Lütfen tekrar giriş yapınız.")
+                return
 
-        if not gln_guid:
-            gln_guid = "8aaf058e-7444-48bb-bd74-4077173fa6a8"
+        # 4) Stok listesi
+        r_grid = session.post("https://bkst.tarbil.gov.tr/Main/GetStockList",
+                              data={"CompanyAddressId": gln_guid, "Gtin": "", "__RequestVerificationToken": token2},
+                              verify=False, timeout=(5, 15))
+        if r_grid.status_code != 200:
+            _mark_offline(f"Bakanlık stok listesi servisi yanıt vermiyor (HTTP {r_grid.status_code}).")
+            return
+        try:
+            grid_json = r_grid.json()
+        except Exception:
+            _mark_offline("Bakanlık stok listesi geçersiz yanıt döndürdü (oturum düşmüş olabilir).")
+            return
+        gtin_list = grid_json.get("Data", []) if isinstance(grid_json, dict) else []
 
-        r_grid = session.post("https://bkst.tarbil.gov.tr/Main/GetStockList", data={"CompanyAddressId": gln_guid, "Gtin": "", "__RequestVerificationToken": token2}, verify=False, timeout=(5, 15))
-        gtin_list = r_grid.json().get("Data", []) if r_grid.status_code == 200 else []
-
+        # 5) Detaylar
         all_rows = []
+        detail_errors = 0
         for g_item in gtin_list:
             gtin_code = g_item.get("BARKOD")
             prod_name = g_item.get("URUNADI")
             if not gtin_code:
                 continue
+            try:
+                session.post("https://bkst.tarbil.gov.tr/Main/GetViewReport",
+                             data={"gtin": gtin_code, "gln": gln_guid, "__RequestVerificationToken": token2},
+                             verify=False, timeout=(5, 10))
+                r_detail = session.post("https://bkst.tarbil.gov.tr/Main/GetStockDetailList",
+                                        data={"CompanyAddressId": gln_guid, "Gtin": gtin_code, "__RequestVerificationToken": token2},
+                                        verify=False, timeout=(5, 15))
+            except Exception:
+                detail_errors += 1
+                continue
+            if r_detail.status_code != 200:
+                detail_errors += 1
+                continue
+            try:
+                d_items = r_detail.json()
+            except Exception:
+                detail_errors += 1
+                continue
+            if isinstance(d_items, list):
+                for item in d_items:
+                    koli = item.get("PAKETNO") or item.get("KOLINO") or item.get("PALETNO") or ""
+                    all_rows.append({
+                        "Koli Numarası": koli,
+                        "Ürün Adı": prod_name or item.get("URUNADI") or "",
+                        "Karekod": item.get("KAREKOD") or item.get("HAMKAREKOD") or "",
+                        "Gtin Numarası": item.get("BARKOD") or gtin_code or "",
+                        "Gtin / Barkod": item.get("BARKOD") or gtin_code or "",
+                        "gtin": item.get("BARKOD") or gtin_code or "",
+                        "Seri Numarası": item.get("SERINO") or "",
+                        "Parti Numarası": item.get("SARJNO") or "",
+                        "Palet Numarası": item.get("PALETNO") or "",
+                        "Üretim Tarihi": item.get("URETIMTARIHI") or "",
+                        "Son Kullanma Tarihi": item.get("SKT") or ""
+                    })
 
-            session.post("https://bkst.tarbil.gov.tr/Main/GetViewReport", data={"gtin": gtin_code, "gln": gln_guid, "__RequestVerificationToken": token2}, verify=False, timeout=(5, 10))
-            r_detail = session.post("https://bkst.tarbil.gov.tr/Main/GetStockDetailList", data={"CompanyAddressId": gln_guid, "Gtin": gtin_code, "__RequestVerificationToken": token2}, verify=False, timeout=(5, 15))
+        fetched = len(all_rows)
+        if fetched == 0:
+            # 0 adet veri = Bakanlık tarafında sorun. Yerel veriyi SİLMEYİZ.
+            if not gtin_list:
+                _mark_offline("Bakanlık'tan 0 adet stok verisi geldi (stok listesi boş döndü).")
+            else:
+                _mark_offline(f"Bakanlık'tan 0 adet karekod detayı alınabildi ({detail_errors} istek başarısız).")
+            return
 
-            if r_detail.status_code == 200:
-                try:
-                    d_items = r_detail.json()
-                    if isinstance(d_items, list):
-                        for item in d_items:
-                            koli = item.get("PAKETNO") or item.get("KOLINO") or item.get("PALETNO") or ""
-                            all_rows.append({
-                                "Koli Numarası": koli,
-                                "Ürün Adı": prod_name or item.get("URUNADI") or "",
-                                "Karekod": item.get("KAREKOD") or item.get("HAMKAREKOD") or "",
-                                "Gtin / Barkod": item.get("BARKOD") or gtin_code,
-                                "Seri Numarası": item.get("SERINO") or "",
-                                "Parti Numarası": item.get("SARJNO") or "",
-                                "Palet Numarası": item.get("PALETNO") or "",
-                                "Üretim Tarihi": item.get("URETIMTARIHI") or "",
-                                "Son Kullanma Tarihi": item.get("SKT") or ""
-                            })
-                except Exception:
-                    pass
-
-        df = pd.DataFrame(all_rows)
-        save_bkst_data_to_db(df, username)
-
-        df_cache, _, _, _ = get_bkst_cache()
-        item_count = len(df_cache) if df_cache is not None else len(all_rows)
+        try:
+            save_bkst_data_to_db(pd.DataFrame(all_rows), username)
+        except Exception as db_err:
+            logger.error(f"Error saving to db, attempting auto-repair: {db_err}", exc_info=True)
+            try:
+                ensure_db_schema()
+                save_bkst_data_to_db(pd.DataFrame(all_rows), username)
+            except Exception as retry_err:
+                logger.error(f"Failed to save to db after repair: {retry_err}", exc_info=True)
+                _mark_offline(f"Bakanlık verileri çekildi ancak veritabanı kayıt hatası oluştu ({type(retry_err).__name__}).")
+                return
 
         with _state_lock:
             _app_bkst_synced = True
-            if item_count == 0:
-                bkst_status = "done"
-                bkst_message = "⚠️ UYARI: Bakanlık sisteminde kayıtlı stok bulunamadı (0 adet)."
-            else:
-                bkst_status = "done"
-                bkst_message = f"🟢 TEBRİKLER! Bakanlık stok verileri API ile başarıyla çekildi! Toplam {item_count} adet ürün hazır."
-        logger.info(f"BKST fetch_api worker finished with {item_count} items")
+        msg = f"🟢 SİSTEM AKTİF: Bakanlık'tan {fetched} adet stok verisi başarıyla çekildi."
+        if detail_errors:
+            msg += f" ({detail_errors} ürün detayı alınamadı.)"
+        _set_bkst_state("done", msg, True, fetched)
+        logger.info(f"BKST fetch_api worker finished: fetched={fetched}, detail_errors={detail_errors}")
 
     except Exception as e:
         logger.error(f"BKST fetch_api worker error: {e}", exc_info=True)
-        with _state_lock:
-            bkst_status = "error"
-            bkst_message = "❌ HATA: Bakanlık API bağlantı hatası: " + str(e)
+        _mark_offline(f"Bakanlık bağlantı hatası ({type(e).__name__}).")
+
 
 @app.route('/api/bkst/fetch_api', methods=['POST'])
 def bkst_fetch_api_start():
     global _fetch_future, bkst_status, bkst_message
     with _state_lock:
         if _fetch_future and not _fetch_future.done():
-            return jsonify({"success": False, "error": "Zaten devam eden bir veri çekme işlemi var."})
+            return jsonify({"success": True, "status": "already_running",
+                            "message": "Zaten devam eden bir veri çekme işlemi var, sonucu bekleniyor."})
         bkst_status = "fetching"
         bkst_message = "⚡ Bakanlık verileri API üzerinden çekiliyor..."
         _fetch_future = _fetch_executor.submit(_do_fetch_api_worker)
     return jsonify({"success": True, "status": "started", "message": "Veri çekme işlemi başlatıldı."})
 
-@app.route('/api/bkst/fetch_status', methods=['GET'])
-def bkst_fetch_status():
+
+def _bkst_state_payload():
     with _state_lock:
         running = bool(_fetch_future and not _fetch_future.done())
-        return jsonify({
+        return {
             "running": running,
             "status": bkst_status,
-            "message": bkst_message
-        })
+            "message": bkst_message,
+            "online": bkst_online,
+            "fetched_count": bkst_fetched_count,
+        }
+
+
+@app.route('/api/bkst/fetch_status', methods=['GET'])
+def bkst_fetch_status():
+    payload = _bkst_state_payload()
+    payload["local_count"] = _local_item_count()
+    return jsonify(payload)
 
 @app.route('/api/bkst/download_api_data', methods=['GET'])
 @app.route('/api/bkst/download', methods=['GET'])
@@ -2213,7 +2012,25 @@ def api_depo_stoklari():
             df_clean = df.fillna("")
             for col in df_clean.columns:
                 df_clean[col] = df_clean[col].astype(str)
-            rows = df_clean.to_dict(orient="records")
+            raw_rows = df_clean.to_dict(orient="records")
+            for r in raw_rows:
+                gtin_val = r.get('Gtin Numarası') or r.get('Gtin / Barkod') or r.get('gtin') or r.get('GTIN') or r.get('BARCODE') or r.get('barkod') or ''
+                karekod_str = r.get('Karekod') or r.get('tam_karekod') or r.get('ham_karekod') or r.get('KAREKOD') or ''
+                if (not gtin_val or gtin_val in ('-', 'None', 'nan', 'null', 'BELİRSİZ')) and karekod_str:
+                    parsed = parse_gs1_qr(karekod_str)
+                    if parsed and parsed.get('gtin'):
+                        gtin_val = str(parsed['gtin'])
+                    elif karekod_str.startswith('01') and len(karekod_str) >= 16:
+                        gtin_val = karekod_str[2:16]
+                    else:
+                        m14 = re.findall(r'\d{14}', karekod_str)
+                        if m14:
+                            gtin_val = m14[0]
+                r['Gtin Numarası'] = gtin_val
+                r['Gtin / Barkod'] = gtin_val
+                r['gtin'] = gtin_val
+                r['GTIN'] = gtin_val
+                rows.append(r)
 
         return jsonify({
             "success": True,
@@ -2240,23 +2057,6 @@ def cikis_okut():
         barkod_norm = normalize_qr(barkod_raw)
         username, _, _, _ = read_bkst_credentials()
 
-        conn = sqlite3.connect(DB_PATH, timeout=30.0)
-        c = conn.cursor()
-        if username:
-            c.execute('SELECT id, tarih, urun_adi FROM cikis_kayitlari WHERE ham_karekod = ? AND (kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = "")', (barkod_norm, username))
-        else:
-            c.execute('SELECT id, tarih, urun_adi FROM cikis_kayitlari WHERE ham_karekod = ?', (barkod_norm,))
-        existing = c.fetchone()
-        conn.close()
-
-        if existing:
-            ex_id, ex_tarih, ex_urun = existing
-            return jsonify({
-                'success': False,
-                'already_exited': True,
-                'error': f'Bu ürün zaten depodan çıkarılmış! Ürün: {ex_urun} (Tarih: {ex_tarih})'
-            })
-
         df, qr_map, gtin_map, koli_map = get_bkst_cache()
         if df is None or df.empty:
             return jsonify({
@@ -2264,25 +2064,89 @@ def cikis_okut():
                 'error': 'Bakanlık depo verisi bulunamadı. Lütfen önce verileri çekin.'
             })
 
-        match_row = qr_map.get(barkod_norm) if qr_map else None
-        if match_row is None and gtin_map:
-            match_row = gtin_map.get(barkod_norm)
+        # Koli / Palet toplu okutma kontrolü
+        koli_key = barkod_norm.upper()
+        if koli_map and (koli_key in koli_map or barkod_norm in koli_map):
+            koli_items = koli_map.get(koli_key) or koli_map.get(barkod_norm) or []
+            if koli_items:
+                conn = sqlite3.connect(DB_PATH, timeout=30.0)
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA synchronous=NORMAL")
+                c = conn.cursor()
+                if username:
+                    c.execute('SELECT ham_karekod FROM cikis_kayitlari WHERE kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = ""', (username,))
+                else:
+                    c.execute('SELECT ham_karekod FROM cikis_kayitlari')
+                existing_set = set((row[0] or "").casefold() for row in c.fetchall() if row[0])
 
-        if match_row is None and qr_map:
-            for k_qr, r_dict in qr_map.items():
-                if barkod_norm in k_qr or k_qr in barkod_norm:
-                    match_row = r_dict
-                    break
+                tarih = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                insert_rows = []
+                last_inserted = None
+                has_any_tekrar = False
 
+                for r_item in koli_items:
+                    item_qr = normalize_qr(str(r_item.get("Karekod", "")))
+                    if not item_qr:
+                        continue
+                    item_is_tekrar = item_qr.casefold() in existing_set
+                    if item_is_tekrar:
+                        has_any_tekrar = True
+                    existing_set.add(item_qr.casefold())
+
+                    u_adi = str(r_item.get('Ürün Adı', '')).strip()
+                    b_col = str(r_item.get('Gtin Numarası') or r_item.get('Gtin / Barkod') or r_item.get('gtin') or '').strip()
+                    k_no  = str(r_item.get('Koli Numarası', '')).strip()
+                    s_no  = str(r_item.get('Seri Numarası', '')).strip()
+                    p_no  = str(r_item.get('Parti Numarası', '')).strip()
+                    pal_no = str(r_item.get('Palet Numarası', '')).strip()
+                    ur_t  = str(r_item.get('Üretim Tarihi', '')).strip()
+                    sk_t  = str(r_item.get('Son Kullanma Tarihi', '')).strip()
+
+                    insert_rows.append((tarih, u_adi, b_col, k_no, s_no, p_no, pal_no, ur_t, sk_t, item_qr, 1 if item_is_tekrar else 0, username))
+                    last_inserted = {
+                        'tarih': tarih, 'urun_adi': u_adi, 'barkod': b_col, 'koli_no': k_no,
+                        'seri_no': s_no, 'parti_no': p_no, 'palet_no': pal_no, 'uretim_tarihi': ur_t,
+                        'skt': sk_t, 'ham_karekod': item_qr, 'tekrar_uyari': 1 if item_is_tekrar else 0
+                    }
+
+                if insert_rows:
+                    c.executemany('''INSERT INTO cikis_kayitlari
+                        (tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no,
+                         uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', insert_rows)
+                    conn.commit()
+                conn.close()
+
+                return jsonify({
+                    'success': True,
+                    'is_bulk': True,
+                    'tekrar_uyari': has_any_tekrar,
+                    'count': len(insert_rows),
+                    'message': f'{koli_key} kolisindeki {len(insert_rows)} adet ürün başarıyla çıkış yapıldı.',
+                    'kayit': last_inserted
+                })
+
+        # Parti Numarası kontrolü: Parti numarası tekil kutuyu değil tüm partiyi temsil eder
+        is_parti, p_count, p_urun = check_is_parti_no(barkod_norm, df)
+        if is_parti:
+            return jsonify({
+                'success': False,
+                'is_parti_no': True,
+                'error': f'"{barkod_raw}" bir Parti Numarasıdır ({p_urun} - Depoda bu partiye ait {p_count} adet ürün var). Parti numarası üretimdeki bir grubu temsil eder ve tekil bir kutuya ait değildir. Çıkış yapabilmek için lütfen kutu üzerindeki Karekodu veya Seri Numarasını okutunuz.'
+            })
+
+        # Tekil ürün kontrolü: Önce ürünü Bakanlık deposundan tam eşleştir
+        match_row = resolve_product_from_cache(barkod_norm, df, qr_map, gtin_map)
         if match_row is None:
             return jsonify({
                 'success': False,
-                'error': f'"{barkod_raw}" barkoduna ait ürün Bakanlık depo verisinde bulunamadı.'
+                'error': f'"{barkod_raw}" barkoduna / seri numarasına ait ürün Bakanlık depo verisinde bulunamadı.'
             })
 
         tarih         = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         urun_adi      = str(match_row.get('Ürün Adı', '')).strip()
-        barkod_col    = str(match_row.get('Gtin Numarası', '')).strip()
+        barkod_col    = str(match_row.get('Gtin Numarası') or match_row.get('Gtin / Barkod') or match_row.get('gtin') or match_row.get('BARKOD') or match_row.get('barkod') or '').strip()
+        real_karekod  = str(match_row.get('Karekod') or '').strip() or barkod_norm
         koli_no       = str(match_row.get('Koli Numarası', '')).strip()
         seri_no       = str(match_row.get('Seri Numarası', '')).strip()
         parti_no      = str(match_row.get('Parti Numarası', '')).strip()
@@ -2290,23 +2154,77 @@ def cikis_okut():
         uretim_tarihi = str(match_row.get('Üretim Tarihi', '')).strip()
         skt           = str(match_row.get('Son Kullanma Tarihi', '')).strip()
 
+        if not barkod_col and real_karekod:
+            parsed = parse_gs1_qr(real_karekod)
+            if parsed and parsed.get('gtin'):
+                barkod_col = str(parsed['gtin']).strip()
+        if not seri_no and real_karekod:
+            parsed = parse_gs1_qr(real_karekod)
+            if parsed and parsed.get('seri_no'):
+                seri_no = str(parsed['seri_no']).strip()
+
         conn = sqlite3.connect(DB_PATH, timeout=30.0)
         c = conn.cursor()
+
+        # Çıkış kayıtlarında bu ürünün daha önce çıkış yapılıp yapılmadığını denetle:
+        # 1) Gerçek tam karekod ile eşleşme
+        # 2) Okutulan ham değer ile eşleşme
+        # 3) Aynı Seri Numarası + GTIN ile eşleşme (kullanıcı ister karekod ister seri no okutmuş olsun yakalar)
+        if username:
+            c.execute('''
+                SELECT id, tarih, urun_adi, ham_karekod, seri_no
+                FROM cikis_kayitlari
+                WHERE (kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = "")
+                  AND (
+                      LOWER(ham_karekod) = LOWER(?)
+                      OR LOWER(ham_karekod) = LOWER(?)
+                      OR (
+                          seri_no IS NOT NULL AND seri_no != ""
+                          AND LOWER(seri_no) = LOWER(?)
+                          AND (? = "" OR barkod = ? OR barkod IS NULL OR barkod = "")
+                      )
+                  )
+                ORDER BY id ASC LIMIT 1
+            ''', (username, real_karekod, barkod_norm, seri_no, barkod_col, barkod_col))
+        else:
+            c.execute('''
+                SELECT id, tarih, urun_adi, ham_karekod, seri_no
+                FROM cikis_kayitlari
+                WHERE (
+                    LOWER(ham_karekod) = LOWER(?)
+                    OR LOWER(ham_karekod) = LOWER(?)
+                    OR (
+                        seri_no IS NOT NULL AND seri_no != ""
+                        AND LOWER(seri_no) = LOWER(?)
+                        AND (? = "" OR barkod = ? OR barkod IS NULL OR barkod = "")
+                    )
+                )
+                ORDER BY id ASC LIMIT 1
+            ''', (real_karekod, barkod_norm, seri_no, barkod_col, barkod_col))
+
+        existing = c.fetchone()
+        is_tekrar = False
+        ex_tarih = ""
+        if existing:
+            is_tekrar = True
+            ex_tarih = existing[1] or ""
+
         c.execute("PRAGMA journal_mode=WAL")
         c.execute("PRAGMA synchronous=NORMAL")
+        # Karekod sütununa kullanıcının girdiği seri no yerine ürünün GERÇEK TAM KAREKODU kaydedilir
         c.execute('''INSERT INTO cikis_kayitlari
             (tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no,
              uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)''',
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
             (tarih, urun_adi, barkod_col, koli_no, seri_no, parti_no, palet_no,
-             uretim_tarihi, skt, barkod_norm, username))
+             uretim_tarihi, skt, real_karekod, 1 if is_tekrar else 0, username))
         new_id = c.lastrowid
         conn.commit()
         conn.close()
 
-        return jsonify({
+        res_obj = {
             'success': True,
-            'tekrar_uyari': False,
+            'tekrar_uyari': is_tekrar,
             'kayit': {
                 'id': new_id,
                 'tarih': tarih,
@@ -2318,9 +2236,14 @@ def cikis_okut():
                 'palet_no': palet_no,
                 'uretim_tarihi': uretim_tarihi,
                 'skt': skt,
-                'ham_karekod': barkod_norm
+                'ham_karekod': real_karekod,
+                'tekrar_uyari': 1 if is_tekrar else 0
             }
-        })
+        }
+        if is_tekrar:
+            res_obj['warning'] = f'Bu ürün daha önce depodan çıkarılmış! (Önceki çıkış tarihi: {ex_tarih})'
+        return jsonify(res_obj)
+
     except Exception as e:
         logger.error(f"cikis_okut error: {e}", exc_info=True)
         return jsonify({'success': False, 'error': f'Kayıt sırasında hata: {str(e)}'})
@@ -2342,10 +2265,12 @@ def cikis_toplu_ekle():
         c = conn.cursor()
 
         if username:
-            c.execute('SELECT ham_karekod FROM cikis_kayitlari WHERE kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = ""', (username,))
+            c.execute('SELECT ham_karekod, seri_no, barkod FROM cikis_kayitlari WHERE kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = ""', (username,))
         else:
-            c.execute('SELECT ham_karekod FROM cikis_kayitlari')
-        existing_set = set(row[0] for row in c.fetchall() if row[0])
+            c.execute('SELECT ham_karekod, seri_no, barkod FROM cikis_kayitlari')
+        existing_rows = c.fetchall()
+        existing_qr_set = set((row[0] or "").casefold() for row in existing_rows if row[0])
+        existing_seri_set = set((row[1] or "").casefold() for row in existing_rows if row[1])
 
         insert_rows = []
         added_count = 0
@@ -2353,47 +2278,49 @@ def cikis_toplu_ekle():
         tarih = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
         for barkod_raw in items:
-            barkod_norm = normalize_qr(str(barkod_raw).strip())
-            if not barkod_norm:
+            raw_str = str(barkod_raw).strip()
+            if not raw_str:
                 continue
 
-            if barkod_norm in existing_set:
-                already_count += 1
+            # Parti Numarası tekil ürün olarak listeye eklenmemelidir
+            is_parti, _, _ = check_is_parti_no(raw_str, df)
+            if is_parti:
+                logger.warning(f"cikis_toplu_ekle: '{raw_str}' parti numarası olduğu için tekil çıkışa eklenmedi.")
                 continue
 
-            existing_set.add(barkod_norm)
-
-            match_row = qr_map.get(barkod_norm) if qr_map else None
-            if match_row is None and gtin_map:
-                match_row = gtin_map.get(barkod_norm)
-
-            if match_row is None and qr_map:
-                for k_qr, r_dict in qr_map.items():
-                    if barkod_norm in k_qr or k_qr in barkod_norm:
-                        match_row = r_dict
-                        break
-
-            if match_row is None:
-                urun_adi = "Tanımsız Ürün"
-                barkod_col = ""
-                koli_no = ""
-                seri_no = ""
-                parti_no = ""
-                palet_no = ""
-                uretim_tarihi = ""
-                skt = ""
-            else:
-                urun_adi      = str(match_row.get('Ürün Adı', '')).strip()
-                barkod_col    = str(match_row.get('Gtin Numarası', '')).strip()
-                koli_no       = str(match_row.get('Koli Numarası', '')).strip()
-                seri_no       = str(match_row.get('Seri Numarası', '')).strip()
-                parti_no      = str(match_row.get('Parti Numarası', '')).strip()
-                palet_no      = str(match_row.get('Palet Numarası', '')).strip()
+            match_row = resolve_product_from_cache(raw_str, df, qr_map, gtin_map)
+            if match_row:
+                real_karekod = str(match_row.get('Karekod') or '').strip() or normalize_qr(raw_str)
+                urun_adi = str(match_row.get('Ürün Adı', '')).strip()
+                barkod_col = str(match_row.get('Gtin Numarası') or match_row.get('Gtin / Barkod') or match_row.get('gtin') or '').strip()
+                koli_no = str(match_row.get('Koli Numarası', '')).strip()
+                seri_no = str(match_row.get('Seri Numarası', '')).strip()
+                parti_no = str(match_row.get('Parti Numarası', '')).strip()
+                palet_no = str(match_row.get('Palet Numarası', '')).strip()
                 uretim_tarihi = str(match_row.get('Üretim Tarihi', '')).strip()
-                skt           = str(match_row.get('Son Kullanma Tarihi', '')).strip()
+                skt = str(match_row.get('Son Kullanma Tarihi', '')).strip()
+            else:
+                real_karekod = normalize_qr(raw_str)
+                parsed = parse_gs1_qr(real_karekod)
+                urun_adi = "Tanımsız Ürün"
+                barkod_col = str(parsed.get('gtin') or '').strip()
+                koli_no = ""
+                seri_no = str(parsed.get('seri_no') or '').strip()
+                parti_no = str(parsed.get('parti_no') or '').strip()
+                palet_no = ""
+                uretim_tarihi = str(parsed.get('uretim_tarihi') or '').strip()
+                skt = str(parsed.get('skt') or '').strip()
+
+            is_tekrar = (real_karekod.casefold() in existing_qr_set) or (seri_no and seri_no.casefold() in existing_seri_set)
+            if is_tekrar:
+                already_count += 1
+
+            existing_qr_set.add(real_karekod.casefold())
+            if seri_no:
+                existing_seri_set.add(seri_no.casefold())
 
             insert_rows.append((tarih, urun_adi, barkod_col, koli_no, seri_no, parti_no, palet_no,
-                                uretim_tarihi, skt, barkod_norm, 0, username))
+                                uretim_tarihi, skt, real_karekod, 1 if is_tekrar else 0, username))
             added_count += 1
 
         if insert_rows:
@@ -2423,10 +2350,14 @@ def cikis_toplu_ekle():
 @app.route('/api/cikis/listesi', methods=['GET'])
 def cikis_listesi_api():
     try:
+        username, _, _, _ = read_bkst_credentials()
         conn = sqlite3.connect(DB_PATH, timeout=30.0)
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
-        c.execute('SELECT * FROM cikis_kayitlari ORDER BY id DESC')
+        if username:
+            c.execute('SELECT * FROM cikis_kayitlari WHERE kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = "" ORDER BY id DESC', (username,))
+        else:
+            c.execute('SELECT * FROM cikis_kayitlari ORDER BY id DESC')
         rows = [dict(r) for r in c.fetchall()]
         conn.close()
 
@@ -2434,7 +2365,15 @@ def cikis_listesi_api():
         for row in rows:
             clean_row = {}
             for k, v in row.items():
-                clean_row[k] = "" if v is None else str(v)
+                if k == 'tekrar_uyari':
+                    clean_row['tekrar_uyari'] = 1 if (v in (1, '1', True)) else 0
+                else:
+                    clean_row[k] = "" if v is None else str(v)
+            if not clean_row.get('barkod') and clean_row.get('ham_karekod'):
+                parsed = parse_gs1_qr(clean_row['ham_karekod'])
+                if parsed and parsed.get('gtin'):
+                    clean_row['barkod'] = str(parsed['gtin'])
+            clean_row['gtin'] = clean_row.get('barkod', '')
             clean_rows.append(clean_row)
 
         return jsonify({'success': True, 'kayitlar': clean_rows, 'toplam': len(clean_rows)})
@@ -2480,6 +2419,14 @@ def cikis_indir():
 
     if 'kullanici_adi' in df.columns:
         df = df.drop(columns=['kullanici_adi'])
+
+    if 'barkod' in df.columns and 'ham_karekod' in df.columns:
+        for idx, row in df.iterrows():
+            b_val = str(row.get('barkod') or '').strip()
+            if not b_val and pd.notna(row.get('ham_karekod')):
+                parsed = parse_gs1_qr(str(row['ham_karekod']))
+                if parsed and parsed.get('gtin'):
+                    df.at[idx, 'barkod'] = str(parsed['gtin'])
 
     df = df.rename(columns={
         'id':            'ID',
@@ -2674,12 +2621,7 @@ def bkst_recetesiz_satis():
             if not norm_qr:
                 continue
 
-            match_row = qr_map.get(norm_qr) or gtin_map.get(norm_qr) if qr_map else None
-            if match_row is None and qr_map:
-                for k_qr, r_dict in qr_map.items():
-                    if norm_qr in k_qr or k_qr in norm_qr:
-                        match_row = r_dict
-                        break
+            match_row = resolve_product_from_cache(norm_qr, df_cache, qr_map, gtin_map)
 
             gtin = str(match_row.get('Gtin Numarası', '')).strip() if match_row else ""
             seri = str(match_row.get('Seri Numarası', '')).strip() if match_row else ""
@@ -2783,60 +2725,58 @@ def api_depo_kabul_gelen_listesi():
     if err:
         return jsonify({"success": False, "error": err})
 
+    # Token'ı ReceivedNotificationList sayfasından al
+    try:
+        r_page = session.get("https://bkst.tarbil.gov.tr/Main/ReceivedNotificationList", verify=False, timeout=(5, 10))
+        token_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', r_page.text)
+        if token_match:
+            token2 = token_match.group(1)
+    except Exception:
+        pass
+
     notifications = []
     try:
-        endpoints = [
-            "https://bkst.tarbil.gov.tr/Main/GetReceivedNotificationList",
-            "https://bkst.tarbil.gov.tr/Main/GetNotificationList",
-            "https://bkst.tarbil.gov.tr/Main/ReceivedNotificationList"
-        ]
-        
-        for ep in endpoints:
-            try:
-                res = session.post(ep, data={
-                    "CompanyAddressId": gln_guid,
-                    "NotificationType": "1",
-                    "NotificationDirection": "1",
-                    "HeaderState": "0",
-                    "__RequestVerificationToken": token2
-                }, verify=False, timeout=(5, 12))
-                
-                if res.status_code == 200:
-                    try:
-                        jdata = res.json()
-                        raw_list = jdata.get("Data") if isinstance(jdata, dict) else (jdata if isinstance(jdata, list) else [])
-                        if isinstance(raw_list, list) and len(raw_list) > 0:
-                            for item in raw_list:
-                                op = str(item.get("OPERATION") or item.get("OperationName") or item.get("ISLEMTIPI") or item.get("NotificationType") or item.get("DESCR") or item.get("Operation") or "").upper()
-                                direction = str(item.get("NotificationDirection") or item.get("DIRECTION") or item.get("YON") or "").upper()
+        payload = {
+            "CompanyAddressId": gln_guid,
+            "SenderGln": "",
+            "DocumentNo": "",
+            "StartDate": "",
+            "EndDate": "",
+            "NotificationType": "",
+            "page": 1,
+            "pageSize": 100,
+            "__RequestVerificationToken": token2
+        }
+        res = session.post("https://bkst.tarbil.gov.tr/Main/GetReceivedNotificationList", data=payload, verify=False, timeout=(5, 15))
+        if res.status_code == 200:
+            jdata = res.json()
+            raw_list = jdata.get("Data") if isinstance(jdata, dict) else (jdata if isinstance(jdata, list) else [])
+            for item in raw_list:
+                state = str(item.get("HEADERSTATE") or item.get("StateDescription") or "").upper()
+                if "IPTAL" in state or "İPTAL" in state:
+                    continue
 
-                                if any(x in op for x in ["SATIS", "SATIŞ", "CIKIS", "ÇIKIŞ", "DEVR", "GÖNDER", "SATIŞA"]):
-                                    continue
-                                if direction in ["2", "OUT", "OUTGOING", "GİDEN", "GIDEN"]:
-                                    continue
+                op_raw = str(item.get("OPERATION") or "MALALIM").upper()
+                op_display = "MAL ALIM" if op_raw in ["SATIS", "MALALIM"] else op_raw
 
-                                notifications.append({
-                                    "HEADERID": item.get("HEADERID") or item.get("Id") or item.get("ID") or str(item.get("WAYBILLNUMBER", "")),
-                                    "WAYBILLNUMBER": item.get("WAYBILLNUMBER") or item.get("WaybillNumber") or item.get("BELGENO") or "-",
-                                    "WAYBILLDATE": format_date_val(item.get("WAYBILLDATE") or item.get("WaybillDate") or item.get("TARIH")),
-                                    "SENDER": item.get("CompanyTitle") or item.get("SENDER") or item.get("GonderenFirma") or item.get("FIRMA") or "Tedarikçi / Üretici",
-                                    "PRODUCTCOUNT": item.get("PRODUCTCOUNT") or item.get("ProductCount") or item.get("ADET") or 0,
-                                    "HEADERSTATE": item.get("HEADERSTATE") or item.get("StateDescription") or "Bekliyor",
-                                    "OPERATION": "MALALIM",
-                                    "products": item.get("products") or []
-                                })
-                            break
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                notifications.append({
+                    "HEADERID": item.get("HEADERID") or item.get("Id") or item.get("ID") or str(item.get("WAYBILLNUMBER", "")),
+                    "WAYBILLNUMBER": item.get("WAYBILLNUMBER") or item.get("WaybillNumber") or item.get("BELGENO") or "-",
+                    "WAYBILLDATE": format_date_val(item.get("WAYBILLDATE") or item.get("WaybillDate") or item.get("TARIH")),
+                    "SENDER": item.get("CompanyTitle") or item.get("SENDER") or item.get("GonderenFirma") or item.get("FIRMA") or "Tedarikçi / Üretici",
+                    "PRODUCTCOUNT": item.get("PRODUCTCOUNT") or item.get("ProductCount") or item.get("ADET") or 0,
+                    "HEADERSTATE": item.get("HEADERSTATE") or item.get("StateDescription") or "Bekliyor",
+                    "OPERATION": op_display,
+                    "products": []
+                })
     except Exception as e:
-        logger.error(f"BKST gelen bildirim hatası: {e}")
+        logger.error(f"BKST gelen bildirim hatası: {e}", exc_info=True)
+        return jsonify({"success": False, "error": f"BKST sunucusundan bildirimler çekilirken hata oluştu: {str(e)}"})
 
     return jsonify({
         "success": True,
         "notifications": notifications,
-        "message": f"Sadece Tipi 'MAL ALIM' (Gelen) olan {len(notifications)} adet bildirim filtreler ile listelendi." if notifications else "Gelen/bekleyen MAL ALIM bildirimi bulunamadı."
+        "message": f"Tedarikçilerden gelen {len(notifications)} adet bildirim listelendi." if notifications else "Gelen/bekleyen bildirim bulunamadı."
     })
 
 @app.route('/api/depo_kabul/detay/<header_id>', methods=['GET'])
@@ -2845,37 +2785,51 @@ def api_depo_kabul_detay(header_id):
     if err:
         return jsonify({"success": False, "error": err, "products": []})
 
+    try:
+        r_page = session.get("https://bkst.tarbil.gov.tr/Main/ReceivedNotificationList", verify=False, timeout=(5, 10))
+        token_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', r_page.text)
+        if token_match:
+            token2 = token_match.group(1)
+    except Exception:
+        pass
+
     products = []
     try:
-        endpoints = [
-            "https://bkst.tarbil.gov.tr/Main/GetReceivedNotificationDetailList",
+        res = session.post(
             "https://bkst.tarbil.gov.tr/Main/GetNotificationDetailList",
-            "https://bkst.tarbil.gov.tr/Main/GetNotificationDetail"
-        ]
-        for ep in endpoints:
-            try:
-                res = session.post(ep, data={"HeaderId": header_id, "CompanyAddressId": gln_guid, "__RequestVerificationToken": token2}, verify=False, timeout=(5, 12))
-                if res.status_code == 200:
-                    jdata = res.json()
-                    raw_list = jdata.get("Data") if isinstance(jdata, dict) else (jdata if isinstance(jdata, list) else [])
-                    if isinstance(raw_list, list) and len(raw_list) > 0:
-                        for item in raw_list:
-                            products.append({
-                                "Koli Numarası": item.get("PAKETNO") or item.get("KOLINO") or item.get("PALETNO") or "",
-                                "Ürün Adı": item.get("STOCKNAME") or item.get("URUNADI") or item.get("ProductName") or "",
-                                "Karekod": item.get("KAREKOD") or item.get("HAMKAREKOD") or item.get("Barcode") or "",
-                                "Gtin / Barkod": item.get("BARCODE") or item.get("GTIN") or item.get("Gtin") or "",
-                                "Seri Numarası": item.get("SERIALNUMBER") or item.get("SERINO") or item.get("SerialNumber") or "",
-                                "Parti Numarası": item.get("SARJNO") or item.get("LOT") or item.get("BatchNumber") or "",
-                                "Palet Numarası": item.get("PALETNO") or "",
-                                "Üretim Tarihi": format_date_val(item.get("URETIMTARIHI") or item.get("ProductionDate")),
-                                "Son Kullanma Tarihi": format_date_val(item.get("SKT") or item.get("ExpirationDate"))
-                            })
-                        break
-            except Exception:
-                pass
+            data={"CompanyAddressId": gln_guid, "HeaderId": header_id, "__RequestVerificationToken": token2},
+            verify=False,
+            timeout=(5, 15)
+        )
+        if res.status_code == 200:
+            jdata = res.json()
+            raw_list = jdata if isinstance(jdata, list) else (jdata.get("Data", []) if isinstance(jdata, dict) else [])
+            for item in raw_list:
+                gtin = item.get("BARCODE") or item.get("GTIN") or item.get("Gtin") or ""
+                qr = item.get("KAREKOD") or item.get("HAMKAREKOD") or item.get("Barcode") or ""
+                seri = item.get("SERIALNUMBER") or item.get("SERINO") or item.get("SerialNumber") or ""
+                parti = item.get("LOTNUMBER") or item.get("SARJNO") or item.get("LOT") or item.get("BatchNumber") or ""
+                koli = item.get("CARRIERLABEL1") or item.get("PAKETNO") or item.get("KOLINO") or ""
+                palet = item.get("CARRIERLABEL2") or item.get("PALETNO") or ""
+                urun_adi = item.get("STOCKNAME") or item.get("URUNADI") or item.get("ProductName") or "Bitki Koruma Ürünü"
+                ur_tarih = format_date_val(item.get("PRODUCTIONDATE") or item.get("URETIMTARIHI") or item.get("ProductionDate"))
+                skt_val = format_date_val(item.get("SKT") or item.get("ExpirationDate"))
+
+                products.append({
+                    "Koli Numarası": koli,
+                    "Ürün Adı": urun_adi,
+                    "Karekod": qr,
+                    "Gtin / Barkod": gtin,
+                    "gtin": gtin,
+                    "Seri Numarası": seri,
+                    "Parti Numarası": parti,
+                    "Palet Numarası": palet,
+                    "Üretim Tarihi": ur_tarih,
+                    "Son Kullanma Tarihi": skt_val
+                })
     except Exception as e:
-        logger.error(f"Detail fetch error: {e}")
+        logger.error(f"Detail fetch error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": f"Detay çekilirken hata oluştu: {str(e)}", "products": []})
 
     return jsonify({
         "success": True,
@@ -2889,8 +2843,24 @@ def api_depo_kabul_onayla():
     incoming_products = req_data.get('products') or []
 
     session, gln_guid, token2, err = get_bkst_authenticated_session()
+
+    # Eğer ön yüzden ürün listesi boş geldiyse arka planda detay servisini çağır
+    if not incoming_products and header_id and session and gln_guid:
+        try:
+            r_detail = session.post(
+                "https://bkst.tarbil.gov.tr/Main/GetNotificationDetailList",
+                data={"CompanyAddressId": gln_guid, "HeaderId": header_id, "__RequestVerificationToken": token2},
+                verify=False,
+                timeout=(5, 15)
+            )
+            if r_detail.status_code == 200:
+                jd = r_detail.json()
+                incoming_products = jd if isinstance(jd, list) else (jd.get("Data", []) if isinstance(jd, dict) else [])
+        except Exception as e_fetch:
+            logger.warning(f"api_depo_kabul_onayla: Otomatik detay çekme hatası: {e_fetch}")
+
     bkst_msg = ""
-    if session and gln_guid and token2:
+    if session and gln_guid and token2 and header_id:
         accept_endpoints = [
             "https://bkst.tarbil.gov.tr/Main/NotificationAccept",
             "https://bkst.tarbil.gov.tr/Main/SaveNotificationAccept",
@@ -2901,7 +2871,7 @@ def api_depo_kabul_onayla():
             try:
                 res = session.post(ep, data={"HeaderId": header_id, "CompanyAddressId": gln_guid, "__RequestVerificationToken": token2}, verify=False, timeout=(5, 12))
                 if res.status_code == 200:
-                    bkst_msg = "Bakanlık (BKST) mal alım bildirimi onaylandı."
+                    bkst_msg = "Bakanlık (BKST) bildirimi onaylandı."
                     break
             except Exception:
                 pass
@@ -2909,32 +2879,39 @@ def api_depo_kabul_onayla():
     username, _, _, _ = read_bkst_credentials()
     df_existing, _, _, _ = get_bkst_cache()
     
-    cols = ["Koli Numarası", "Ürün Adı", "Karekod", "Gtin / Barkod", "Seri Numarası", "Parti Numarası", "Palet Numarası", "Üretim Tarihi", "Son Kullanma Tarihi"]
     existing_karekods = set()
     if df_existing is not None and not df_existing.empty and 'Karekod' in df_existing.columns:
-        existing_karekods = set(df_existing['Karekod'].dropna().astype(str).str.strip())
+        existing_karekods = set(str(k).strip().casefold() for k in df_existing['Karekod'].dropna() if str(k).strip())
     
     new_rows = []
     added_count = 0
     for p in incoming_products:
         qr = str(p.get("Karekod") or p.get("KAREKOD") or "").strip()
-        if qr and qr in existing_karekods:
+        if qr and qr.casefold() in existing_karekods:
             continue
         
+        gtin_parsed = p.get("Gtin Numarası") or p.get("Gtin / Barkod") or p.get("BARCODE") or p.get("GTIN") or ""
+        if not gtin_parsed and qr:
+            parsed_qr = parse_gs1_qr(qr)
+            if parsed_qr and parsed_qr.get("gtin"):
+                gtin_parsed = parsed_qr["gtin"]
+
         row = {
-            "Koli Numarası": p.get("Koli Numarası") or p.get("PAKETNO") or p.get("KOLINO") or "",
+            "Koli Numarası": p.get("Koli Numarası") or p.get("CARRIERLABEL1") or p.get("PAKETNO") or p.get("KOLINO") or "",
             "Ürün Adı": p.get("Ürün Adı") or p.get("STOCKNAME") or p.get("URUNADI") or "",
             "Karekod": qr,
-            "Gtin / Barkod": p.get("Gtin / Barkod") or p.get("BARCODE") or p.get("GTIN") or "",
+            "Gtin Numarası": gtin_parsed,
+            "Gtin / Barkod": gtin_parsed,
+            "gtin": gtin_parsed,
             "Seri Numarası": p.get("Seri Numarası") or p.get("SERIALNUMBER") or p.get("SERINO") or "",
-            "Parti Numarası": p.get("Parti Numarası") or p.get("SARJNO") or p.get("LOT") or "",
-            "Palet Numarası": p.get("Palet Numarası") or p.get("PALETNO") or "",
-            "Üretim Tarihi": format_date_val(p.get("Üretim Tarihi") or p.get("URETIMTARIHI")),
+            "Parti Numarası": p.get("Parti Numarası") or p.get("LOTNUMBER") or p.get("SARJNO") or p.get("LOT") or "",
+            "Palet Numarası": p.get("Palet Numarası") or p.get("CARRIERLABEL2") or p.get("PALETNO") or "",
+            "Üretim Tarihi": format_date_val(p.get("Üretim Tarihi") or p.get("PRODUCTIONDATE") or p.get("URETIMTARIHI")),
             "Son Kullanma Tarihi": format_date_val(p.get("Son Kullanma Tarihi") or p.get("SKT"))
         }
         new_rows.append(row)
         if qr:
-            existing_karekods.add(qr)
+            existing_karekods.add(qr.casefold())
         added_count += 1
 
     if new_rows:
@@ -2944,6 +2921,9 @@ def api_depo_kabul_onayla():
         else:
             updated_df = new_df
         save_bkst_data_to_db(updated_df, username)
+        # Önbelleği temizle ki yeni ürünler anında depomdaki stoklar ve çıkışta aktif olsun
+        with _state_lock:
+            _user_cache_map.pop(username or "_anon", None)
 
     msg = f"🟢 Mal Alım bildirimi kabul edildi ve {added_count} adet ürün yerel veritabanınıza eklendi."
     if bkst_msg:
@@ -3050,37 +3030,32 @@ def api_system_login():
         with open(cred_file, 'w', encoding='utf-8') as f:
             f.write("\n".join(lines))
 
-        return jsonify({'success': True, 'message': 'Giriş başarılı ve kaydedildi.', 'user_name': user_name, 'token': LOCAL_SESSION_TOKEN})
+        return jsonify({'success': True, 'message': 'Giriş başarılı ve kaydedildi.', 'user_name': user_name})
 
     except Exception as e:
-        logger.warning(f"api_system_login offline fallback: {e}")
-        lines = [
-            "# ==============================================================================",
-            "# BAKANLIK BKST GİRİŞ BİLGİLERİ",
-            "# ==============================================================================",
-            f"KULLANICI_ADI={username}",
-            f"SIFRE={password}",
-            f"ADRES_ID={address_id}",
-            f"KULLANICI_ISIM={user_name}",
-            ""
-        ]
-        with open(cred_file, 'w', encoding='utf-8') as f:
-            f.write("\n".join(lines))
+        logger.warning(f"api_system_login offline fallback check: {e}")
+        is_net_error = isinstance(e, (requests.ConnectionError, requests.Timeout,
+                                      requests.RequestException, socket.gaierror,
+                                      urllib3.exceptions.HTTPError))
+        if not is_net_error:
+            return jsonify({'success': False, 'error': f'Giriş hatası: {str(e)}'})
 
-        return jsonify({
-            'success': True,
-            'offline_mode': True,
-            'message': 'İnternet bağlantısı yok veya Bakanlık sunucusu erişilemiyor. Yerel Çevrimdışı (Offline) Modda Giriş Yapıldı.',
-            'user_name': clean_user_name(user_name),
-            'token': LOCAL_SESSION_TOKEN
-        })
+        saved_u, saved_p, saved_name, saved_a = read_bkst_credentials()
+        if saved_u == username and saved_p == password:
+            return jsonify({
+                'success': True,
+                'offline_mode': True,
+                'message': 'İnternet bağlantısı yok. Kayıtlı bilgilerle çevrimdışı (offline) modda giriş yapıldı.',
+                'user_name': clean_user_name(saved_name or username)
+            })
+        return jsonify({'success': False, 'error': 'Bakanlık sunucusuna bağlanılamadı ve girilen bilgiler kayıtlı çevrimdışı bilgilerle eşleşmiyor.'})
 
 @app.route('/api/system/user_info', methods=['GET'])
 def api_system_user_info():
     cred_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bakanlik_giris_bilgileri.txt")
     username, password, address_id, api_key = read_bkst_credentials()
     if not username:
-        return jsonify({'success': True, 'username': '', 'user_name': 'Giriş Yapılmadı', 'token': LOCAL_SESSION_TOKEN})
+        return jsonify({'success': True, 'username': '', 'user_name': 'Giriş Yapılmadı'})
 
     user_name = username
     if os.path.exists(cred_file):
@@ -3099,49 +3074,79 @@ def api_system_user_info():
     return jsonify({
         'success': True,
         'username': username,
-        'user_name': display_name,
-        'token': LOCAL_SESSION_TOKEN
+        'user_name': display_name
     })
 
 @app.route('/api/system/sync_status', methods=['GET'])
 def api_system_sync_status():
+    payload = _bkst_state_payload()
     with _state_lock:
-        return jsonify({"synced": _app_bkst_synced})
+        payload["synced"] = _app_bkst_synced
+    return jsonify(payload)
+
+_last_update_check_time = 0
+_cached_update_response = {'has_update': False}
 
 @app.route('/api/system/check_update', methods=['GET'])
 def api_system_check_update():
+    global _last_update_check_time, _cached_update_response
+
+    # Geliştirici modu kontrolü (.dev_mode dosyası veya DEV_MODE env)
+    dev_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".dev_mode")
+    if os.path.exists(dev_path) or os.environ.get("DEV_MODE") == "1":
+        return jsonify({'has_update': False})
+
+    now = time.time()
+    # Son 3 dakika içinde kontrol edildiyse önbellekten dön (gereksiz ağ gecikmesini önler)
+    if now - _last_update_check_time < 180 and _cached_update_response is not None:
+        return jsonify(_cached_update_response)
+
     try:
-        from guncelleme_kontrol import get_unified_version_info, get_latest_remote_commit_sha
         import requests
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-        cur_code, cur_date, cur_msg = get_unified_version_info()
         local_vpath = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.json")
         local_commit = ""
+        cur_code = "v1.0"
         if os.path.exists(local_vpath):
             with open(local_vpath, "r", encoding="utf-8") as f:
-                local_commit = str(json.load(f).get("commit", "")).strip()
+                v_data = json.load(f)
+                local_commit = str(v_data.get("commit", "")).strip()
+                cur_code = str(v_data.get("version", "v1.0")).strip()
 
-        latest_sha = get_latest_remote_commit_sha(requests)
-        if not latest_sha or latest_sha == "main":
-            return jsonify({'has_update': False, 'current_version': cur_code})
-
-        headers = {"User-Agent": "Mozilla/5.0", "Cache-Control": "no-cache"}
-        remote_vurl = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/{latest_sha}/version.json?t={time.time_ns()}"
+        headers = {"User-Agent": "Mozilla/5.0", "Cache-Control": "no-cache, no-store, must-revalidate"}
+        remote_vurl = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/main/version.json?t={time.time_ns()}"
         resp = requests.get(remote_vurl, verify=False, timeout=(4, 8), headers=headers)
         if resp.status_code == 200:
             rdata = resp.json()
             remote_commit = str(rdata.get("commit", "")).strip()
             remote_version = str(rdata.get("version", "v1.0")).strip()
-            if remote_commit and remote_commit != local_commit:
-                return jsonify({
+            _last_update_check_time = now
+
+            def _parse_version_tuple(v_str):
+                try:
+                    clean = re.sub(r'[^0-9.]', '', str(v_str))
+                    parts = [int(p) for p in clean.split('.') if p.isdigit()]
+                    return tuple(parts)
+                except Exception:
+                    return (0, 0, 0)
+
+            remote_tup = _parse_version_tuple(remote_version)
+            local_tup = _parse_version_tuple(cur_code)
+
+            if remote_tup > local_tup:
+                _cached_update_response = {
                     'has_update': True,
                     'current_version': cur_code,
                     'remote_version': remote_version,
                     'remote_commit': remote_commit,
                     'message': rdata.get("message", "Yeni sistem güncellemesi mevcut.")
-                })
+                }
+                return jsonify(_cached_update_response)
+            else:
+                _cached_update_response = {'has_update': False}
+                return jsonify(_cached_update_response)
     except Exception as e:
         logger.error(f"Check update error: {e}")
 
@@ -3153,7 +3158,25 @@ def api_system_apply_update():
         from guncelleme_kontrol import force_update
         updated = force_update()
         if updated:
-            return jsonify({'success': True, 'updated': True, 'message': 'Güncelleme başarıyla yüklendi!'})
+            def _restart_process():
+                time.sleep(1.2)
+                try:
+                    logger.info("Restarting QR-Compare server process after update...")
+                    base_dir = os.path.dirname(os.path.abspath(__file__))
+                    py_dir = os.path.dirname(sys.executable)
+                    pythonw_cand = os.path.join(py_dir, "pythonw.exe")
+                    target_py = pythonw_cand if os.path.exists(pythonw_cand) else sys.executable
+                    flags = 0x08000000 if os.name == 'nt' else 0
+                    if os.name == 'nt':
+                        flags |= 0x00000008
+                    subprocess.Popen([target_py, "app.py"], cwd=base_dir, creationflags=flags)
+                except Exception as ex:
+                    logger.error(f"Restart error: {ex}")
+                finally:
+                    os._exit(0)
+
+            threading.Thread(target=_restart_process, daemon=True).start()
+            return jsonify({'success': True, 'updated': True, 'message': 'Güncelleme başarıyla yüklendi! Program yeniden başlatılıyor...'})
         return jsonify({'success': True, 'updated': False, 'message': 'Sistem zaten güncel.'})
     except Exception as e:
         logger.error(f"Apply update error: {e}", exc_info=True)
@@ -3181,18 +3204,1794 @@ def api_system_logout():
     return jsonify({'success': True, 'message': 'Oturum kapatıldı.'})
 
 if __name__ == '__main__':
-    from waitress import serve
-    logger.info("Starting QR-Compare server with Waitress (threads=32, port=5000)...")
-    serve(
-        app,
-        host='127.0.0.1',
-        port=5000,
-        threads=32,
-        connection_limit=200,
-        channel_timeout=180,
-        cleanup_interval=30,
-        ident='QR-Compare'
-    )
+    try:
+        from waitress import serve
+        logger.info("Starting QR-Compare server with Waitress (threads=32, port=5000)...")
+        serve(
+            app,
+            host='127.0.0.1',
+            port=5000,
+            threads=32,
+            connection_limit=200,
+            channel_timeout=180,
+            cleanup_interval=30,
+            ident='QR-Compare'
+        )
+    except ImportError:
+        logger.warning("Waitress bulunamadı, otomatik pip ile yüklenmeye çalışılıyor...")
+        try:
+            import subprocess
+            subprocess.run([sys.executable, "-m", "pip", "install", "waitress"], check=True)
+            from waitress import serve
+            serve(
+                app,
+                host='127.0.0.1',
+                port=5000,
+                threads=32,
+                connection_limit=200,
+                channel_timeout=180,
+                cleanup_interval=30,
+                ident='QR-Compare'
+            )
+        except Exception as e:
+            logger.warning(f"Waitress kurulamadı ({e}), Flask development server ile başlatılıyor...")
+            app.run(host='127.0.0.1', port=5000, threaded=True)
+
+```
+
+---
+
+### 📁 `guncelleme_kontrol.py`
+
+```python
+import os
+import sys
+import subprocess
+import shutil
+import json
+import time
+import re
+from datetime import datetime
+
+# Çalışma dizinini script'in bulunduğu klasöre sabitle
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+os.chdir(BASE_DIR)
+
+NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
+
+# Windows Konsolu için ANSI Renk ve UTF-8 Türkçe Karakter Desteğini Aktifleştir
+if os.name == 'nt':
+    try:
+        os.system('')  # Windows VT100 / ANSI escape sequence modunu açar
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
+GREEN = '\033[92m'
+CYAN = '\033[96m'
+YELLOW = '\033[93m'
+RED = '\033[91m'
+WHITE = '\033[97m'
+BOLD = '\033[1m'
+DIM = '\033[2m'
+RESET = '\033[0m'
+
+def clear_pycache():
+    for dirpath, dirnames, filenames in os.walk(BASE_DIR):
+        if "__pycache__" in dirnames:
+            try:
+                shutil.rmtree(os.path.join(dirpath, "__pycache__"), ignore_errors=True)
+            except Exception:
+                pass
+
+def get_unified_version_info():
+    v_code = "v1.0"
+    v_commit = ""
+    v_date = datetime.now().strftime("%d.%m.%Y")
+    v_msg = "Sistem Güncel"
+
+    v_path = os.path.join(BASE_DIR, "version.json")
+    if os.path.exists(v_path):
+        try:
+            with open(v_path, "r", encoding="utf-8") as f:
+                v_data = json.load(f)
+                v_code = str(v_data.get("version", "v1.0")).strip()
+                v_commit = str(v_data.get("commit", "")).strip()
+                v_date = str(v_data.get("date", "")).strip()
+                v_msg = str(v_data.get("message", "Sistem Güncel")).strip()
+        except Exception:
+            pass
+
+    full_ver = f"{v_code} ({v_commit})" if v_commit else v_code
+    return full_ver, v_date, v_msg
+
+def install_dependencies():
+    print(f"  {CYAN}[3/3] Gerekli Python kütüphaneleri kontrol ediliyor ve kuruluyor...{RESET}")
+    req_file = os.path.join(BASE_DIR, "requirements.txt")
+    if os.path.exists(req_file):
+        try:
+            res = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"],
+                capture_output=True, text=True, cwd=BASE_DIR, creationflags=NO_WINDOW
+            )
+            if res.returncode == 0:
+                print(f"  {GREEN}  ✓ Tüm Python paketleri başarıyla doğrulandı ve yüklendi.{RESET}")
+            else:
+                print(f"  {YELLOW}  • Temel paketler (waitress, flask, pandas, openpyxl, requests) kuruluyor...{RESET}")
+                subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "waitress", "flask", "pandas", "openpyxl", "requests", "xlrd"],
+                    capture_output=True, text=True, cwd=BASE_DIR, creationflags=NO_WINDOW
+                )
+                print(f"  {GREEN}  ✓ Temel paketler başarıyla yüklendi.{RESET}")
+        except Exception as e:
+            print(f"  {YELLOW}  • Paket yükleme uyarısı: {e}{RESET}")
+
+def recompile_exe_if_possible():
+    ps1_file = os.path.join(BASE_DIR, "build_exe.ps1")
+    if os.path.exists(ps1_file) and os.name == 'nt':
+        try:
+            subprocess.run(
+                ["powershell", "-ExecutionPolicy", "Bypass", "-File", "build_exe.ps1"],
+                capture_output=True, text=True, cwd=BASE_DIR, creationflags=NO_WINDOW
+            )
+        except Exception:
+            pass
+
+def is_dev_mode():
+    if os.environ.get("DEV_MODE") == "1":
+        return True
+    if os.path.exists(os.path.join(BASE_DIR, ".dev_mode")):
+        return True
+    return False
+
+def parse_version_tuple(v_str):
+    try:
+        clean = re.sub(r'[^0-9.]', '', str(v_str))
+        parts = [int(p) for p in clean.split('.') if p.isdigit()]
+        return tuple(parts)
+    except Exception:
+        return (0, 0, 0)
+
+def http_update():
+    if is_dev_mode():
+        print(f"\n{YELLOW}{BOLD} =============================================================={RESET}")
+        print(f"{YELLOW}{BOLD}  🔧 [GELİŞTİRİCİ MODU AKTİF] (.dev_mode dosyası mevcut){RESET}")
+        print(f"{WHITE}  Yerel kodlar korunuyor, GitHub'dan indirme/ezme yapılmayacak.{RESET}")
+        print(f"{YELLOW}{BOLD} =============================================================={RESET}\n")
+        install_dependencies()
+        return False
+
+    print(f"  {CYAN}[1/3] GitHub sunucusundan en güncel sürüm bilgisi sorgulanıyor...{RESET}")
+    try:
+        import requests
+        import urllib3
+        import zipfile
+        import io
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    except ImportError:
+        print(f"  {YELLOW}  • requests kütüphanesi yükleniyor...{RESET}")
+        subprocess.run([sys.executable, "-m", "pip", "install", "requests", "urllib3"], capture_output=True, creationflags=NO_WINDOW)
+        import requests
+        import urllib3
+        import zipfile
+        import io
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache"
+    }
+
+    timestamp = time.time_ns()
+    remote_vurl = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/main/version.json?t={timestamp}"
+
+    try:
+        resp = requests.get(remote_vurl, verify=False, timeout=10, headers=headers)
+        if resp.status_code != 200:
+            print(f"  {RED}[HATA] Güncelleme sunucusuna ulaşılamadı (HTTP {resp.status_code}){RESET}")
+            return False
+
+        remote_data = resp.json()
+        remote_commit = str(remote_data.get("commit", "")).strip()
+        remote_version = str(remote_data.get("version", "")).strip()
+        remote_date = str(remote_data.get("date", "")).strip()
+        remote_msg = str(remote_data.get("message", "")).strip()
+
+        local_vpath = os.path.join(BASE_DIR, "version.json")
+        local_commit = ""
+        local_version = "v1.0"
+        if os.path.exists(local_vpath):
+            try:
+                with open(local_vpath, "r", encoding="utf-8") as f:
+                    v_raw = json.load(f)
+                    local_commit = str(v_raw.get("commit", "")).strip()
+                    local_version = str(v_raw.get("version", "v1.0")).strip()
+            except Exception:
+                pass
+
+        # Sürüm karşılaştırması: Uzak sürüm yerel sürümden büyük değilse güncelleme yapma!
+        remote_tup = parse_version_tuple(remote_version)
+        local_tup = parse_version_tuple(local_version)
+
+        if remote_tup <= local_tup or (local_commit and local_commit == remote_commit):
+            print(f"\n{GREEN}{BOLD} =============================================================={RESET}")
+            print(f"{GREEN}{BOLD}  🟢 [GÜNCEL] Sisteminiz zaten en son sürümde ({local_version}).{RESET}")
+            print(f"{WHITE}  📦 Yerel Sürüm: {local_version} | Uzak Sürüm: {remote_version}{RESET}")
+            print(f"{GREEN}{BOLD} =============================================================={RESET}\n")
+            install_dependencies()
+            return False
+
+        print(f"\n  {YELLOW}{BOLD}[2/3] [🔄 YENİ SÜRÜM TESPİT EDİLDİ: {remote_version}] Dosyalar indiriliyor...{RESET}")
+
+        zip_url = f"https://github.com/mfatih01020/stok_fatih/archive/refs/heads/main.zip?t={timestamp}"
+        zip_resp = requests.get(zip_url, verify=False, timeout=40, headers=headers)
+
+        if zip_resp.status_code != 200:
+            print(f"  {RED}[HATA] Güncelleme zip paketi indirilemedi (HTTP {zip_resp.status_code}){RESET}")
+            return False
+
+        # Asla ezilmeyecek kullanıcı dosyaları
+        ignored_extensions = ('.db', '.sqlite', '.sqlite3', '.log')
+        ignored_filenames = (
+            'cikis_kayitlari.db', 'stok.db', 'stok_takip.db', 
+            'bakanlik_giris_bilgileri.txt', 'günlük satışlar.txt',
+            '.session_token'
+        )
+
+        with zipfile.ZipFile(io.BytesIO(zip_resp.content)) as zf:
+            for member in zf.infolist():
+                if member.is_dir():
+                    continue
+                parts = member.filename.split('/', 1)
+                if len(parts) < 2:
+                    continue
+                rel_path = parts[1]
+
+                filename = os.path.basename(rel_path)
+                if filename in ignored_filenames or filename.endswith(ignored_extensions) or rel_path.startswith('.git/'):
+                    continue
+
+                dest_path = os.path.join(BASE_DIR, rel_path.replace('/', os.sep))
+                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                try:
+                    with zf.open(member) as source, open(dest_path, "wb") as target:
+                        target.write(source.read())
+                except PermissionError:
+                    # Dosya o an kullanımda ise (örneğin Calistir.exe açık ise) atla
+                    pass
+
+        with open(local_vpath, "w", encoding="utf-8") as f:
+            json.dump(remote_data, f, ensure_ascii=False, indent=2)
+
+        clear_pycache()
+        install_dependencies()
+        recompile_exe_if_possible()
+
+        print(f"\n{GREEN}{BOLD} =============================================================={RESET}")
+        print(f"{GREEN}{BOLD}  🟢 [BAŞARILI] Sistem başarıyla {remote_version} sürümüne güncellendi!{RESET}")
+        print(f"{WHITE}{BOLD}  📦 Sürüm: {remote_version} ({remote_commit}) | {remote_date}{RESET}")
+        print(f"{WHITE}  📝 Not  : {remote_msg}{RESET}")
+        print(f"{GREEN}{BOLD} =============================================================={RESET}\n")
+        return True
+
+    except Exception as e:
+        print(f"  {RED}[HATA] Güncelleme işlemi sırasında beklenmeyen hata: {e}{RESET}")
+        return False
+
+def force_update():
+    print(f"\n{CYAN}{BOLD} =============================================================={RESET}")
+    print(f"{WHITE}{BOLD}       QR STOK YÖNETİM SİSTEMİ - GÜNCELLEME KONTROLÜ{RESET}")
+    print(f"{CYAN}{BOLD} =============================================================={RESET}\n")
+
+    cur_hash, cur_date, cur_msg = get_unified_version_info()
+    print(f"  {WHITE}{BOLD}📌 MEVCUT YÜKLÜ SÜRÜM:{RESET}")
+    print(f"  {DIM}  • Sürüm Kodu: {RESET}{WHITE}{cur_hash}{RESET}")
+    print(f"  {DIM}  • Tarih     : {RESET}{WHITE}{cur_date}{RESET}")
+    print(f"  {DIM}  • Not       : {RESET}{WHITE}{cur_msg}{RESET}\n")
+
+    return http_update()
+
+if __name__ == "__main__":
+    success = force_update()
+
+```
+
+---
+
+### 📁 `launcher.py`
+
+```python
+import os
+import sys
+import subprocess
+import time
+import socket
+import webbrowser
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+os.chdir(BASE_DIR)
+
+NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
+
+def is_port_in_use(port=5000):
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.5)
+            return s.connect_ex(('127.0.0.1', port)) == 0
+    except Exception:
+        return False
+
+def find_and_bring_window_to_front():
+    if os.name != 'nt':
+        return False
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        found_hwnd = None
+
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+        def enum_windows_callback(hwnd, extra):
+            nonlocal found_hwnd
+            if user32.IsWindowVisible(hwnd):
+                length = user32.GetWindowTextLengthW(hwnd)
+                if length > 0:
+                    buff = ctypes.create_unicode_buffer(length + 1)
+                    user32.GetWindowTextW(hwnd, buff, length + 1)
+                    if "QR Compare" in buff.value:
+                        found_hwnd = hwnd
+                        return False
+            return True
+
+        user32.EnumWindows(WNDENUMPROC(enum_windows_callback), 0)
+        if found_hwnd:
+            user32.ShowWindow(found_hwnd, 9)  # SW_RESTORE
+            user32.ShowWindow(found_hwnd, 3)  # SW_MAXIMIZE
+            user32.SetForegroundWindow(found_hwnd)
+            return True
+    except Exception:
+        pass
+    return False
+
+def open_as_desktop_app(url="http://127.0.0.1:5000"):
+    chrome_paths = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe")
+    ]
+    edge_paths = [
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"
+    ]
+
+    for browser_path in chrome_paths + edge_paths:
+        if os.path.exists(browser_path):
+            try:
+                subprocess.Popen([browser_path, f"--app={url}", "--start-maximized", "--window-position=0,0"], creationflags=NO_WINDOW)
+                return True
+            except Exception:
+                pass
+
+    webbrowser.open(url)
+    return False
+
+def ensure_dependencies():
+    packages = ["flask", "waitress", "pandas", "openpyxl", "requests"]
+    missing = []
+    for pkg in packages:
+        try:
+            __import__(pkg)
+        except ImportError:
+            missing.append(pkg)
+    if missing:
+        try:
+            subprocess.run([sys.executable, "-m", "pip", "install", *missing], check=True, creationflags=NO_WINDOW)
+        except Exception:
+            pass
+
+def launch():
+    if is_port_in_use(5000):
+        # Uygulama zaten çalışıyorsa var olan pencereyi öne getir
+        if find_and_bring_window_to_front():
+            return
+        # Pencere bulunamadıysa yeni tarayıcı penceresi aç
+        open_as_desktop_app("http://127.0.0.1:5000")
+        return
+
+    ensure_dependencies()
+    py_dir = os.path.dirname(sys.executable)
+    pythonw_cand = os.path.join(py_dir, "pythonw.exe")
+    target_py = pythonw_cand if os.path.exists(pythonw_cand) else sys.executable
+    flags = NO_WINDOW
+    if os.name == 'nt':
+        flags |= 0x00000008  # DETACHED_PROCESS
+    subprocess.Popen([target_py, "app.py"], cwd=BASE_DIR, creationflags=flags)
+
+    for _ in range(32):
+        time.sleep(0.25)
+        if is_port_in_use(5000):
+            break
+
+    open_as_desktop_app("http://127.0.0.1:5000")
+
+if __name__ == "__main__":
+    launch()
+
+```
+
+---
+
+### 📁 `static/app.js`
+
+```javascript
+// ── QR COMPARE APP.JS ──────────────────────────────────────────────────────
+console.log("QR Compare app.js loading...");
+
+// Global HTML & Attribute Escaping Helpers
+window.esc = function(str) {
+    return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+};
+
+window.escAttr = function(str) {
+    return String(str || '')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+};
+
+// Global Session Authenticated Fetch Helper
+window.apiFetch = async function(resource, init = {}) {
+    init = init || {};
+    const urlStr = typeof resource === 'string' ? resource : (resource && resource.url ? resource.url : '');
+    if (init.headers instanceof Headers) {
+        if (!init.headers.has('X-Requested-With')) init.headers.append('X-Requested-With', 'XMLHttpRequest');
+    } else {
+        init.headers = init.headers || {};
+        if (!init.headers['X-Requested-With']) init.headers['X-Requested-With'] = 'XMLHttpRequest';
+    }
+    const response = await fetch(resource, init);
+    if (response.status === 401 && urlStr && urlStr.startsWith('/api/') && !urlStr.startsWith('/api/system/heartbeat') && !urlStr.startsWith('/api/system/user_info')) {
+        window.location.href = '/login';
+    }
+    return response;
+};
+
+(function initAppWindowControl() {
+    if (window.outerWidth < screen.availWidth || window.outerHeight < screen.availHeight) {
+        try {
+            window.moveTo(0, 0);
+            window.resizeTo(screen.availWidth, screen.availHeight);
+        } catch (e) {}
+    }
+})();
+
+(function startHeartbeat() {
+    let hbTimer = null;
+    async function sendPing() {
+        try {
+            const res = await window.apiFetch('/api/system/heartbeat', { method: 'POST' });
+            if (res && res.ok) {
+                const data = await res.json();
+                if (data && typeof window.updateSystemStatusPill === 'function') {
+                    if (data.running) {
+                        window.updateSystemStatusPill('fetching', 'Veriler Çekiliyor...');
+                    } else if (data.online === false || data.status === 'offline' || data.status === 'error') {
+                        window.updateSystemStatusPill(false, 'Sistem Deaktif', data.message);
+                    } else if (data.online === true && data.fetched_count > 0) {
+                        window.updateSystemStatusPill(true, 'Sistem Aktif');
+                    }
+                }
+            }
+        } catch (_) {}
+    }
+    function startTimer() {
+        if (hbTimer) return;
+        hbTimer = setInterval(sendPing, 10000);
+    }
+    function stopTimer() {
+        if (hbTimer) { clearInterval(hbTimer); hbTimer = null; }
+    }
+    sendPing();
+    startTimer();
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) stopTimer();
+        else { sendPing(); startTimer(); }
+    });
+})();
+
+// ── Unified Startup Auto Update Engine ───────────────────────────────────────
+async function performStartupUpdateCheck() {
+    // Sadece oturumun İLK açılışında bir kez çalışır. Sayfalar arası geçişlerde veya buton tıklamalarında ASLA tekrar çalışmaz!
+    if (sessionStorage.getItem('startup_update_checked')) {
+        return false;
+    }
+    sessionStorage.setItem('startup_update_checked', 'true');
+
+    try {
+        const res = await fetch('/api/system/check_update');
+        if (!res.ok) return false;
+        const data = await res.json();
+        if (data && data.has_update) {
+            console.log("Startup Update Found:", data);
+            await showUpdateScreenAndApply(data);
+            return true;
+        }
+    } catch (e) {
+        console.warn("Startup update check error:", e);
+    }
+    return false;
+}
+
+function showUpdateScreenAndApply(updateInfo) {
+    return new Promise(resolve => {
+        let overlay = document.getElementById('startupUpdateOverlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'startupUpdateOverlay';
+            overlay.style.cssText = `
+                position: fixed;
+                top: 0; left: 0; width: 100vw; height: 100vh;
+                background: #0f172a;
+                color: #ffffff;
+                z-index: 9999999;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                font-family: 'Outfit', 'Inter', sans-serif;
+                text-align: center;
+                padding: 20px;
+            `;
+            const remVer = (updateInfo && updateInfo.remote_version) ? updateInfo.remote_version : 'yeni sürüm';
+            overlay.innerHTML = `
+                <div style="background: rgba(30, 41, 59, 0.95); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 24px; padding: 40px 32px; max-width: 480px; width: 90%; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.8); backdrop-filter: blur(12px);">
+                    <div style="width: 80px; height: 80px; margin: 0 auto 20px; background: rgba(56, 189, 248, 0.12); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                        <i class="fa-solid fa-cloud-arrow-down fa-bounce" style="font-size: 38px; color: #38bdf8;"></i>
+                    </div>
+                    <h2 style="font-size: 1.55rem; font-weight: 800; margin-bottom: 10px; color: #f8fafc;">Uygulama Güncelleniyor</h2>
+                    <p id="updateStatusMsg" style="font-size: 0.95rem; color: #94a3b8; line-height: 1.6; margin-bottom: 24px;">
+                        Yeni sürüm (${remVer}) tespit edildi. Güncelleme paketleri indiriliyor ve sisteme entegre ediliyor...
+                    </p>
+                    <div style="width: 100%; height: 8px; background: #334155; border-radius: 999px; overflow: hidden; position: relative;">
+                        <div id="updateProgressBar" style="width: 45%; height: 100%; background: linear-gradient(90deg, #38bdf8, #3b82f6); border-radius: 999px; transition: width 0.4s ease; animation: updateProgressAnim 1.8s infinite linear;"></div>
+                    </div>
+                    <p id="updateSubStatus" style="font-size: 0.82rem; color: #64748b; margin-top: 18px; font-weight: 500;">
+                        <i class="fa-solid fa-circle-info" style="color: #38bdf8; margin-right: 4px;"></i> İşlem tamamlandığında program sıfırdan otomatik başlatılacaktır.
+                    </p>
+                </div>
+                <style>
+                    @keyframes updateProgressAnim {
+                        0% { transform: translateX(-100%); width: 30%; }
+                        50% { width: 60%; }
+                        100% { transform: translateX(350%); width: 30%; }
+                    }
+                </style>
+            `;
+            document.body.appendChild(overlay);
+        }
+
+        fetch('/api/system/apply_update', { method: 'POST' })
+            .then(res => res.json())
+            .then(async resData => {
+                const msgEl = document.getElementById('updateStatusMsg');
+                const barEl = document.getElementById('updateProgressBar');
+                const subEl = document.getElementById('updateSubStatus');
+
+                if (resData.success && resData.updated) {
+                    if (barEl) {
+                        barEl.style.animation = 'none';
+                        barEl.style.width = '100%';
+                    }
+                    if (msgEl) {
+                        msgEl.style.color = '#4ade80';
+                        msgEl.innerHTML = '<strong>✅ Güncelleme Başarıyla Tamamlandı!</strong><br>Program sıfırdan yeniden başlatılıyor...';
+                    }
+                    if (subEl) subEl.textContent = 'Yeni sistem yükleniyor, lütfen bekleyin...';
+
+                    // Sunucunun yeni process ile ayağa kalkmasını bekle (Heartbeat Polling)
+                    await new Promise(r => setTimeout(r, 2200));
+                    for (let i = 0; i < 30; i++) {
+                        await new Promise(r => setTimeout(r, 800));
+                        try {
+                            const ping = await fetch('/api/system/heartbeat', { method: 'POST' });
+                            if (ping.ok) break;
+                        } catch (_) {}
+                    }
+                    window.location.reload(true);
+                } else {
+                    if (msgEl) msgEl.textContent = resData.message || "Sistem zaten güncel.";
+                    setTimeout(() => {
+                        if (overlay) overlay.remove();
+                        resolve();
+                    }, 1200);
+                }
+            })
+            .catch(err => {
+                console.error("Apply update error:", err);
+                const msgEl = document.getElementById('updateStatusMsg');
+                if (msgEl) {
+                    msgEl.style.color = '#f87171';
+                    msgEl.textContent = "Güncelleme sırasında bir aksaklık oluştu, normal modda başlatılıyor...";
+                }
+                setTimeout(() => {
+                    if (overlay) overlay.remove();
+                    resolve();
+                }, 2000);
+            });
+    });
+}
+
+// Global state
+window.shelfKoliMap = window.shelfKoliMap || new Map();
+window.shelfItems = window.shelfItems || [];
+window.scannedQRsInShelf = window.scannedQRsInShelf || new Set();
+window.isAuditAllMode = window.isAuditAllMode || false;
+window.allWarehouseItems = window.allWarehouseItems || [];
+
+const BADGE_MAP = {
+    closed:     { text: 'Kapalı',                                      cls: 'badge-closed' },
+    opening:    { text: 'Tarayıcı Açılıyor…',                          cls: 'badge-fetching'},
+    login_page: { text: 'Giriş Bekleniyor (Stok Takibi Sayfasına Gidin)', cls: 'badge-closed' },
+    open:       { text: 'Açık (Stok Takibi Sayfasına Gidin)',          cls: 'badge-open'   },
+    ready:      { text: '🟢 Hazır (Stok Takibi Sayfasında)',            cls: 'badge-done'   },
+    fetching:   { text: 'Veriler Çekiliyor…',                           cls: 'badge-fetching'},
+    done:       { text: 'Tamamlandı',                                  cls: 'badge-done'   },
+    error:      { text: 'Hata',                                        cls: 'badge-error'  }
+};
+
+function escapeHtml(str) {
+    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function isItemScanned(item) {
+    if (!item) return false;
+    if (item.qr && window.scannedQRsInShelf.has(item.qr)) return true;
+
+    const itemQrClean = (item.qr || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
+    const itemSeriClean = (item.seri_no || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
+
+    for (let scanned of window.scannedQRsInShelf) {
+        const sClean = (scanned || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
+        if (!sClean) continue;
+
+        if (itemQrClean && (sClean === itemQrClean || sClean.includes(itemQrClean) || itemQrClean.includes(sClean))) {
+            return true;
+        }
+
+        if (itemSeriClean && itemSeriClean.length >= 3 && sClean.includes(itemSeriClean)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function setBkstUI(status, message) {
+    const bkstBadge  = document.getElementById('bkst-status-badge');
+    const bkstMsgBox = document.getElementById('bkst-message-box');
+    const btnBkstFetch = document.getElementById('btn-bkst-fetch');
+
+    if (!bkstBadge || !bkstMsgBox) return;
+    const info = BADGE_MAP[status] || BADGE_MAP.closed;
+
+    bkstBadge.textContent = info.text;
+    bkstBadge.className   = 'badge ' + info.cls;
+
+    bkstMsgBox.classList.remove('hidden', 'status-error', 'status-done', 'status-fetch');
+    if (!message) { bkstMsgBox.classList.add('hidden'); return; }
+
+    let icon = 'fa-circle-info';
+    let extraClass = '';
+    if (status === 'fetching' || status === 'opening') { icon = 'fa-circle-notch fa-spin'; extraClass = 'status-fetch'; }
+    if (status === 'done' || status === 'ready')      { icon = 'fa-circle-check';         extraClass = 'status-done';  }
+    if (status === 'error' || status === 'login_page') { icon = 'fa-circle-exclamation';   extraClass = 'status-error'; }
+
+    bkstMsgBox.className = 'status-msg' + (extraClass ? ' ' + extraClass : '');
+    bkstMsgBox.innerHTML = `<i class="fa-solid ${icon}"></i><span>${escapeHtml(message)}</span>`;
+
+    const existingDl = bkstMsgBox.parentElement ? bkstMsgBox.parentElement.querySelector('.bkst-download-btn') : null;
+    if (existingDl) existingDl.remove();
+    if (status === 'done' && bkstMsgBox.parentElement) {
+        const dl = document.createElement('a');
+        dl.href = '/api/bkst/download';
+        dl.className = 'bkst-download-btn';
+        dl.innerHTML = '<i class="fa-solid fa-file-excel"></i> Excel Dosyasını İndir';
+        bkstMsgBox.parentElement.appendChild(dl);
+    }
+
+    if (btnBkstFetch) btnBkstFetch.disabled = !(status === 'ready' || status === 'done');
+}
+
+window.triggerBkstFetchApi = function() {
+    console.log("triggerBkstFetchApi called");
+    setBkstUI('fetching', '⚡ Bakanlık verileri API üzerinden çekiliyor...');
+    if (window.updateSystemStatusPill) window.updateSystemStatusPill('fetching', 'Bağlantı Kuruluyor...');
+
+    const sidebar = document.querySelector('.sidebar');
+    if (sidebar) sidebar.style.pointerEvents = 'none';
+
+    window.apiFetch('/api/bkst/fetch_api', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                let pollAttempts = 0;
+                let statusTimer = setInterval(async () => {
+                    pollAttempts++;
+                    try {
+                        const res = await window.apiFetch('/api/bkst/fetch_status');
+                        const statusData = await res.json();
+                        setBkstUI(statusData.status, statusData.message);
+                        if (!statusData.running || pollAttempts > 45) {
+                            clearInterval(statusTimer);
+                            if (sidebar) sidebar.style.pointerEvents = 'auto';
+
+                            if (statusData.online === true && statusData.fetched_count > 0) {
+                                if (window.updateSystemStatusPill) {
+                                    window.updateSystemStatusPill(true, 'Sistem Aktif', `Bakanlıktan ${statusData.fetched_count} adet stok çekildi.`);
+                                }
+                                const dlBtn = document.getElementById('btn-bkst-download-excel');
+                                if (dlBtn) dlBtn.classList.remove('hidden');
+                            } else {
+                                if (window.updateSystemStatusPill) {
+                                    window.updateSystemStatusPill(false, 'Sistem Deaktif', statusData.message || 'Bakanlık bağlantı sorunu (0 adet veri).');
+                                }
+                                alert(`⚠️ Bakanlık Bağlantı Sorunu: 0 adet veri çekildi!\n\nSistem Deaktif moduna alındı.\n\n${statusData.message || 'Yerel veritabanındaki son kayıtlı stoklar korunuyor.'}`);
+                            }
+                        }
+                    } catch (e) {
+                        clearInterval(statusTimer);
+                        if (sidebar) sidebar.style.pointerEvents = 'auto';
+                        if (window.updateSystemStatusPill) window.updateSystemStatusPill(false, 'Sistem Deaktif', 'Bağlantı hatası');
+                    }
+                }, 1500);
+            } else {
+                setBkstUI('error', data.error || 'API veri çekme hatası oluştu.');
+                if (window.updateSystemStatusPill) window.updateSystemStatusPill(false, 'Sistem Deaktif', data.error);
+                if (sidebar) sidebar.style.pointerEvents = 'auto';
+            }
+        })
+        .catch(err => {
+            setBkstUI('error', 'Sunucu hatası: ' + err.message);
+            if (window.updateSystemStatusPill) window.updateSystemStatusPill(false, 'Sistem Deaktif', err.message);
+            if (sidebar) sidebar.style.pointerEvents = 'auto';
+        });
+};
+
+
+function showAuditMsg(msg, isError = false) {
+    const auditMsgBox = document.getElementById('audit-msg-box');
+    if (!auditMsgBox) return;
+    auditMsgBox.classList.remove('hidden');
+    if (isError) {
+        auditMsgBox.style.background = 'rgba(239, 68, 68, 0.15)';
+        auditMsgBox.style.border = '1px solid rgba(239, 68, 68, 0.4)';
+        auditMsgBox.style.color = '#f87171';
+        auditMsgBox.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> <span>${escapeHtml(msg)}</span>`;
+    } else {
+        auditMsgBox.style.background = 'rgba(16, 185, 129, 0.15)';
+        auditMsgBox.style.border = '1px solid rgba(16, 185, 129, 0.4)';
+        auditMsgBox.style.color = '#6ee7b7';
+        auditMsgBox.innerHTML = `<i class="fa-solid fa-circle-check"></i> <span>${escapeHtml(msg)}</span>`;
+    }
+}
+
+function hideAuditMsg() {
+    const auditMsgBox = document.getElementById('audit-msg-box');
+    if (auditMsgBox) auditMsgBox.classList.add('hidden');
+}
+
+function rebuildShelfItems() {
+    window.shelfItems = [];
+    const seenQrs = new Set();
+    window.shelfKoliMap.forEach((items) => {
+        items.forEach(item => {
+            const q = (item.qr || '').trim();
+            if (q) {
+                if (!seenQrs.has(q)) {
+                    seenQrs.add(q);
+                    window.shelfItems.push(item);
+                }
+            } else {
+                window.shelfItems.push(item);
+            }
+        });
+    });
+}
+
+window.toggleAuditMode = async function() {
+    console.log("toggleAuditMode called. Current mode:", window.isAuditAllMode);
+    if (window.shelfItems.length === 0) {
+        showAuditMsg('⚠️ Henüz hiç ürün okutmadınız! Lütfen önce karşılaştırmak istediğiniz en az 1 ürün veya koli okutun.', true);
+        return;
+    }
+
+    window.isAuditAllMode = !window.isAuditAllMode;
+
+    if (window.isAuditAllMode) {
+        const gtinsSet = new Set();
+        const pNamesSet = new Set();
+
+        window.shelfItems.forEach(i => {
+            let g = (i.gtin || '').trim();
+            if (!g || g === '—') {
+                const match = (i.qr || '').match(/01(\d{14})/);
+                if (match) g = match[1];
+            }
+            if (g && g !== '—') gtinsSet.add(g);
+            if (i.product_name && i.product_name !== '—') pNamesSet.add(i.product_name);
+        });
+
+        const gtins = Array.from(gtinsSet);
+        const pNames = Array.from(pNamesSet);
+
+        showAuditMsg('📊 Okutulan ürün kalemleri Bakanlık depodaki tüm stokla karşılaştırılıyor...', false);
+        
+        try {
+            const res = await fetch('/api/audit_all', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ gtins: gtins, product_names: pNames })
+            });
+            const data = await res.json();
+            if (data.success) {
+                window.allWarehouseItems = data.items || [];
+                renderAuditTable();
+                const missingCnt = window.allWarehouseItems.filter(i => !isItemScanned(i)).length;
+                showAuditMsg(`📊 Okutulan Kalem Karşılaştırma Modu AÇILDI! Bakanlık depodaki toplam ${window.allWarehouseItems.length} kutunun ${missingCnt} adeti tereğinizde EKSİK (Kırmızı renkte listenin en üstünde sıralandı).`, false);
+            } else {
+                window.isAuditAllMode = false;
+                renderAuditTable();
+                showAuditMsg('Hata: ' + data.error, true);
+                return;
+            }
+        } catch (err) {
+            window.isAuditAllMode = false;
+            renderAuditTable();
+            showAuditMsg('Sunucu hatası: ' + err.message, true);
+            return;
+        }
+    } else {
+        renderAuditTable();
+        showAuditMsg('📦 Okutulan Koliler Sayım Moduna Dönüldü.', false);
+    }
+
+    const wrapper = document.getElementById('audit-results-wrapper');
+    if (wrapper) wrapper.classList.remove('hidden');
+};
+
+function renderAuditTable() {
+    const tbody = document.getElementById('audit-table-body');
+    const elTotal = document.getElementById('audit-cnt-total');
+    const elOk = document.getElementById('audit-cnt-ok');
+    const elMissing = document.getElementById('audit-cnt-missing');
+    const elKolisList = document.getElementById('audit-kolis-list');
+    const alertBox = document.getElementById('audit-sync-alert-box');
+    const alertText = document.getElementById('audit-sync-alert-text');
+    const toggleBtn = document.getElementById('btn-audit-toggle-mode');
+
+    let activeList = window.isAuditAllMode ? [...window.allWarehouseItems] : [...window.shelfItems];
+
+    if (window.isAuditAllMode) {
+        // Sort missing items (Tereğimde YOK) first so missing QRs appear at top!
+        activeList.sort((a, b) => {
+            const aOk = isItemScanned(a) ? 1 : 0;
+            const bOk = isItemScanned(b) ? 1 : 0;
+            return aOk - bOk;
+        });
+    }
+
+    if (toggleBtn) {
+        if (window.isAuditAllMode) {
+            toggleBtn.innerHTML = '<i class="fa-solid fa-boxes-packing"></i> 📦 Okutulan Koliler Moduna Dön (Koli Modu)';
+            toggleBtn.style.background = 'linear-gradient(135deg, #a855f7, #7e22ce)';
+            toggleBtn.style.borderColor = '#a855f7';
+        } else {
+            toggleBtn.innerHTML = '<i class="fa-solid fa-layer-group"></i> 📊 Okutulan Kalemleri Tüm Depoyla Karşılaştır';
+            toggleBtn.style.background = 'transparent';
+            toggleBtn.style.borderColor = 'rgba(255,255,255,0.2)';
+        }
+    }
+
+    if (elKolisList) {
+        if (window.isAuditAllMode) {
+            elKolisList.innerHTML = `<span class="badge" style="background: rgba(168,85,247,0.2); color: #e9d5ff; border: 1px solid rgba(168,85,247,0.4); padding: 5px 12px; font-size: 0.85rem; font-weight:700;"><i class="fa-solid fa-layer-group"></i> OKUTULAN KALEMLERİN DEPO EŞLEŞTİRMESİ AKTİF (${activeList.length} Toplam Kutu)</span>`;
+        } else if (window.shelfKoliMap.size === 0) {
+            elKolisList.innerHTML = '<span class="badge" style="background: rgba(88,101,242,0.2); color: #a5b4fc; border: 1px solid rgba(88,101,242,0.4); padding: 5px 12px; font-size: 0.85rem;">Henüz koli yüklenmedi</span>';
+        } else {
+            let badges = [];
+            window.shelfKoliMap.forEach((items, kNo) => {
+                const kOkCount = items.filter(i => isItemScanned(i)).length;
+                const isFullOk = kOkCount === items.length && items.length > 0;
+                const bg = isFullOk ? 'rgba(16,185,129,0.2)' : 'rgba(88,101,242,0.2)';
+                const border = isFullOk ? 'rgba(16,185,129,0.4)' : 'rgba(88,101,242,0.4)';
+                const color = isFullOk ? '#6ee7b7' : '#a5b4fc';
+                badges.push(`<span class="badge" style="background:${bg}; border:1px solid ${border}; color:${color}; padding:5px 10px; font-size:0.82rem; font-weight:600;"><i class="fa-solid fa-box"></i> Koli ${escapeHtml(kNo)} (${kOkCount}/${items.length})</span>`);
+            });
+            elKolisList.innerHTML = badges.join(' ');
+        }
+    }
+
+    const totalCount = activeList.length;
+    const okCount = activeList.filter(i => isItemScanned(i)).length;
+    const missingCount = totalCount - okCount;
+
+    if (elTotal) elTotal.textContent = totalCount;
+    if (elOk) elOk.textContent = okCount;
+    if (elMissing) elMissing.textContent = missingCount;
+
+    if (alertBox && alertText) {
+        if (activeList.length === 0) {
+            alertBox.classList.add('hidden');
+        } else if (missingCount > 0) {
+            alertBox.classList.remove('hidden');
+            alertBox.style.background = 'rgba(239, 68, 68, 0.12)';
+            alertBox.style.borderColor = 'rgba(239, 68, 68, 0.35)';
+            alertText.style.color = '#f87171';
+            alertText.innerHTML = `⚠️ DİKKAT! Toplam <strong>${missingCount} adet ürün/ilaç tereğinizde eksik</strong>. Aşağıdaki listeden Kırmızı renkli olan bu ürünler Bakanlık sisteminden çıkılmalıdır!`;
+        } else {
+            alertBox.classList.remove('hidden');
+            alertBox.style.background = 'rgba(16, 185, 129, 0.12)';
+            alertBox.style.borderColor = 'rgba(16, 185, 129, 0.35)';
+            alertText.style.color = '#6ee7b7';
+            alertText.innerHTML = `🟢 TEBRİKLER! Listedeki tüm koli ve ürünler (${okCount}/${activeList.length}) tereğinizde doğrulandı! Eksik ürün yok.`;
+        }
+    }
+
+    if (!tbody) return;
+
+    if (activeList.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" style="padding:2rem; text-align:center; color:var(--text-muted);">Tereğe eklenmiş koli veya ürün bulunamadı. Lütfen QR okutun.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = activeList.map((item, idx) => {
+        const isOk = isItemScanned(item);
+        const statusHtml = isOk
+            ? `<span style="background:rgba(16,185,129,0.18); color:#6ee7b7; border:1px solid rgba(16,185,129,0.4); padding:4px 10px; border-radius:6px; font-weight:700; font-size:0.78rem;"><i class="fa-solid fa-check"></i> Tereğimde VAR</span>`
+            : `<span style="background:rgba(239,68,68,0.18); color:#f87171; border:1px solid rgba(239,68,68,0.4); padding:4px 10px; border-radius:6px; font-weight:700; font-size:0.78rem;"><i class="fa-solid fa-xmark"></i> Tereğimde YOK</span>`;
+
+        const noteHtml = isOk
+            ? `<span style="color:var(--text-muted); font-size:0.8rem;">Fiziksel depoda doğrulandı</span>`
+            : `<span style="color:#f87171; font-weight:600; font-size:0.8rem;"><i class="fa-solid fa-triangle-exclamation"></i> Tereğümde yok, bakanlıktan çık!</span>`;
+
+        return `
+            <tr style="border-bottom: 1px solid rgba(255,255,255,0.04); background: ${isOk ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.04)'};">
+                <td style="padding: 0.65rem 0.85rem; font-weight:700; color:var(--primary);">${idx + 1}</td>
+                <td style="padding: 0.65rem 0.85rem; font-weight:600; color:var(--text-main); white-space:nowrap;">${escapeHtml(item.product_name || '—')}</td>
+                <td style="padding: 0.65rem 0.85rem; font-weight:600; color:#a5b4fc; white-space:nowrap;">${escapeHtml(item.koli_no || '—')}</td>
+                <td style="padding: 0.65rem 0.85rem; font-family:monospace; font-size:0.78rem; color:var(--text-muted); white-space:nowrap;">${escapeHtml(item.qr || '—')}</td>
+                <td style="padding: 0.65rem 0.85rem; white-space:nowrap;">${escapeHtml(item.seri_no || '—')}</td>
+                <td style="padding: 0.65rem 0.85rem; white-space:nowrap;">${escapeHtml(item.parti_no || '—')}</td>
+                <td style="padding: 0.65rem 0.85rem; white-space:nowrap;">${escapeHtml(item.palet_no || '—')}</td>
+                <td style="padding: 0.65rem 0.85rem; text-align:center; white-space:nowrap;">${statusHtml}</td>
+                <td style="padding: 0.65rem 0.85rem; white-space:nowrap;">${noteHtml}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+async function handleScanSubmit(rawCode) {
+    if (!rawCode) return;
+    console.log("handleScanSubmit triggered with code:", rawCode);
+
+    const wrapper = document.getElementById('audit-results-wrapper');
+    if (wrapper) wrapper.classList.remove('hidden');
+
+    showAuditMsg(`🔍 Barkod / QR sorgulanıyor: ${rawCode}...`, false);
+    const normCode = rawCode.replace(/\s+/g, '').toUpperCase();
+
+    if (window.shelfItems.length > 0) {
+        const matchedItem = window.shelfItems.find(i => {
+            const iQr = (i.qr || '').replace(/\s+/g, '').toUpperCase();
+            const iSeri = (i.seri_no || '').replace(/\s+/g, '').toUpperCase();
+            return iQr === normCode || normCode.includes(iQr) || iQr.includes(normCode) || (iSeri && iSeri === normCode);
+        });
+
+        if (matchedItem) {
+            if (window.scannedQRsInShelf.has(matchedItem.qr)) {
+                showAuditMsg(`⚠️ Bu ilacın karekodu (${matchedItem.qr}) zaten tereğinizde okutulmuştu!`, true);
+            } else {
+                window.scannedQRsInShelf.add(matchedItem.qr);
+                renderAuditTable();
+                showAuditMsg(`🟢 Ürün tereğinizde doğrulandı (Tereğimde VAR): ${matchedItem.product_name} (Koli: ${matchedItem.koli_no})`, false);
+            }
+            const mainInput = document.getElementById('audit-input-main');
+            if (mainInput) { mainInput.value = ''; mainInput.focus(); }
+            return;
+        }
+    }
+
+    try {
+        const res = await fetch('/api/audit_box?code=' + encodeURIComponent(rawCode));
+        const data = await res.json();
+
+        if (data.success) {
+            const newKoliNo = data.koli_no;
+            const newItems = data.items || [];
+            const isKoliScan = data.is_koli_scan;
+            const scannedQr = data.scanned_qr;
+
+            if (!window.shelfKoliMap.has(newKoliNo)) {
+                window.shelfKoliMap.set(newKoliNo, newItems);
+                rebuildShelfItems();
+            }
+
+            if (isKoliScan) {
+                newItems.forEach(item => {
+                    if (item.qr) window.scannedQRsInShelf.add(item.qr);
+                });
+                renderAuditTable();
+                showAuditMsg(`📦 Koli (${newKoliNo}) barkodu okutuldu! Kolideki ${newItems.length} adet ürünün TAMAMI tereğümde VAR olarak işaretlendi.`, false);
+            } else {
+                if (scannedQr) window.scannedQRsInShelf.add(scannedQr);
+                const targetMatch = window.shelfItems.find(i => {
+                    const iQr = (i.qr || '').replace(/\s+/g, '').toUpperCase();
+                    const iSeri = (i.seri_no || '').replace(/\s+/g, '').toUpperCase();
+                    return iQr === normCode || normCode.includes(iQr) || iQr.includes(normCode) || (iSeri && iSeri === normCode) || (scannedQr && iQr === scannedQr.replace(/\s+/g, '').toUpperCase());
+                });
+
+                if (targetMatch) {
+                    window.scannedQRsInShelf.add(targetMatch.qr);
+                }
+
+                renderAuditTable();
+                if (targetMatch) {
+                    showAuditMsg(`🟢 Ürün okundu (Tereğimde VAR): ${targetMatch.product_name} (Koli: ${newKoliNo}).`, false);
+                } else {
+                    showAuditMsg(`Koli (${newKoliNo}) tereğinize eklendi! Toplam ${newItems.length} ürün stokta bulundu.`, false);
+                }
+            }
+
+            const wrapper = document.getElementById('audit-results-wrapper');
+            if (wrapper) wrapper.classList.remove('hidden');
+
+        } else {
+            showAuditMsg('Sorgulama Hatası: ' + (data.error || 'Bilinmeyen hata'), true);
+        }
+    } catch (err) {
+        showAuditMsg('Sunucu hatası: ' + err.message, true);
+    } finally {
+        const mainInput = document.getElementById('audit-input-main');
+        if (mainInput) {
+            mainInput.value = '';
+            mainInput.focus();
+        }
+    }
+}
+
+window.handleAuditKeypress = function(e) {
+    const code = e.keyCode || e.which;
+    if (code === 13 || code === 10 || code === 9 || e.key === 'Enter') {
+        if (e.preventDefault) e.preventDefault();
+        const el = document.getElementById('audit-input-main');
+        if (el) {
+            const rawCode = el.value.trim();
+            el.value = '';
+            if (rawCode) handleScanSubmit(rawCode);
+        }
+    }
+};
+
+window.handleAuditChange = function(el) {
+    const mainInput = document.getElementById('audit-input-main');
+    if (mainInput && mainInput.value.trim()) {
+        const rawCode = mainInput.value.trim();
+        mainInput.value = '';
+        handleScanSubmit(rawCode);
+    }
+};
+
+window.handleAuditInput = function(el) {
+    // Intentionally no-op to prevent premature truncation of barcode scanner input
+};
+
+window.triggerAuditSubmit = function() {
+    console.log("triggerAuditSubmit called");
+    const el = document.getElementById('audit-input-main');
+    if (el) {
+        const rawCode = el.value.trim();
+        el.value = '';
+        if (rawCode) handleScanSubmit(rawCode);
+    }
+};
+
+window.resetAudit = function() {
+    console.log("resetAudit called");
+    window.shelfKoliMap.clear();
+    window.shelfItems = [];
+    window.scannedQRsInShelf.clear();
+    window.allWarehouseItems = [];
+    window.isAuditAllMode = false;
+
+    renderAuditTable();
+    hideAuditMsg();
+
+    const wrapper = document.getElementById('audit-results-wrapper');
+    if (wrapper) wrapper.classList.add('hidden');
+
+    const mainInput = document.getElementById('audit-input-main');
+    if (mainInput) {
+        mainInput.value = '';
+        mainInput.disabled = false;
+        mainInput.placeholder = "Barkod veya İlaç QR okutun (Enter'a basın)...";
+        mainInput.focus();
+    }
+
+    showAuditMsg('🧹 Terek sayımı temizlendi. Yeni sayım yapabilirsiniz.', false);
+};
+
+window.downloadAuditExcel = async function() {
+    console.log("downloadAuditExcel called");
+    const activeList = window.isAuditAllMode ? window.allWarehouseItems : window.shelfItems;
+    if (activeList.length === 0) return;
+
+    const missingItems = activeList.filter(i => !isItemScanned(i)).map(i => ({
+        "Koli Numarası": i.koli_no,
+        "Ürün Adı": i.product_name,
+        "Karekod": i.qr,
+        "Gtin": i.gtin,
+        "Seri Numarası": i.seri_no,
+        "Parti Numarası": i.parti_no,
+        "Palet Numarası": i.palet_no,
+        "Açıklama": "Tereğümde yok, Bakanlık sitesinden çıkış yapılacak ürün"
+    }));
+
+    if (missingItems.length === 0) {
+        showAuditMsg(`Tereğinizdeki tüm ürünler fiziken mevcut! Bakanlıktan çıkılacak eksik ürün yok.`, false);
+        return;
+    }
+
+    const btnAuditExcel = document.getElementById('btn-dl-audit-excel');
+    if (btnAuditExcel) {
+        btnAuditExcel.disabled = true;
+        btnAuditExcel.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> İndiriliyor...';
+    }
+
+    try {
+        const response = await fetch('/api/download/audit_excel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(missingItems)
+        });
+
+        if (!response.ok) throw new Error("Excel oluşturulamadı");
+
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `terek_eksik_urunler_bakanlik_cikis.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+    } catch (err) {
+        showAuditMsg("Excel indirme hatası: " + err.message, true);
+    } finally {
+        if (btnAuditExcel) {
+            btnAuditExcel.disabled = false;
+            btnAuditExcel.innerHTML = '<i class="fa-solid fa-file-excel"></i> 📥 Tereğümde Olmayan Ürünleri İndir (Excel)';
+        }
+    }
+};
+
+window.transferMissingToCikis = async function() {
+    const activeList = window.isAuditAllMode ? window.allWarehouseItems : window.shelfItems;
+    if (!activeList || activeList.length === 0) {
+        alert("⚠️ Henüz terek sayımı yapılmadı. Lütfen önce koli veya ürün QR okutun.");
+        return;
+    }
+
+    const missingItems = activeList.filter(i => !isItemScanned(i));
+
+    if (missingItems.length === 0) {
+        alert("🟢 Tereğinizdeki tüm ürünler tam! Çıkış listesine aktarılacak eksik ürün bulunmamaktadır.");
+        return;
+    }
+
+    const count = missingItems.length;
+    const confirmMsg = `🔴 EMİN MİSİNİZ?\n\nTereğinizde bulunmayan (eksik) ${count} adet ürünü Çıkış Listesine aktarmak istediğinize emin misiniz?`;
+    
+    if (!confirm(confirmMsg)) {
+        return;
+    }
+
+    const qrList = missingItems.map(i => i.qr || i.Karekod || i.ham_karekod).filter(Boolean);
+
+    const btn = document.getElementById('btn-audit-send-cikis');
+    const originalHTML = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Aktarılıyor...';
+    }
+
+    try {
+        const res = await fetch('/api/cikis/toplu_ekle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ items: qrList })
+        });
+        const data = await res.json();
+        if (data.success) {
+            alert(`✅ BAŞARILI!\n\n${data.added_count} adet eksik ürün Çıkış Listesine aktarıldı.${data.already_count > 0 ? ` (${data.already_count} ürün zaten listedeydi)` : ''}`);
+        } else {
+            alert(`❌ Hata: ${data.error || 'Aktarım gerçekleştirilemedi.'}`);
+        }
+    } catch (err) {
+        alert(`❌ Bağlantı hatası: ${err.message}`);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalHTML;
+        }
+    }
+};
+
+function formatBytes(bytes, decimals = 2) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+}
+
+// Direct DOM Event Binding
+document.addEventListener('DOMContentLoaded', () => {
+    console.log("DOM loaded, binding event listeners...");
+
+    const btnFetch = document.getElementById('btn-bkst-fetch');
+    if (btnFetch) {
+        btnFetch.addEventListener('click', (e) => {
+            e.preventDefault();
+            window.triggerBkstFetch();
+        });
+    }
+
+    const btnFetchApi = document.getElementById('btn-bkst-fetch-api');
+    if (btnFetchApi) {
+        btnFetchApi.addEventListener('click', (e) => {
+            e.preventDefault();
+            window.triggerBkstFetchApi();
+        });
+    }
+
+    const btnAuditSubmit = document.getElementById('btn-audit-submit-trigger');
+    if (btnAuditSubmit) {
+        btnAuditSubmit.addEventListener('click', (e) => {
+            e.preventDefault();
+            window.triggerAuditSubmit();
+        });
+    }
+
+    const dropZoneSystem = document.getElementById('drop-zone-system');
+    const systemFileInput = document.getElementById('system-file');
+    const fileInfoSystem = document.getElementById('file-info-system');
+    const nameSystem = document.getElementById('name-system');
+    const sizeSystem = document.getElementById('size-system');
+    const btnClearSystem = document.getElementById('btn-clear-system');
+    
+    const dropZoneSales = document.getElementById('drop-zone-sales');
+    const salesFileInput = document.getElementById('sales-file');
+    const fileInfoSales = document.getElementById('file-info-sales');
+    const nameSales = document.getElementById('name-sales');
+    const sizeSales = document.getElementById('size-sales');
+    const btnClearSales = document.getElementById('btn-clear-sales');
+
+    const btnCompare = document.getElementById('btn-compare');
+    const statTotalInitial = document.getElementById('val-total-system') || document.getElementById('stat-total-initial');
+    const statTotalSold = document.getElementById('val-total-sales') || document.getElementById('stat-total-sold');
+    const statTotalMatched = document.getElementById('val-matched') || document.getElementById('stat-total-matched');
+    const statTotalRemaining = document.getElementById('val-remaining') || document.getElementById('stat-total-remaining');
+    
+    let fileSystem = null;
+    let fileSales = null;
+
+    function checkReadyToCompare() {
+        if (btnCompare) btnCompare.disabled = !(fileSystem && fileSales);
+    }
+
+    function setupDragAndDrop(dropZone, fileInput, onSelect) {
+        if (!dropZone || !fileInput) return;
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                dropZone.classList.add('dragover');
+            }, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('dragover');
+            }, false);
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            if (files.length > 0) { onSelect(files[0]); }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) { onSelect(e.target.files[0]); }
+        });
+    }
+
+    if (dropZoneSystem && systemFileInput) {
+        setupDragAndDrop(dropZoneSystem, systemFileInput, (file) => {
+            fileSystem = file;
+            nameSystem.textContent = file.name;
+            sizeSystem.textContent = formatBytes(file.size);
+            dropZoneSystem.classList.add('hidden');
+            fileInfoSystem.classList.remove('hidden');
+            checkReadyToCompare();
+        });
+    }
+
+    if (dropZoneSales && salesFileInput) {
+        setupDragAndDrop(dropZoneSales, salesFileInput, (file) => {
+            fileSales = file;
+            nameSales.textContent = file.name;
+            sizeSales.textContent = formatBytes(file.size);
+            dropZoneSales.classList.add('hidden');
+            fileInfoSales.classList.remove('hidden');
+            checkReadyToCompare();
+        });
+    }
+
+    if (btnClearSystem) {
+        btnClearSystem.addEventListener('click', () => {
+            fileSystem = null;
+            systemFileInput.value = '';
+            fileInfoSystem.classList.add('hidden');
+            dropZoneSystem.classList.remove('hidden');
+            checkReadyToCompare();
+        });
+    }
+
+    if (btnClearSales) {
+        btnClearSales.addEventListener('click', () => {
+            fileSales = null;
+            salesFileInput.value = '';
+            fileInfoSales.classList.add('hidden');
+            dropZoneSales.classList.remove('hidden');
+            checkReadyToCompare();
+        });
+    }
+
+    if (btnCompare) {
+        btnCompare.addEventListener('click', async () => {
+            if (!fileSystem || !fileSales) return;
+
+            const formData = new FormData();
+            formData.append('system_file', fileSystem);
+            formData.append('sales_file', fileSales);
+            
+            btnCompare.disabled = true;
+            btnCompare.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Karşılaştırılıyor...`;
+            
+            try {
+                const response = await fetch('/api/compare', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    if (statTotalInitial) statTotalInitial.textContent = data.stats.total_system;
+                    if (statTotalSold) statTotalSold.textContent = data.stats.total_sales;
+                    if (statTotalMatched) statTotalMatched.textContent = data.stats.matched;
+                    if (statTotalRemaining) statTotalRemaining.textContent = data.stats.remaining;
+
+                    const overviewSection = document.getElementById('results-overview');
+                    if (overviewSection) overviewSection.classList.remove('hidden');
+                } else {
+                    alert('Hata: ' + (data.error || 'Bilinmeyen bir hata oluştu.'));
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Karşılaştırma hatası: ' + err.message);
+            } finally {
+                btnCompare.disabled = false;
+                btnCompare.innerHTML = `<i class="fa-solid fa-bolt"></i> Karşılaştır ve Analiz Et`;
+            }
+        });
+    }
+
+    const btnAuditResetKoli = document.getElementById('btn-audit-reset-koli');
+    const btnAuditExcel = document.getElementById('btn-dl-audit-excel');
+    const btnAuditToggleMode = document.getElementById('btn-audit-toggle-mode');
+
+    if (btnAuditToggleMode) {
+        btnAuditToggleMode.addEventListener('click', (e) => {
+            e.preventDefault();
+            window.toggleAuditMode();
+        });
+    }
+
+    if (btnAuditResetKoli) {
+        btnAuditResetKoli.addEventListener('click', (e) => {
+            e.preventDefault();
+            window.resetAudit();
+        });
+    }
+
+    if (btnAuditExcel) {
+        btnAuditExcel.addEventListener('click', (e) => {
+            e.preventDefault();
+            window.downloadAuditExcel();
+        });
+    }
+
+    // Sürüm Bilgisi Yükleme
+    loadSystemVersion();
+});
+
+function loadSystemVersion() {
+    fetch('/api/system/version')
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                const verStr = data.version || '';
+                if (verStr) {
+                    document.querySelectorAll('#versionText, .version-text').forEach(el => {
+                        el.textContent = verStr;
+                    });
+                }
+                
+                const h = document.getElementById('modalCommitHash');
+                const d = document.getElementById('modalCommitDate');
+                const m = document.getElementById('modalCommitMsg');
+                if (h && data.commit_hash) h.textContent = data.commit_hash;
+                if (d && data.commit_date) d.textContent = data.commit_date;
+                if (m && data.commit_msg) m.textContent = data.commit_msg;
+            }
+        })
+        .catch(e => console.warn('Version check error:', e));
+}
+
+window.showVersionModal = function() {
+    let modal = document.getElementById('versionModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'versionModal';
+        modal.className = 'modal';
+        modal.style.cssText = 'display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px);';
+        document.body.appendChild(modal);
+    }
+    
+    modal.innerHTML = `
+    <div style="background:#1e293b; color:#fff; max-width:450px; margin:10% auto; padding:24px; border-radius:16px; border:1px solid rgba(255,255,255,0.1); box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
+        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:12px; margin-bottom:16px;">
+            <h3 style="margin:0; font-size:1.15rem; color:#38bdf8; display:flex; align-items:center; gap:8px;">
+                <i class="fa-solid fa-circle-info"></i> Uygulama Sürüm Bilgisi
+            </h3>
+            <span onclick="closeVersionModal()" style="cursor:pointer; font-size:1.4rem; color:#94a3b8;">&times;</span>
+        </div>
+        <div style="font-size:0.95rem; line-height:1.8;">
+            <p style="margin:6px 0;"><strong>📦 Sürüm Kodu:</strong> <span id="modalCommitHash" style="color:#38bdf8; font-family:monospace; font-weight:bold;">Yükleniyor...</span></p>
+            <p style="margin:6px 0;"><strong>📅 Son Güncelleme:</strong> <span id="modalCommitDate" style="color:#f1f5f9;">-</span></p>
+            <p style="margin:6px 0;"><strong>📝 Son Değişiklik Notu:</strong></p>
+            <div id="modalCommitMsg" style="background:#0f172a; padding:10px 14px; border-radius:8px; font-size:0.85rem; color:#cbd5e1; border:1px solid rgba(255,255,255,0.05); margin-top:4px;">Yükleniyor...</div>
+            <div style="margin-top:16px; background:rgba(34, 197, 94, 0.15); border:1px solid rgba(34, 197, 94, 0.3); color:#4ade80; padding:8px 12px; border-radius:8px; text-align:center; font-size:0.85rem; font-weight:600;">
+                🟢 Sistem Güncel
+            </div>
+        </div>
+        <div style="margin-top:16px; text-align:right;">
+            <button onclick="closeVersionModal()" style="background:#3b82f6; color:#fff; border:none; padding:8px 18px; border-radius:8px; font-weight:600; cursor:pointer;">Kapat</button>
+        </div>
+    </div>`;
+    
+    modal.style.display = 'block';
+    loadSystemVersion();
+};
+
+window.closeVersionModal = function() {
+    const modal = document.getElementById('versionModal');
+    if (modal) modal.style.display = 'none';
+};
+
+function cleanUserName(name) {
+    if (!name) return "";
+    let cleaned = String(name).trim().replace(/^\d+[\s\-]+/, "");
+    if (cleaned.includes(" (")) {
+        cleaned = cleaned.split(" (")[0].trim();
+    }
+    return cleaned || String(name).trim();
+}
+
+// ── Kullanıcı Bilgisi ve Oturum Kapatma (Logout) ──────────────────────────────────────────
+async function loadUserInfo() {
+    const userNameEl = document.getElementById('sidebar-user-name');
+    const cachedName = localStorage.getItem('cached_user_name');
+    if (userNameEl && cachedName && (userNameEl.textContent === 'Giriş Yapılmadı' || !userNameEl.textContent.trim())) {
+        userNameEl.textContent = cachedName;
+        userNameEl.title = cachedName;
+    }
+    try {
+        const res = await fetch('/api/system/user_info');
+        const data = await res.json();
+        if (data.unauthenticated) {
+            localStorage.removeItem('cached_user_name');
+            if (userNameEl) userNameEl.textContent = 'Giriş Yapılmadı';
+            if (window.location.pathname !== '/login') {
+                window.location.href = '/login';
+            }
+            return;
+        }
+        if (userNameEl) {
+            const displayName = cleanUserName(data.user_name || data.username || 'Giriş Yapılmadı');
+            localStorage.setItem('cached_user_name', displayName);
+            if (userNameEl.textContent !== displayName) {
+                userNameEl.textContent = displayName;
+                userNameEl.title = displayName;
+            }
+        }
+    } catch (e) {
+        console.error("User info error:", e);
+    }
+}
+
+async function logoutUser() {
+    if (!confirm("Oturumu kapatmak ve bakanlık giriş bilgilerinizi silmek istediğinize emin misiniz?")) {
+        return;
+    }
+    try {
+        sessionStorage.removeItem('bkst_auto_synced');
+        localStorage.removeItem('cached_user_name');
+        const res = await fetch('/api/system/logout', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            window.location.href = '/login';
+        } else {
+            alert(data.error || "Oturum kapatılamadı.");
+        }
+    } catch (e) {
+        alert("Bağlantı hatası: " + e.message);
+    }
+}
+
+window.logoutUser = logoutUser;
+
+// ── Sistem Durumu ve Durum Rozeti (Sistem Aktif / Sistem Deaktif) ───────────
+window.updateSystemStatusPill = function(isOnline, statusText, details) {
+    const pills = document.querySelectorAll('.system-status-pill');
+    pills.forEach(pill => {
+        const ind = pill.querySelector('.status-indicator');
+        const textSpan = pill.querySelector('span:not(.status-indicator)');
+        
+        pill.classList.remove('offline', 'fetching');
+        if (ind) ind.classList.remove('online', 'offline', 'fetching');
+        
+        if (isOnline === true) {
+            if (ind) ind.classList.add('online');
+            if (textSpan) textSpan.textContent = statusText || 'Sistem Aktif';
+            pill.title = details || 'Bakanlık bağlantısı aktif, güncel veriler senkronize.';
+        } else if (isOnline === false) {
+            pill.classList.add('offline');
+            if (ind) ind.classList.add('offline');
+            if (textSpan) textSpan.textContent = statusText || 'Sistem Deaktif';
+            pill.title = details || 'Bakanlığa bağlanılamadı. Sistem yerel veritabanı ile deaktif modda çalışıyor.';
+        } else if (isOnline === 'fetching') {
+            pill.classList.add('fetching');
+            if (ind) ind.classList.add('fetching');
+            if (textSpan) textSpan.textContent = statusText || 'Bağlantı Kuruluyor...';
+            pill.title = details || 'Bakanlık verileri güncelleniyor...';
+        }
+    });
+};
+
+// ── Otomatik Bakanlık Veri Senkronizasyonu (Uygulama Açıldığında) ──────────────────────────
+async function runAutoBkstSync(force = false) {
+    if (window.location.pathname === '/login') return;
+
+    const urlForce = window.location.search.includes('force_sync=1');
+    const alreadySynced = sessionStorage.getItem('app_launch_synced');
+
+    if (!force && !urlForce && alreadySynced) {
+        return;
+    }
+    sessionStorage.setItem('app_launch_synced', 'true');
+
+    if (urlForce) {
+        try {
+            window.history.replaceState({}, document.title, window.location.pathname);
+        } catch (_) {}
+    }
+
+    let loader = document.getElementById('auto-sync-loader');
+    if (!loader) {
+        loader = document.createElement('div');
+        loader.id = 'auto-sync-loader';
+        loader.style.cssText = 'display:flex; position:fixed; z-index:99999; left:0; top:0; width:100%; height:100%; background:rgba(10, 11, 16, 0.94); backdrop-filter:blur(14px); flex-direction:column; align-items:center; justify-content:center; text-align:center;';
+        loader.innerHTML = `
+            <div style="background:rgba(15, 23, 42, 0.96); border:1px solid rgba(56, 189, 248, 0.35); border-radius:24px; padding:2.8rem 3rem; max-width:540px; width:92%; box-shadow:0 25px 50px rgba(0,0,0,0.8); transition: all 0.3s ease;">
+                <div id="loader-icon-box" style="width:80px; height:80px; border-radius:50%; background:rgba(56,189,248,0.15); border:2px solid rgba(56,189,248,0.4); margin:0 auto 1.5rem auto; display:flex; align-items:center; justify-content:center; transition: all 0.3s ease;">
+                    <i id="loader-icon" class="fa-solid fa-cloud-arrow-down fa-bounce" style="font-size:2.4rem; color:#38bdf8;"></i>
+                </div>
+                <h2 id="loader-title" style="font-family:var(--font-outfit, sans-serif); font-size:1.45rem; font-weight:800; color:#fff; margin:0 0 0.6rem 0;">
+                    Bakanlıktan Güncel Veriler Çekiliyor...
+                </h2>
+                <div id="loader-status" style="font-size:0.95rem; color:#94a3b8; margin:0 0 1.6rem 0; line-height:1.6; transition: all 0.3s ease;">
+                    Lütfen bekleyin, BKST sunucusundan güncel stok ve karekod verileriniz API üzerinden çekiliyor.
+                </div>
+                <div style="background:rgba(255,255,255,0.06); height:6px; border-radius:10px; overflow:hidden; width:100%;">
+                    <div id="loader-progress-bar" style="background:linear-gradient(90deg, #38bdf8, #818cf8); height:100%; width:100%; transition: background 0.4s ease, width 0.4s ease;"></div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(loader);
+    } else {
+        loader.style.display = 'flex';
+    }
+
+    const title = document.getElementById('loader-title');
+    const status = document.getElementById('loader-status');
+    const iconBox = document.getElementById('loader-icon-box');
+    const icon = document.getElementById('loader-icon');
+    const progressBar = document.getElementById('loader-progress-bar');
+
+    window.updateSystemStatusPill('fetching', 'Bağlantı Kuruluyor...');
+
+    try {
+        const startRes = await window.apiFetch('/api/bkst/fetch_api', { method: 'POST' });
+        const startData = await startRes.json();
+
+        if (startData.unauthenticated) {
+            if (loader) loader.style.display = 'none';
+            if (window.location.pathname !== '/login') {
+                window.location.href = '/login';
+            }
+            return;
+        }
+
+        // 2. setInterval ile her 3 saniyede bir fetch_status sorgula (Maks 100 deneme = 5 dakika)
+        await new Promise((resolve) => {
+            let attempts = 0;
+            const maxAttempts = 100;
+            const pollInterval = setInterval(async () => {
+                attempts++;
+                try {
+                    const sRes = await window.apiFetch('/api/bkst/fetch_status');
+                    if (sRes.ok) {
+                        const statusData = await sRes.json();
+                        if (statusData.message && status) {
+                            status.textContent = statusData.message;
+                        }
+
+                        if (!statusData.running || attempts >= maxAttempts) {
+                            clearInterval(pollInterval);
+
+                            if (statusData.online === true && statusData.fetched_count > 0) {
+                                window.updateSystemStatusPill(true, 'Sistem Aktif', `Bakanlıktan ${statusData.fetched_count} adet stok çekildi.`);
+                                if (title) title.textContent = "Tamamlandı";
+                                if (status) {
+                                    status.style.color = "#4ade80";
+                                    status.style.fontWeight = "700";
+                                    status.style.fontSize = "1.05rem";
+                                    status.textContent = `🟢 Sistem Aktif: Bakanlıktan toplam ${statusData.fetched_count} adet stok verisi çekildi. Sisteme aktarıldı.`;
+                                }
+                                if (iconBox) {
+                                    iconBox.style.background = "rgba(34, 197, 94, 0.2)";
+                                    iconBox.style.borderColor = "rgba(34, 197, 94, 0.5)";
+                                }
+                                if (icon) {
+                                    icon.className = "fa-solid fa-circle-check";
+                                    icon.style.color = "#4ade80";
+                                }
+                                if (progressBar) progressBar.style.background = "#22c55e";
+                                setTimeout(resolve, 2000);
+                            } else {
+                                const failReason = statusData.message || "Bakanlık API'sine bağlanırken sorun oluştu (0 adet veri çekildi).";
+                                const localCount = statusData.local_count || 0;
+                                window.updateSystemStatusPill(false, 'Sistem Deaktif', failReason);
+
+                                if (title) {
+                                    title.textContent = "⚠️ BAKANLIK BAĞLANTI UYARISI";
+                                    title.style.color = "#f87171";
+                                }
+                                if (status) {
+                                    status.style.color = "#fca5a5";
+                                    status.style.fontWeight = "600";
+                                    status.style.fontSize = "0.95rem";
+                                    status.innerHTML = `
+                                        <div style="margin-bottom:0.6rem; color:#ef4444; font-weight:800; font-size:1.05rem;">
+                                            ⚠️ 0 Adet Veri Çekildi (Bakanlığa Bağlanılamadı)!
+                                        </div>
+                                        <div style="color:#cbd5e1; font-size:0.88rem; margin-bottom:0.8rem;">${failReason}</div>
+                                        <div style="padding:0.75rem; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.3); border-radius:10px; color:#fecaca; text-align:left; line-height:1.5;">
+                                            <div style="font-weight:700; color:#f87171; margin-bottom:3px;">🔴 Sistem Durumu: SİSTEM DEAKTİF</div>
+                                            <div style="font-size:0.83rem;">Yerel veritabanındaki son kayıtlı <strong>${localCount}</strong> adet stok verisi korunuyor ve kesintisiz kullanılmaya devam ediliyor.</div>
+                                        </div>
+                                    `;
+                                }
+                                if (iconBox) {
+                                    iconBox.style.background = "rgba(239, 68, 68, 0.2)";
+                                    iconBox.style.borderColor = "rgba(239, 68, 68, 0.5)";
+                                }
+                                if (icon) {
+                                    icon.className = "fa-solid fa-triangle-exclamation";
+                                    icon.style.color = "#ef4444";
+                                }
+                                if (progressBar) progressBar.style.background = "#ef4444";
+                                setTimeout(resolve, 3500);
+                            }
+                        }
+                    }
+                } catch (e) {
+                    if (attempts >= maxAttempts) {
+                        clearInterval(pollInterval);
+                        if (title) title.textContent = "Bağlantı Hatası";
+                        if (status) status.textContent = "Sunucu ile bağlantı kurulamadı veya zaman aşımına uğradı.";
+                        setTimeout(resolve, 2000);
+                    }
+                }
+            }, 3000);
+        });
+
+    } catch (err) {
+        console.error('Otomatik BKST veri çekme hatası:', err);
+        window.updateSystemStatusPill(false, 'Sistem Deaktif', 'Sunucu ile iletişim kurulamadı.');
+        if (title) title.textContent = "Bağlantı Hatası";
+        if (status) status.innerHTML = `<span style="color:#ef4444;">Sunucu ile bağlantı kurulamadı. Sistem Deaktif durumdadır.</span>`;
+        await new Promise(resolve => setTimeout(resolve, 2000));
+    } finally {
+        if (loader) loader.style.display = 'none';
+        if (typeof window.loadWarehouseStock === 'function') {
+            window.loadWarehouseStock();
+        }
+    }
+}
+
+async function checkWebSystemUpdate() {
+    return await performStartupUpdateCheck();
+}
+
+async function initApp() {
+    loadUserInfo();
+    loadSystemVersion();
+
+    // 1. Sadece oturumun ilk açılışında arka planda güncelleme kontrolü yap
+    // (sessionStorage sayesinde butonlara basıldığında veya sayfa geçişlerinde ASLA tekrar çalışmaz)
+    const hasUpdate = await performStartupUpdateCheck();
+    if (hasUpdate) {
+        return;
+    }
+
+    // 2. Bakanlık Senkronizasyonu Kontrolü:
+    // Sunucunun senkronizasyon durumunu sorgula
+    let serverNeedsSync = false;
+    try {
+        const syncRes = await fetch('/api/system/sync_status');
+        if (syncRes.ok) {
+            const syncData = await syncRes.json();
+            if (!syncData.synced) {
+                serverNeedsSync = true;
+            }
+        }
+    } catch (_) {}
+
+    const urlForce = window.location.search.includes('force_sync=1');
+    const sessionSynced = sessionStorage.getItem('app_launch_synced');
+
+    // Sunucu yeni başladıysa VEYA zorlama varsa VEYA bu oturumda henüz veri çekilmediyse veri çek
+    if (serverNeedsSync || urlForce || !sessionSynced) {
+        await runAutoBkstSync(true);
+    }
+}
+
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initApp);
+} else {
+    initApp();
+}
+
 
 ```
 
@@ -3395,6 +5194,16 @@ body {
 .status-indicator.online {
     background-color: var(--success);
     box-shadow: 0 0 10px var(--success-glow);
+}
+
+.status-indicator.offline {
+    background-color: #ef4444;
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.7);
+}
+
+.status-indicator.fetching {
+    background-color: #f59e0b;
+    box-shadow: 0 0 10px rgba(245, 158, 11, 0.7);
 }
 
 /* Quick Guide Bar (Sade Üst Rehber Barı) */
@@ -4164,6 +5973,19 @@ body.sidebar-layout {
     font-size: 0.82rem;
     font-weight: 600;
     color: #34d399;
+    transition: all 0.3s ease;
+}
+
+.system-status-pill.offline {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.35);
+    color: #f87171;
+}
+
+.system-status-pill.fetching {
+    background: rgba(245, 158, 11, 0.12);
+    border-color: rgba(245, 158, 11, 0.35);
+    color: #fbbf24;
 }
 
 .version-pill {
@@ -4443,1590 +6265,6 @@ body.sidebar-layout {
 
 ---
 
-### 📁 `static/app.js`
-
-```javascript
-// ── QR COMPARE APP.JS ──────────────────────────────────────────────────────
-console.log("QR Compare app.js loading...");
-
-// Global Session Authenticated Fetch Wrapper
-window.apiFetch = async function(url, options = {}) {
-    options.headers = options.headers || {};
-    const token = localStorage.getItem('local_session_token');
-    if (token) {
-        options.headers['X-Local-Token'] = token;
-    }
-    try {
-        const response = await fetch(url, options);
-        if (response.status === 401) {
-            window.location.href = '/login';
-            return response;
-        }
-        return response;
-    } catch (err) {
-        console.error("apiFetch error:", err);
-        throw err;
-    }
-};
-
-(function syncSessionToken() {
-    fetch('/api/system/user_info')
-        .then(res => res.json())
-        .then(data => {
-            if (data && data.token) {
-                localStorage.setItem('local_session_token', data.token);
-            }
-        })
-        .catch(() => {});
-})();
-
-(function initAppWindowControl() {
-    if (window.outerWidth < screen.availWidth || window.outerHeight < screen.availHeight) {
-        try {
-            window.moveTo(0, 0);
-            window.resizeTo(screen.availWidth, screen.availHeight);
-        } catch (e) {}
-    }
-})();
-
-(function startHeartbeat() {
-    let hbTimer = null;
-    function sendPing() {
-        window.apiFetch('/api/system/heartbeat', { method: 'POST' }).catch(() => {});
-    }
-    function startTimer() {
-        if (hbTimer) return;
-        hbTimer = setInterval(sendPing, 10000);
-    }
-    function stopTimer() {
-        if (hbTimer) { clearInterval(hbTimer); hbTimer = null; }
-    }
-    sendPing();
-    startTimer();
-    document.addEventListener('visibilitychange', () => {
-        if (document.hidden) stopTimer();
-        else { sendPing(); startTimer(); }
-    });
-})();
-
-// ── Startup Auto Update Engine ──────────────────────────────────────────────
-(function checkStartupAutoUpdate() {
-    if (sessionStorage.getItem('app_update_checked')) return;
-    sessionStorage.setItem('app_update_checked', '1');
-
-    fetch('/api/system/check_update')
-        .then(res => res.json())
-        .then(data => {
-            if (data && data.has_update) {
-                showUpdateLoadingScreen(data);
-            }
-        })
-        .catch(err => console.warn("Startup update check error:", err));
-})();
-
-function showUpdateLoadingScreen(updateInfo) {
-    let overlay = document.getElementById('startupUpdateOverlay');
-    if (!overlay) {
-        overlay = document.createElement('div');
-        overlay.id = 'startupUpdateOverlay';
-        overlay.style.cssText = `
-            position: fixed;
-            top: 0; left: 0; width: 100vw; height: 100vh;
-            background: #0f172a;
-            color: #ffffff;
-            z-index: 999999;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            font-family: 'Outfit', 'Inter', sans-serif;
-            text-align: center;
-            padding: 20px;
-        `;
-        overlay.innerHTML = `
-            <div style="background: rgba(30, 41, 59, 0.95); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 24px; padding: 40px 30px; max-width: 480px; width: 90%; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.7); backdrop-filter: blur(10px);">
-                <div style="width: 80px; height: 80px; margin: 0 auto 24px; background: rgba(56, 189, 248, 0.1); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
-                    <i class="fa-solid fa-cloud-arrow-down fa-bounce" style="font-size: 38px; color: #38bdf8;"></i>
-                </div>
-                <h2 style="font-size: 1.6rem; font-weight: 700; margin-bottom: 12px; color: #f8fafc;">Uygulama Güncelleme Alıyor</h2>
-                <p id="updateStatusMsg" style="font-size: 0.95rem; color: #94a3b8; line-height: 1.6; margin-bottom: 24px;">
-                    Yeni sürüm (${updateInfo.remote_version || 'Gelişmiş Sürüm'}) algılandı. Güncelleme paketleri indiriliyor, lütfen bekleyin...
-                </p>
-                <div style="width: 100%; height: 8px; background: #334155; border-radius: 999px; overflow: hidden; position: relative;">
-                    <div id="updateProgressBar" style="width: 40%; height: 100%; background: linear-gradient(90deg, #38bdf8, #3b82f6); border-radius: 999px; transition: width 0.4s ease; animation: updateProgressAnim 1.8s infinite linear;"></div>
-                </div>
-                <p style="font-size: 0.8rem; color: #64748b; margin-top: 18px; font-weight: 500;">
-                    <i class="fa-solid fa-circle-info" style="color: #38bdf8; margin-right: 4px;"></i> İşlem tamamlanınca uygulama yeni sürümüyle yeniden başlayacaktır.
-                </p>
-            </div>
-            <style>
-                @keyframes updateProgressAnim {
-                    0% { transform: translateX(-100%); width: 30%; }
-                    50% { width: 60%; }
-                    100% { transform: translateX(350%); width: 30%; }
-                }
-            </style>
-        `;
-        document.body.appendChild(overlay);
-    }
-
-    fetch('/api/system/apply_update', { method: 'POST' })
-        .then(res => res.json())
-        .then(resData => {
-            const msgEl = document.getElementById('updateStatusMsg');
-            const barEl = document.getElementById('updateProgressBar');
-            if (barEl) {
-                barEl.style.animation = 'none';
-                barEl.style.width = '100%';
-            }
-            if (msgEl) {
-                msgEl.style.color = '#4ade80';
-                msgEl.innerHTML = '<strong>✅ Güncelleme başarıyla tamamlandı!</strong><br>Uygulama güncel haliyle otomatik yeniden başlatılıyor...';
-            }
-            setTimeout(() => {
-                window.location.reload(true);
-            }, 1800);
-        })
-        .catch(err => {
-            const msgEl = document.getElementById('updateStatusMsg');
-            if (msgEl) {
-                msgEl.style.color = '#f87171';
-                msgEl.textContent = "Güncelleme sırasında bir aksaklık oluştu, uygulama normal modda başlatılıyor...";
-            }
-            setTimeout(() => {
-                if (overlay) overlay.remove();
-            }, 2500);
-        });
-}
-
-// Global state
-window.shelfKoliMap = window.shelfKoliMap || new Map();
-window.shelfItems = window.shelfItems || [];
-window.scannedQRsInShelf = window.scannedQRsInShelf || new Set();
-window.bkstPollTimer = window.bkstPollTimer || null;
-window.isAuditAllMode = window.isAuditAllMode || false;
-window.allWarehouseItems = window.allWarehouseItems || [];
-
-const BADGE_MAP = {
-    closed:     { text: 'Kapalı',                                      cls: 'badge-closed' },
-    opening:    { text: 'Tarayıcı Açılıyor…',                          cls: 'badge-fetching'},
-    login_page: { text: 'Giriş Bekleniyor (Stok Takibi Sayfasına Gidin)', cls: 'badge-closed' },
-    open:       { text: 'Açık (Stok Takibi Sayfasına Gidin)',          cls: 'badge-open'   },
-    ready:      { text: '🟢 Hazır (Stok Takibi Sayfasında)',            cls: 'badge-done'   },
-    fetching:   { text: 'Veriler Çekiliyor…',                           cls: 'badge-fetching'},
-    done:       { text: 'Tamamlandı',                                  cls: 'badge-done'   },
-    error:      { text: 'Hata',                                        cls: 'badge-error'  }
-};
-
-function escapeHtml(str) {
-    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-function isItemScanned(item) {
-    if (!item) return false;
-    if (item.qr && window.scannedQRsInShelf.has(item.qr)) return true;
-
-    const itemQrClean = (item.qr || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
-    const itemSeriClean = (item.seri_no || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
-
-    for (let scanned of window.scannedQRsInShelf) {
-        const sClean = (scanned || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
-        if (!sClean) continue;
-
-        if (itemQrClean && (sClean === itemQrClean || sClean.includes(itemQrClean) || itemQrClean.includes(sClean))) {
-            return true;
-        }
-
-        if (itemSeriClean && itemSeriClean.length >= 3 && sClean.includes(itemSeriClean)) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-function setBkstUI(status, message) {
-    const bkstBadge  = document.getElementById('bkst-status-badge');
-    const bkstMsgBox = document.getElementById('bkst-message-box');
-    const btnBkstFetch = document.getElementById('btn-bkst-fetch');
-    const btnBkstClose = document.getElementById('btn-bkst-close');
-
-    if (!bkstBadge || !bkstMsgBox) return;
-    const info = BADGE_MAP[status] || BADGE_MAP.closed;
-
-    bkstBadge.textContent = info.text;
-    bkstBadge.className   = 'badge ' + info.cls;
-
-    bkstMsgBox.classList.remove('hidden', 'status-error', 'status-done', 'status-fetch');
-    if (!message) { bkstMsgBox.classList.add('hidden'); return; }
-
-    let icon = 'fa-circle-info';
-    let extraClass = '';
-    if (status === 'fetching' || status === 'opening') { icon = 'fa-circle-notch fa-spin'; extraClass = 'status-fetch'; }
-    if (status === 'done' || status === 'ready')      { icon = 'fa-circle-check';         extraClass = 'status-done';  }
-    if (status === 'error' || status === 'login_page') { icon = 'fa-circle-exclamation';   extraClass = 'status-error'; }
-
-    bkstMsgBox.className = 'status-msg' + (extraClass ? ' ' + extraClass : '');
-    bkstMsgBox.innerHTML = `<i class="fa-solid ${icon}"></i><span>${escapeHtml(message)}</span>`;
-
-    const existingDl = bkstMsgBox.parentElement ? bkstMsgBox.parentElement.querySelector('.bkst-download-btn') : null;
-    if (existingDl) existingDl.remove();
-    if (status === 'done' && bkstMsgBox.parentElement) {
-        const dl = document.createElement('a');
-        dl.href = '/api/bkst/download';
-        dl.className = 'bkst-download-btn';
-        dl.innerHTML = '<i class="fa-solid fa-file-excel"></i> Excel Dosyasını İndir';
-        bkstMsgBox.parentElement.appendChild(dl);
-    }
-
-    if (btnBkstFetch) btnBkstFetch.disabled = !(status === 'ready' || status === 'done');
-    if (btnBkstClose) btnBkstClose.classList.toggle('hidden', status === 'closed');
-}
-
-function startBkstPolling() {
-    if (window.bkstPollTimer) return;
-    window.bkstPollTimer = setInterval(async () => {
-        try {
-            const res  = await fetch('/api/bkst/status');
-            const data = await res.json();
-            setBkstUI(data.status, data.message);
-            if (data.status === 'done' || data.status === 'error' || data.status === 'closed') {
-                clearInterval(window.bkstPollTimer);
-                window.bkstPollTimer = null;
-            }
-        } catch (_) {}
-    }, 2000);
-}
-
-// Global button click triggers
-window.triggerBkstOpen = function() {
-    console.log("triggerBkstOpen called");
-    setBkstUI('opening', 'Bakanlık tarayıcısı açılıyor...');
-
-    fetch('/api/bkst/open', { method: 'POST' })
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                setBkstUI(data.status, data.message);
-                startBkstPolling();
-            } else {
-                setBkstUI('error', data.message || 'Başlatma hatası oluştu.');
-            }
-        })
-        .catch(err => {
-            setBkstUI('error', 'Sunucu ile iletişim kurulamadı: ' + err.message);
-        });
-};
-
-window.triggerBkstFetchApi = function() {
-    console.log("triggerBkstFetchApi called");
-    setBkstUI('fetching', '⚡ Bakanlık verileri API üzerinden çekiliyor...');
-
-    const sidebar = document.querySelector('.sidebar');
-    if (sidebar) sidebar.style.pointerEvents = 'none';
-
-    window.apiFetch('/api/bkst/fetch_api', { method: 'POST' })
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                let statusTimer = setInterval(async () => {
-                    try {
-                        const res = await window.apiFetch('/api/bkst/fetch_status');
-                        const statusData = await res.json();
-                        setBkstUI(statusData.status, statusData.message);
-                        if (!statusData.running) {
-                            clearInterval(statusTimer);
-                            if (sidebar) sidebar.style.pointerEvents = 'auto';
-                            const dlBtn = document.getElementById('btn-bkst-download-excel');
-                            if (dlBtn && statusData.status === 'done') dlBtn.classList.remove('hidden');
-                        }
-                    } catch (e) {
-                        clearInterval(statusTimer);
-                        if (sidebar) sidebar.style.pointerEvents = 'auto';
-                    }
-                }, 10000);
-            } else {
-                setBkstUI('error', data.error || 'API veri çekme hatası oluştu.');
-                if (sidebar) sidebar.style.pointerEvents = 'auto';
-            }
-        })
-        .catch(err => {
-            setBkstUI('error', 'Sunucu hatası: ' + err.message);
-            if (sidebar) sidebar.style.pointerEvents = 'auto';
-        });
-};
-
-
-function showAuditMsg(msg, isError = false) {
-    const auditMsgBox = document.getElementById('audit-msg-box');
-    if (!auditMsgBox) return;
-    auditMsgBox.classList.remove('hidden');
-    if (isError) {
-        auditMsgBox.style.background = 'rgba(239, 68, 68, 0.15)';
-        auditMsgBox.style.border = '1px solid rgba(239, 68, 68, 0.4)';
-        auditMsgBox.style.color = '#f87171';
-        auditMsgBox.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> <span>${escapeHtml(msg)}</span>`;
-    } else {
-        auditMsgBox.style.background = 'rgba(16, 185, 129, 0.15)';
-        auditMsgBox.style.border = '1px solid rgba(16, 185, 129, 0.4)';
-        auditMsgBox.style.color = '#6ee7b7';
-        auditMsgBox.innerHTML = `<i class="fa-solid fa-circle-check"></i> <span>${escapeHtml(msg)}</span>`;
-    }
-}
-
-function hideAuditMsg() {
-    const auditMsgBox = document.getElementById('audit-msg-box');
-    if (auditMsgBox) auditMsgBox.classList.add('hidden');
-}
-
-function rebuildShelfItems() {
-    window.shelfItems = [];
-    const seenQrs = new Set();
-    window.shelfKoliMap.forEach((items) => {
-        items.forEach(item => {
-            const q = (item.qr || '').trim();
-            if (q) {
-                if (!seenQrs.has(q)) {
-                    seenQrs.add(q);
-                    window.shelfItems.push(item);
-                }
-            } else {
-                window.shelfItems.push(item);
-            }
-        });
-    });
-}
-
-window.toggleAuditMode = async function() {
-    console.log("toggleAuditMode called. Current mode:", window.isAuditAllMode);
-    if (window.shelfItems.length === 0) {
-        showAuditMsg('⚠️ Henüz hiç ürün okutmadınız! Lütfen önce karşılaştırmak istediğiniz en az 1 ürün veya koli okutun.', true);
-        return;
-    }
-
-    window.isAuditAllMode = !window.isAuditAllMode;
-
-    if (window.isAuditAllMode) {
-        const gtinsSet = new Set();
-        const pNamesSet = new Set();
-
-        window.shelfItems.forEach(i => {
-            let g = (i.gtin || '').trim();
-            if (!g || g === '—') {
-                const match = (i.qr || '').match(/01(\d{14})/);
-                if (match) g = match[1];
-            }
-            if (g && g !== '—') gtinsSet.add(g);
-            if (i.product_name && i.product_name !== '—') pNamesSet.add(i.product_name);
-        });
-
-        const gtins = Array.from(gtinsSet);
-        const pNames = Array.from(pNamesSet);
-
-        showAuditMsg('📊 Okutulan ürün kalemleri Bakanlık depodaki tüm stokla karşılaştırılıyor...', false);
-        
-        try {
-            const res = await fetch('/api/audit_all', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ gtins: gtins, product_names: pNames })
-            });
-            const data = await res.json();
-            if (data.success) {
-                window.allWarehouseItems = data.items || [];
-                renderAuditTable();
-                const missingCnt = window.allWarehouseItems.filter(i => !isItemScanned(i)).length;
-                showAuditMsg(`📊 Okutulan Kalem Karşılaştırma Modu AÇILDI! Bakanlık depodaki toplam ${window.allWarehouseItems.length} kutunun ${missingCnt} adeti tereğinizde EKSİK (Kırmızı renkte listenin en üstünde sıralandı).`, false);
-            } else {
-                window.isAuditAllMode = false;
-                renderAuditTable();
-                showAuditMsg('Hata: ' + data.error, true);
-                return;
-            }
-        } catch (err) {
-            window.isAuditAllMode = false;
-            renderAuditTable();
-            showAuditMsg('Sunucu hatası: ' + err.message, true);
-            return;
-        }
-    } else {
-        renderAuditTable();
-        showAuditMsg('📦 Okutulan Koliler Sayım Moduna Dönüldü.', false);
-    }
-
-    const wrapper = document.getElementById('audit-results-wrapper');
-    if (wrapper) wrapper.classList.remove('hidden');
-};
-
-function renderAuditTable() {
-    const tbody = document.getElementById('audit-table-body');
-    const elTotal = document.getElementById('audit-cnt-total');
-    const elOk = document.getElementById('audit-cnt-ok');
-    const elMissing = document.getElementById('audit-cnt-missing');
-    const elKolisList = document.getElementById('audit-kolis-list');
-    const alertBox = document.getElementById('audit-sync-alert-box');
-    const alertText = document.getElementById('audit-sync-alert-text');
-    const toggleBtn = document.getElementById('btn-audit-toggle-mode');
-
-    let activeList = window.isAuditAllMode ? [...window.allWarehouseItems] : [...window.shelfItems];
-
-    if (window.isAuditAllMode) {
-        // Sort missing items (Tereğimde YOK) first so missing QRs appear at top!
-        activeList.sort((a, b) => {
-            const aOk = isItemScanned(a) ? 1 : 0;
-            const bOk = isItemScanned(b) ? 1 : 0;
-            return aOk - bOk;
-        });
-    }
-
-    if (toggleBtn) {
-        if (window.isAuditAllMode) {
-            toggleBtn.innerHTML = '<i class="fa-solid fa-boxes-packing"></i> 📦 Okutulan Koliler Moduna Dön (Koli Modu)';
-            toggleBtn.style.background = 'linear-gradient(135deg, #a855f7, #7e22ce)';
-            toggleBtn.style.borderColor = '#a855f7';
-        } else {
-            toggleBtn.innerHTML = '<i class="fa-solid fa-layer-group"></i> 📊 Okutulan Kalemleri Tüm Depoyla Karşılaştır';
-            toggleBtn.style.background = 'transparent';
-            toggleBtn.style.borderColor = 'rgba(255,255,255,0.2)';
-        }
-    }
-
-    if (elKolisList) {
-        if (window.isAuditAllMode) {
-            elKolisList.innerHTML = `<span class="badge" style="background: rgba(168,85,247,0.2); color: #e9d5ff; border: 1px solid rgba(168,85,247,0.4); padding: 5px 12px; font-size: 0.85rem; font-weight:700;"><i class="fa-solid fa-layer-group"></i> OKUTULAN KALEMLERİN DEPO EŞLEŞTİRMESİ AKTİF (${activeList.length} Toplam Kutu)</span>`;
-        } else if (window.shelfKoliMap.size === 0) {
-            elKolisList.innerHTML = '<span class="badge" style="background: rgba(88,101,242,0.2); color: #a5b4fc; border: 1px solid rgba(88,101,242,0.4); padding: 5px 12px; font-size: 0.85rem;">Henüz koli yüklenmedi</span>';
-        } else {
-            let badges = [];
-            window.shelfKoliMap.forEach((items, kNo) => {
-                const kOkCount = items.filter(i => isItemScanned(i)).length;
-                const isFullOk = kOkCount === items.length && items.length > 0;
-                const bg = isFullOk ? 'rgba(16,185,129,0.2)' : 'rgba(88,101,242,0.2)';
-                const border = isFullOk ? 'rgba(16,185,129,0.4)' : 'rgba(88,101,242,0.4)';
-                const color = isFullOk ? '#6ee7b7' : '#a5b4fc';
-                badges.push(`<span class="badge" style="background:${bg}; border:1px solid ${border}; color:${color}; padding:5px 10px; font-size:0.82rem; font-weight:600;"><i class="fa-solid fa-box"></i> Koli ${escapeHtml(kNo)} (${kOkCount}/${items.length})</span>`);
-            });
-            elKolisList.innerHTML = badges.join(' ');
-        }
-    }
-
-    const totalCount = activeList.length;
-    const okCount = activeList.filter(i => isItemScanned(i)).length;
-    const missingCount = totalCount - okCount;
-
-    if (elTotal) elTotal.textContent = totalCount;
-    if (elOk) elOk.textContent = okCount;
-    if (elMissing) elMissing.textContent = missingCount;
-
-    if (alertBox && alertText) {
-        if (activeList.length === 0) {
-            alertBox.classList.add('hidden');
-        } else if (missingCount > 0) {
-            alertBox.classList.remove('hidden');
-            alertBox.style.background = 'rgba(239, 68, 68, 0.12)';
-            alertBox.style.borderColor = 'rgba(239, 68, 68, 0.35)';
-            alertText.style.color = '#f87171';
-            alertText.innerHTML = `⚠️ DİKKAT! Toplam <strong>${missingCount} adet ürün/ilaç tereğinizde eksik</strong>. Aşağıdaki listeden Kırmızı renkli olan bu ürünler Bakanlık sisteminden çıkılmalıdır!`;
-        } else {
-            alertBox.classList.remove('hidden');
-            alertBox.style.background = 'rgba(16, 185, 129, 0.12)';
-            alertBox.style.borderColor = 'rgba(16, 185, 129, 0.35)';
-            alertText.style.color = '#6ee7b7';
-            alertText.innerHTML = `🟢 TEBRİKLER! Listedeki tüm koli ve ürünler (${okCount}/${activeList.length}) tereğinizde doğrulandı! Eksik ürün yok.`;
-        }
-    }
-
-    if (!tbody) return;
-
-    if (activeList.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9" style="padding:2rem; text-align:center; color:var(--text-muted);">Tereğe eklenmiş koli veya ürün bulunamadı. Lütfen QR okutun.</td></tr>';
-        return;
-    }
-
-    tbody.innerHTML = activeList.map((item, idx) => {
-        const isOk = isItemScanned(item);
-        const statusHtml = isOk
-            ? `<span style="background:rgba(16,185,129,0.18); color:#6ee7b7; border:1px solid rgba(16,185,129,0.4); padding:4px 10px; border-radius:6px; font-weight:700; font-size:0.78rem;"><i class="fa-solid fa-check"></i> Tereğimde VAR</span>`
-            : `<span style="background:rgba(239,68,68,0.18); color:#f87171; border:1px solid rgba(239,68,68,0.4); padding:4px 10px; border-radius:6px; font-weight:700; font-size:0.78rem;"><i class="fa-solid fa-xmark"></i> Tereğimde YOK</span>`;
-
-        const noteHtml = isOk
-            ? `<span style="color:var(--text-muted); font-size:0.8rem;">Fiziksel depoda doğrulandı</span>`
-            : `<span style="color:#f87171; font-weight:600; font-size:0.8rem;"><i class="fa-solid fa-triangle-exclamation"></i> Tereğümde yok, bakanlıktan çık!</span>`;
-
-        return `
-            <tr style="border-bottom: 1px solid rgba(255,255,255,0.04); background: ${isOk ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.04)'};">
-                <td style="padding: 0.65rem 0.85rem; font-weight:700; color:var(--primary);">${idx + 1}</td>
-                <td style="padding: 0.65rem 0.85rem; font-weight:600; color:var(--text-main); white-space:nowrap;">${escapeHtml(item.product_name || '—')}</td>
-                <td style="padding: 0.65rem 0.85rem; font-weight:600; color:#a5b4fc; white-space:nowrap;">${escapeHtml(item.koli_no || '—')}</td>
-                <td style="padding: 0.65rem 0.85rem; font-family:monospace; font-size:0.78rem; color:var(--text-muted); white-space:nowrap;">${escapeHtml(item.qr || '—')}</td>
-                <td style="padding: 0.65rem 0.85rem; white-space:nowrap;">${escapeHtml(item.seri_no || '—')}</td>
-                <td style="padding: 0.65rem 0.85rem; white-space:nowrap;">${escapeHtml(item.parti_no || '—')}</td>
-                <td style="padding: 0.65rem 0.85rem; white-space:nowrap;">${escapeHtml(item.palet_no || '—')}</td>
-                <td style="padding: 0.65rem 0.85rem; text-align:center; white-space:nowrap;">${statusHtml}</td>
-                <td style="padding: 0.65rem 0.85rem; white-space:nowrap;">${noteHtml}</td>
-            </tr>
-        `;
-    }).join('');
-}
-
-async function handleScanSubmit(rawCode) {
-    if (!rawCode) return;
-    console.log("handleScanSubmit triggered with code:", rawCode);
-
-    const wrapper = document.getElementById('audit-results-wrapper');
-    if (wrapper) wrapper.classList.remove('hidden');
-
-    showAuditMsg(`🔍 Barkod / QR sorgulanıyor: ${rawCode}...`, false);
-    const normCode = rawCode.replace(/\s+/g, '').toUpperCase();
-
-    if (window.shelfItems.length > 0) {
-        const matchedItem = window.shelfItems.find(i => {
-            const iQr = (i.qr || '').replace(/\s+/g, '').toUpperCase();
-            const iSeri = (i.seri_no || '').replace(/\s+/g, '').toUpperCase();
-            return iQr === normCode || normCode.includes(iQr) || iQr.includes(normCode) || (iSeri && iSeri === normCode);
-        });
-
-        if (matchedItem) {
-            if (window.scannedQRsInShelf.has(matchedItem.qr)) {
-                showAuditMsg(`⚠️ Bu ilacın karekodu (${matchedItem.qr}) zaten tereğinizde okutulmuştu!`, true);
-            } else {
-                window.scannedQRsInShelf.add(matchedItem.qr);
-                renderAuditTable();
-                showAuditMsg(`🟢 Ürün tereğinizde doğrulandı (Tereğimde VAR): ${matchedItem.product_name} (Koli: ${matchedItem.koli_no})`, false);
-            }
-            const mainInput = document.getElementById('audit-input-main');
-            if (mainInput) { mainInput.value = ''; mainInput.focus(); }
-            return;
-        }
-    }
-
-    try {
-        const res = await fetch('/api/audit_box?code=' + encodeURIComponent(rawCode));
-        const data = await res.json();
-
-        if (data.success) {
-            const newKoliNo = data.koli_no;
-            const newItems = data.items || [];
-            const isKoliScan = data.is_koli_scan;
-            const scannedQr = data.scanned_qr;
-
-            if (!window.shelfKoliMap.has(newKoliNo)) {
-                window.shelfKoliMap.set(newKoliNo, newItems);
-                rebuildShelfItems();
-            }
-
-            if (isKoliScan) {
-                newItems.forEach(item => {
-                    if (item.qr) window.scannedQRsInShelf.add(item.qr);
-                });
-                renderAuditTable();
-                showAuditMsg(`📦 Koli (${newKoliNo}) barkodu okutuldu! Kolideki ${newItems.length} adet ürünün TAMAMI tereğümde VAR olarak işaretlendi.`, false);
-            } else {
-                if (scannedQr) window.scannedQRsInShelf.add(scannedQr);
-                const targetMatch = window.shelfItems.find(i => {
-                    const iQr = (i.qr || '').replace(/\s+/g, '').toUpperCase();
-                    const iSeri = (i.seri_no || '').replace(/\s+/g, '').toUpperCase();
-                    return iQr === normCode || normCode.includes(iQr) || iQr.includes(normCode) || (iSeri && iSeri === normCode) || (scannedQr && iQr === scannedQr.replace(/\s+/g, '').toUpperCase());
-                });
-
-                if (targetMatch) {
-                    window.scannedQRsInShelf.add(targetMatch.qr);
-                }
-
-                renderAuditTable();
-                if (targetMatch) {
-                    showAuditMsg(`🟢 Ürün okundu (Tereğimde VAR): ${targetMatch.product_name} (Koli: ${newKoliNo}).`, false);
-                } else {
-                    showAuditMsg(`Koli (${newKoliNo}) tereğinize eklendi! Toplam ${newItems.length} ürün stokta bulundu.`, false);
-                }
-            }
-
-            const wrapper = document.getElementById('audit-results-wrapper');
-            if (wrapper) wrapper.classList.remove('hidden');
-
-        } else {
-            showAuditMsg('Sorgulama Hatası: ' + (data.error || 'Bilinmeyen hata'), true);
-        }
-    } catch (err) {
-        showAuditMsg('Sunucu hatası: ' + err.message, true);
-    } finally {
-        const mainInput = document.getElementById('audit-input-main');
-        if (mainInput) {
-            mainInput.value = '';
-            mainInput.focus();
-        }
-    }
-}
-
-window.handleAuditKeypress = function(e) {
-    const code = e.keyCode || e.which;
-    if (code === 13 || code === 10 || code === 9 || e.key === 'Enter') {
-        if (e.preventDefault) e.preventDefault();
-        const el = document.getElementById('audit-input-main');
-        if (el) {
-            const rawCode = el.value.trim();
-            el.value = '';
-            if (rawCode) handleScanSubmit(rawCode);
-        }
-    }
-};
-
-window.handleAuditChange = function(el) {
-    const mainInput = document.getElementById('audit-input-main');
-    if (mainInput && mainInput.value.trim()) {
-        const rawCode = mainInput.value.trim();
-        mainInput.value = '';
-        handleScanSubmit(rawCode);
-    }
-};
-
-window.handleAuditInput = function(el) {
-    // Intentionally no-op to prevent premature truncation of barcode scanner input
-};
-
-window.triggerAuditSubmit = function() {
-    console.log("triggerAuditSubmit called");
-    const el = document.getElementById('audit-input-main');
-    if (el) {
-        const rawCode = el.value.trim();
-        el.value = '';
-        if (rawCode) handleScanSubmit(rawCode);
-    }
-};
-
-window.resetAudit = function() {
-    console.log("resetAudit called");
-    window.shelfKoliMap.clear();
-    window.shelfItems = [];
-    window.scannedQRsInShelf.clear();
-    window.allWarehouseItems = [];
-    window.isAuditAllMode = false;
-
-    renderAuditTable();
-    hideAuditMsg();
-
-    const wrapper = document.getElementById('audit-results-wrapper');
-    if (wrapper) wrapper.classList.add('hidden');
-
-    const mainInput = document.getElementById('audit-input-main');
-    if (mainInput) {
-        mainInput.value = '';
-        mainInput.disabled = false;
-        mainInput.placeholder = "Barkod veya İlaç QR okutun (Enter'a basın)...";
-        mainInput.focus();
-    }
-
-    showAuditMsg('🧹 Terek sayımı temizlendi. Yeni sayım yapabilirsiniz.', false);
-};
-
-window.downloadAuditExcel = async function() {
-    console.log("downloadAuditExcel called");
-    const activeList = window.isAuditAllMode ? window.allWarehouseItems : window.shelfItems;
-    if (activeList.length === 0) return;
-
-    const missingItems = activeList.filter(i => !isItemScanned(i)).map(i => ({
-        "Koli Numarası": i.koli_no,
-        "Ürün Adı": i.product_name,
-        "Karekod": i.qr,
-        "Gtin": i.gtin,
-        "Seri Numarası": i.seri_no,
-        "Parti Numarası": i.parti_no,
-        "Palet Numarası": i.palet_no,
-        "Açıklama": "Tereğümde yok, Bakanlık sitesinden çıkış yapılacak ürün"
-    }));
-
-    if (missingItems.length === 0) {
-        showAuditMsg(`Tereğinizdeki tüm ürünler fiziken mevcut! Bakanlıktan çıkılacak eksik ürün yok.`, false);
-        return;
-    }
-
-    const btnAuditExcel = document.getElementById('btn-dl-audit-excel');
-    if (btnAuditExcel) {
-        btnAuditExcel.disabled = true;
-        btnAuditExcel.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> İndiriliyor...';
-    }
-
-    try {
-        const response = await fetch('/api/download/audit_excel', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(missingItems)
-        });
-
-        if (!response.ok) throw new Error("Excel oluşturulamadı");
-
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `terek_eksik_urunler_bakanlik_cikis.xlsx`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(url);
-    } catch (err) {
-        showAuditMsg("Excel indirme hatası: " + err.message, true);
-    } finally {
-        if (btnAuditExcel) {
-            btnAuditExcel.disabled = false;
-            btnAuditExcel.innerHTML = '<i class="fa-solid fa-file-excel"></i> 📥 Tereğümde Olmayan Ürünleri İndir (Excel)';
-        }
-    }
-};
-
-window.transferMissingToCikis = async function() {
-    const activeList = window.isAuditAllMode ? window.allWarehouseItems : window.shelfItems;
-    if (!activeList || activeList.length === 0) {
-        alert("⚠️ Henüz terek sayımı yapılmadı. Lütfen önce koli veya ürün QR okutun.");
-        return;
-    }
-
-    const missingItems = activeList.filter(i => !isItemScanned(i));
-
-    if (missingItems.length === 0) {
-        alert("🟢 Tereğinizdeki tüm ürünler tam! Çıkış listesine aktarılacak eksik ürün bulunmamaktadır.");
-        return;
-    }
-
-    const count = missingItems.length;
-    const confirmMsg = `🔴 EMİN MİSİNİZ?\n\nTereğinizde bulunmayan (eksik) ${count} adet ürünü Çıkış Listesine aktarmak istediğinize emin misiniz?`;
-    
-    if (!confirm(confirmMsg)) {
-        return;
-    }
-
-    const qrList = missingItems.map(i => i.qr || i.Karekod || i.ham_karekod).filter(Boolean);
-
-    const btn = document.getElementById('btn-audit-send-cikis');
-    const originalHTML = btn ? btn.innerHTML : '';
-    if (btn) {
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Aktarılıyor...';
-    }
-
-    try {
-        const res = await fetch('/api/cikis/toplu_ekle', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ items: qrList })
-        });
-        const data = await res.json();
-        if (data.success) {
-            alert(`✅ BAŞARILI!\n\n${data.added_count} adet eksik ürün Çıkış Listesine aktarıldı.${data.already_count > 0 ? ` (${data.already_count} ürün zaten listedeydi)` : ''}`);
-        } else {
-            alert(`❌ Hata: ${data.error || 'Aktarım gerçekleştirilemedi.'}`);
-        }
-    } catch (err) {
-        alert(`❌ Bağlantı hatası: ${err.message}`);
-    } finally {
-        if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = originalHTML;
-        }
-    }
-};
-
-function formatBytes(bytes, decimals = 2) {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const dm = decimals < 0 ? 0 : decimals;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
-}
-
-// Immediate polling start
-startBkstPolling();
-
-// Direct DOM Event Binding
-document.addEventListener('DOMContentLoaded', () => {
-    console.log("DOM loaded, starting status polling and binding event listeners...");
-    startBkstPolling();
-
-    const btnOpen = document.getElementById('btn-bkst-open');
-    if (btnOpen) {
-        btnOpen.addEventListener('click', (e) => {
-            e.preventDefault();
-            window.triggerBkstOpen();
-        });
-    }
-
-    const btnFetch = document.getElementById('btn-bkst-fetch');
-    if (btnFetch) {
-        btnFetch.addEventListener('click', (e) => {
-            e.preventDefault();
-            window.triggerBkstFetch();
-        });
-    }
-
-    const btnFetchApi = document.getElementById('btn-bkst-fetch-api');
-    if (btnFetchApi) {
-        btnFetchApi.addEventListener('click', (e) => {
-            e.preventDefault();
-            window.triggerBkstFetchApi();
-        });
-    }
-
-    const btnAuditSubmit = document.getElementById('btn-audit-submit-trigger');
-    if (btnAuditSubmit) {
-        btnAuditSubmit.addEventListener('click', (e) => {
-            e.preventDefault();
-            window.triggerAuditSubmit();
-        });
-    }
-
-    const dropZoneSystem = document.getElementById('drop-zone-system');
-    const systemFileInput = document.getElementById('system-file');
-    const fileInfoSystem = document.getElementById('file-info-system');
-    const nameSystem = document.getElementById('name-system');
-    const sizeSystem = document.getElementById('size-system');
-    const btnClearSystem = document.getElementById('btn-clear-system');
-    
-    const dropZoneSales = document.getElementById('drop-zone-sales');
-    const salesFileInput = document.getElementById('sales-file');
-    const fileInfoSales = document.getElementById('file-info-sales');
-    const nameSales = document.getElementById('name-sales');
-    const sizeSales = document.getElementById('size-sales');
-    const btnClearSales = document.getElementById('btn-clear-sales');
-
-    const btnCompare = document.getElementById('btn-compare');
-    const statTotalInitial = document.getElementById('val-total-system') || document.getElementById('stat-total-initial');
-    const statTotalSold = document.getElementById('val-total-sales') || document.getElementById('stat-total-sold');
-    const statTotalMatched = document.getElementById('val-matched') || document.getElementById('stat-total-matched');
-    const statTotalRemaining = document.getElementById('val-remaining') || document.getElementById('stat-total-remaining');
-    
-    let fileSystem = null;
-    let fileSales = null;
-
-    function checkReadyToCompare() {
-        if (btnCompare) btnCompare.disabled = !(fileSystem && fileSales);
-    }
-
-    function setupDragAndDrop(dropZone, fileInput, onSelect) {
-        if (!dropZone || !fileInput) return;
-        ['dragenter', 'dragover'].forEach(eventName => {
-            dropZone.addEventListener(eventName, (e) => {
-                e.preventDefault();
-                dropZone.classList.add('dragover');
-            }, false);
-        });
-
-        ['dragleave', 'drop'].forEach(eventName => {
-            dropZone.addEventListener(eventName, (e) => {
-                e.preventDefault();
-                dropZone.classList.remove('dragover');
-            }, false);
-        });
-
-        dropZone.addEventListener('drop', (e) => {
-            const dt = e.dataTransfer;
-            const files = dt.files;
-            if (files.length > 0) { onSelect(files[0]); }
-        });
-
-        fileInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) { onSelect(e.target.files[0]); }
-        });
-    }
-
-    if (dropZoneSystem && systemFileInput) {
-        setupDragAndDrop(dropZoneSystem, systemFileInput, (file) => {
-            fileSystem = file;
-            nameSystem.textContent = file.name;
-            sizeSystem.textContent = formatBytes(file.size);
-            dropZoneSystem.classList.add('hidden');
-            fileInfoSystem.classList.remove('hidden');
-            checkReadyToCompare();
-        });
-    }
-
-    if (dropZoneSales && salesFileInput) {
-        setupDragAndDrop(dropZoneSales, salesFileInput, (file) => {
-            fileSales = file;
-            nameSales.textContent = file.name;
-            sizeSales.textContent = formatBytes(file.size);
-            dropZoneSales.classList.add('hidden');
-            fileInfoSales.classList.remove('hidden');
-            checkReadyToCompare();
-        });
-    }
-
-    if (btnClearSystem) {
-        btnClearSystem.addEventListener('click', () => {
-            fileSystem = null;
-            systemFileInput.value = '';
-            fileInfoSystem.classList.add('hidden');
-            dropZoneSystem.classList.remove('hidden');
-            checkReadyToCompare();
-        });
-    }
-
-    if (btnClearSales) {
-        btnClearSales.addEventListener('click', () => {
-            fileSales = null;
-            salesFileInput.value = '';
-            fileInfoSales.classList.add('hidden');
-            dropZoneSales.classList.remove('hidden');
-            checkReadyToCompare();
-        });
-    }
-
-    if (btnCompare) {
-        btnCompare.addEventListener('click', async () => {
-            if (!fileSystem || !fileSales) return;
-
-            const formData = new FormData();
-            formData.append('system_file', fileSystem);
-            formData.append('sales_file', fileSales);
-            
-            btnCompare.disabled = true;
-            btnCompare.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Karşılaştırılıyor...`;
-            
-            try {
-                const response = await fetch('/api/compare', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                const data = await response.json();
-                
-                if (response.ok && data.success) {
-                    if (statTotalInitial) statTotalInitial.textContent = data.stats.total_system;
-                    if (statTotalSold) statTotalSold.textContent = data.stats.total_sales;
-                    if (statTotalMatched) statTotalMatched.textContent = data.stats.matched;
-                    if (statTotalRemaining) statTotalRemaining.textContent = data.stats.remaining;
-
-                    const overviewSection = document.getElementById('results-overview');
-                    if (overviewSection) overviewSection.classList.remove('hidden');
-                } else {
-                    alert('Hata: ' + (data.error || 'Bilinmeyen bir hata oluştu.'));
-                }
-            } catch (err) {
-                console.error(err);
-                alert('Karşılaştırma hatası: ' + err.message);
-            } finally {
-                btnCompare.disabled = false;
-                btnCompare.innerHTML = `<i class="fa-solid fa-bolt"></i> Karşılaştır ve Analiz Et`;
-            }
-        });
-    }
-
-    const btnBkstClose = document.getElementById('btn-bkst-close');
-    const btnAuditResetKoli = document.getElementById('btn-audit-reset-koli');
-    const btnAuditExcel = document.getElementById('btn-dl-audit-excel');
-    const btnAuditToggleMode = document.getElementById('btn-audit-toggle-mode');
-
-    if (btnBkstClose) {
-        btnBkstClose.addEventListener('click', async () => {
-            if (window.bkstPollTimer) { clearInterval(window.bkstPollTimer); window.bkstPollTimer = null; }
-            await fetch('/api/bkst/close', { method: 'POST' });
-            setBkstUI('closed', '');
-        });
-    }
-
-    if (btnAuditToggleMode) {
-        btnAuditToggleMode.addEventListener('click', (e) => {
-            e.preventDefault();
-            window.toggleAuditMode();
-        });
-    }
-
-    if (btnAuditResetKoli) {
-        btnAuditResetKoli.addEventListener('click', (e) => {
-            e.preventDefault();
-            window.resetAudit();
-        });
-    }
-
-    if (btnAuditExcel) {
-        btnAuditExcel.addEventListener('click', (e) => {
-            e.preventDefault();
-            window.downloadAuditExcel();
-        });
-    }
-
-    // Sürüm Bilgisi Yükleme
-    loadSystemVersion();
-});
-
-function loadSystemVersion() {
-    fetch('/api/system/version')
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                const verStr = data.version || 'v3.1.0';
-                document.querySelectorAll('#versionText, .version-text').forEach(el => {
-                    el.textContent = verStr;
-                });
-                
-                const h = document.getElementById('modalCommitHash');
-                const d = document.getElementById('modalCommitDate');
-                const m = document.getElementById('modalCommitMsg');
-                if (h) h.textContent = data.commit_hash || verStr;
-                if (d) d.textContent = data.commit_date || '08.10.2026';
-                if (m) m.textContent = data.commit_msg || 'v3.1.0: Tam ekran masaüstü modu, SQLite DB entegrasyonu ve stabilite güncellemeleri';
-            }
-        })
-        .catch(e => console.warn('Version check error:', e));
-}
-
-window.showVersionModal = function() {
-    let modal = document.getElementById('versionModal');
-    if (!modal) {
-        modal = document.createElement('div');
-        modal.id = 'versionModal';
-        modal.className = 'modal';
-        modal.style.cssText = 'display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px);';
-        document.body.appendChild(modal);
-    }
-    
-    modal.innerHTML = `
-    <div style="background:#1e293b; color:#fff; max-width:450px; margin:10% auto; padding:24px; border-radius:16px; border:1px solid rgba(255,255,255,0.1); box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
-        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:12px; margin-bottom:16px;">
-            <h3 style="margin:0; font-size:1.15rem; color:#38bdf8; display:flex; align-items:center; gap:8px;">
-                <i class="fa-solid fa-circle-info"></i> Uygulama Sürüm Bilgisi
-            </h3>
-            <span onclick="closeVersionModal()" style="cursor:pointer; font-size:1.4rem; color:#94a3b8;">&times;</span>
-        </div>
-        <div style="font-size:0.95rem; line-height:1.8;">
-            <p style="margin:6px 0;"><strong>📦 Sürüm Kodu:</strong> <span id="modalCommitHash" style="color:#38bdf8; font-family:monospace; font-weight:bold;">v3.1.0</span></p>
-            <p style="margin:6px 0;"><strong>📅 Son Güncelleme:</strong> <span id="modalCommitDate" style="color:#f1f5f9;">08.10.2026</span></p>
-            <p style="margin:6px 0;"><strong>📝 Son Değişiklik Notu:</strong></p>
-            <div id="modalCommitMsg" style="background:#0f172a; padding:10px 14px; border-radius:8px; font-size:0.85rem; color:#cbd5e1; border:1px solid rgba(255,255,255,0.05); margin-top:4px;">v3.1.0: Tam ekran masaüstü modu, SQLite DB entegrasyonu ve genel stabilite güncellemeleri</div>
-            <div style="margin-top:16px; background:rgba(34, 197, 94, 0.15); border:1px solid rgba(34, 197, 94, 0.3); color:#4ade80; padding:8px 12px; border-radius:8px; text-align:center; font-size:0.85rem; font-weight:600;">
-                🟢 GitHub Sunucusu ile Eşitlendi & Güncel
-            </div>
-        </div>
-        <div style="margin-top:16px; text-align:right;">
-            <button onclick="closeVersionModal()" style="background:#3b82f6; color:#fff; border:none; padding:8px 18px; border-radius:8px; font-weight:600; cursor:pointer;">Kapat</button>
-        </div>
-    </div>`;
-    
-    modal.style.display = 'block';
-    loadSystemVersion();
-};
-
-window.closeVersionModal = function() {
-    const modal = document.getElementById('versionModal');
-    if (modal) modal.style.display = 'none';
-};
-
-// ── Heartbeat Auto-Shutdown Monitor (Sekme Kapatılınca Sunucu Kapanır) ──────────
-(function startHeartbeat() {
-    function sendPing() {
-        fetch('/api/system/heartbeat', { method: 'POST' }).catch(() => {});
-    }
-    sendPing();
-    setInterval(sendPing, 3000);
-    document.addEventListener('visibilitychange', () => {
-        if (!document.hidden) {
-            sendPing();
-        }
-    });
-})();
-
-function cleanUserName(name) {
-    if (!name) return "";
-    let cleaned = String(name).trim().replace(/^\d+[\s\-]+/, "");
-    if (cleaned.includes(" (")) {
-        cleaned = cleaned.split(" (")[0].trim();
-    }
-    return cleaned || String(name).trim();
-}
-
-// ── Kullanıcı Bilgisi ve Oturum Kapatma (Logout) ──────────────────────────────────────────
-async function loadUserInfo() {
-    const userNameEl = document.getElementById('sidebar-user-name');
-    const cachedName = localStorage.getItem('cached_user_name');
-    if (userNameEl && cachedName && (userNameEl.textContent === 'Giriş Yapılmadı' || !userNameEl.textContent.trim())) {
-        userNameEl.textContent = cachedName;
-        userNameEl.title = cachedName;
-    }
-    try {
-        const res = await fetch('/api/system/user_info');
-        const data = await res.json();
-        if (data.unauthenticated) {
-            localStorage.removeItem('cached_user_name');
-            if (userNameEl) userNameEl.textContent = 'Giriş Yapılmadı';
-            if (window.location.pathname !== '/login') {
-                window.location.href = '/login';
-            }
-            return;
-        }
-        if (userNameEl) {
-            const displayName = cleanUserName(data.user_name || data.username || 'Giriş Yapılmadı');
-            localStorage.setItem('cached_user_name', displayName);
-            if (userNameEl.textContent !== displayName) {
-                userNameEl.textContent = displayName;
-                userNameEl.title = displayName;
-            }
-        }
-    } catch (e) {
-        console.error("User info error:", e);
-    }
-}
-
-async function logoutUser() {
-    if (!confirm("Oturumu kapatmak ve bakanlık giriş bilgilerinizi silmek istediğinize emin misiniz?")) {
-        return;
-    }
-    try {
-        sessionStorage.removeItem('bkst_auto_synced');
-        localStorage.removeItem('cached_user_name');
-        const res = await fetch('/api/system/logout', { method: 'POST' });
-        const data = await res.json();
-        if (data.success) {
-            window.location.href = '/login';
-        } else {
-            alert(data.error || "Oturum kapatılamadı.");
-        }
-    } catch (e) {
-        alert("Bağlantı hatası: " + e.message);
-    }
-}
-
-window.logoutUser = logoutUser;
-
-// ── Otomatik Bakanlık Veri Senkronizasyonu (Uygulama Açıldığında) ──────────────────────────
-async function runAutoBkstSync() {
-    if (window.location.pathname === '/login') return;
-
-    if (sessionStorage.getItem('app_launch_synced')) {
-        return;
-    }
-    sessionStorage.setItem('app_launch_synced', 'true');
-
-    let loader = document.getElementById('auto-sync-loader');
-    if (!loader) {
-        loader = document.createElement('div');
-        loader.id = 'auto-sync-loader';
-        loader.style.cssText = 'display:flex; position:fixed; z-index:99999; left:0; top:0; width:100%; height:100%; background:rgba(10, 11, 16, 0.94); backdrop-filter:blur(14px); flex-direction:column; align-items:center; justify-content:center; text-align:center;';
-        loader.innerHTML = `
-            <div style="background:rgba(15, 23, 42, 0.96); border:1px solid rgba(56, 189, 248, 0.35); border-radius:24px; padding:2.8rem 3rem; max-width:520px; width:90%; box-shadow:0 25px 50px rgba(0,0,0,0.8); transition: all 0.3s ease;">
-                <div id="loader-icon-box" style="width:80px; height:80px; border-radius:50%; background:rgba(56,189,248,0.15); border:2px solid rgba(56,189,248,0.4); margin:0 auto 1.5rem auto; display:flex; align-items:center; justify-content:center; transition: all 0.3s ease;">
-                    <i id="loader-icon" class="fa-solid fa-cloud-arrow-down fa-bounce" style="font-size:2.4rem; color:#38bdf8;"></i>
-                </div>
-                <h2 id="loader-title" style="font-family:var(--font-outfit, sans-serif); font-size:1.45rem; font-weight:800; color:#fff; margin:0 0 0.6rem 0;">
-                    Bakanlıktan Güncel Veriler Çekiliyor...
-                </h2>
-                <p id="loader-status" style="font-size:0.95rem; color:#94a3b8; margin:0 0 1.6rem 0; line-height:1.6; transition: all 0.3s ease;">
-                    Lütfen bekleyin, BKST sunucusundan güncel stok ve karekod verileriniz otomatik çekiliyor.
-                </p>
-                <div style="background:rgba(255,255,255,0.06); height:6px; border-radius:10px; overflow:hidden; width:100%;">
-                    <div id="loader-progress-bar" style="background:linear-gradient(90deg, #38bdf8, #818cf8); height:100%; width:100%; transition: background 0.4s ease, width 0.4s ease;"></div>
-                </div>
-            </div>
-        `;
-        document.body.appendChild(loader);
-    } else {
-        loader.style.display = 'flex';
-    }
-
-    const title = document.getElementById('loader-title');
-    const status = document.getElementById('loader-status');
-    const iconBox = document.getElementById('loader-icon-box');
-    const icon = document.getElementById('loader-icon');
-    const progressBar = document.getElementById('loader-progress-bar');
-
-    try {
-        const res = await fetch('/api/bkst/fetch_api', { method: 'POST' });
-        const data = await res.json();
-
-        if (data.unauthenticated) {
-            if (loader) loader.style.display = 'none';
-            if (window.location.pathname !== '/login') {
-                window.location.href = '/login';
-            }
-            return;
-        }
-
-        if (data.success) {
-            const count = data.item_count !== undefined ? data.item_count : 0;
-            if (title) title.textContent = "✅ Veriler Başarıyla Çekildi!";
-            if (status) {
-                status.style.color = "#4ade80";
-                status.style.fontWeight = "700";
-                status.style.fontSize = "1.05rem";
-                status.textContent = `Bakanlıktan Toplam ${count} Adet Stok Verisi Çekildi. Sisteme Aktarılıyor...`;
-            }
-            if (iconBox) {
-                iconBox.style.background = "rgba(34, 197, 94, 0.2)";
-                iconBox.style.borderColor = "rgba(34, 197, 94, 0.5)";
-            }
-            if (icon) {
-                icon.className = "fa-solid fa-circle-check";
-                icon.style.color = "#4ade80";
-            }
-            if (progressBar) {
-                progressBar.style.background = "#22c55e";
-            }
-        } else {
-            if (title) title.textContent = "⚠️ Veri Çekilirken Uyarı";
-            if (status) {
-                status.style.color = "#f87171";
-                status.textContent = data.error || "Bakanlık API'sine bağlanılamadı.";
-            }
-        }
-
-        await new Promise(resolve => setTimeout(resolve, 2500));
-    } catch (err) {
-        console.error('Otomatik BKST veri çekme hatası:', err);
-        if (title) title.textContent = "❌ Bağlantı Hatası";
-        if (status) status.textContent = "Sunucu ile bağlantı kurulamadı.";
-        await new Promise(resolve => setTimeout(resolve, 2000));
-    } finally {
-        if (loader) loader.style.display = 'none';
-        if (typeof window.loadWarehouseStock === 'function') {
-            window.loadWarehouseStock();
-        }
-    }
-}
-
-async function checkWebSystemUpdate() {
-    if (sessionStorage.getItem('update_checked')) return;
-    sessionStorage.setItem('update_checked', 'true');
-    try {
-        const res = await fetch('/api/system/check_update');
-        const data = await res.json();
-        if (data && data.has_update) {
-            showUpdateOverlay(data.remote_version || "Yeni Sürüm", data.message || "Sistem güncelleniyor...");
-            await applyWebSystemUpdate();
-        }
-    } catch (e) {
-        console.log("Check update error:", e);
-    }
-}
-
-function showUpdateOverlay(version, message) {
-    let overlay = document.getElementById('web-update-overlay');
-    if (!overlay) {
-        overlay = document.createElement('div');
-        overlay.id = 'web-update-overlay';
-        overlay.style.cssText = `
-            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-            background: rgba(15, 23, 42, 0.96); backdrop-filter: blur(12px);
-            z-index: 999999; display: flex; align-items: center; justify-content: center;
-            font-family: 'Inter', sans-serif; color: #fff;
-        `;
-        overlay.innerHTML = `
-            <div style="background: rgba(30, 41, 59, 0.9); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 16px; padding: 2.5rem 3rem; text-align: center; max-width: 480px; width: 90%; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);">
-                <div style="font-size: 3rem; margin-bottom: 1rem;">🔄</div>
-                <h2 style="font-size: 1.3rem; font-weight: 700; margin-bottom: 0.5rem; color: #38bdf8;">SİSTEM GÜNCELLEMESİ YÜKLENİYOR</h2>
-                <p id="web-update-ver" style="font-size: 0.95rem; color: #94a3b8; margin-bottom: 1.5rem;">Sürüm ${version} indiriliyor. Lütfen bekleyin...</p>
-                <div style="width: 100%; height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden;">
-                    <div id="web-update-bar" style="width: 40%; height: 100%; background: linear-gradient(90deg, #38bdf8, #818cf8); border-radius: 4px; transition: width 0.4s ease;"></div>
-                </div>
-            </div>
-        `;
-        document.body.appendChild(overlay);
-    }
-}
-
-async function applyWebSystemUpdate() {
-    const bar = document.getElementById('web-update-bar');
-    const ver = document.getElementById('web-update-ver');
-    if (bar) bar.style.width = '75%';
-    try {
-        const res = await fetch('/api/system/apply_update', { method: 'POST' });
-        const data = await res.json();
-        if (bar) bar.style.width = '100%';
-        if (ver) ver.textContent = "Güncelleme tamamlandı. Yeniden başlatılıyor...";
-        
-        for (let i = 0; i < 30; i++) {
-            await new Promise(r => setTimeout(r, 1000));
-            try {
-                const checkRes = await fetch('/api/system/version');
-                if (checkRes.ok) {
-                    break;
-                }
-            } catch (e) {}
-        }
-        window.location.reload();
-    } catch (e) {
-        console.error("Apply update error:", e);
-    }
-}
-
-function initApp() {
-    loadUserInfo();
-    runAutoBkstSync();
-}
-
-if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initApp);
-} else {
-    initApp();
-}
-
-
-```
-
----
-
-### 📁 `templates/index.html`
-
-```html
-<!DOCTYPE html>
-<html lang="tr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>QR Compare</title>
-    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
-    <link rel="shortcut icon" href="/static/favicon.ico">
-    <!-- Google Fonts Outfit & Inter -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
-    <!-- FontAwesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="/static/style.css">
-</head>
-<body class="sidebar-layout">
-    <div class="glass-bg-decor1"></div>
-    <div class="glass-bg-decor2"></div>
-    
-    <div class="app-wrapper">
-        <!-- SOL DİKİNE SIDEBAR NAVİGASYON -->
-        <aside class="sidebar">
-            <div class="sidebar-brand">
-                <i class="fa-solid fa-qrcode logo-icon"></i>
-                <div>
-                    <h2>QR Compare</h2>
-                    <p>Akıllı Stok Sistemi</p>
-                </div>
-            </div>
-
-            <nav class="sidebar-menu">
-                <a href="/cikis" class="sidebar-link">
-                    <i class="fa-solid fa-box-open"></i>
-                    <span>Barkod Okut & Çıkış</span>
-                </a>
-                <a href="/cikis-listesi" class="sidebar-link">
-                    <i class="fa-solid fa-list-check"></i>
-                    <span>Çıkış Listesi</span>
-                </a>
-                <a href="/stok-esitleme" class="sidebar-link active">
-                    <i class="fa-solid fa-chart-line"></i>
-                    <span>Stok & Eşitleme</span>
-                </a>
-                <a href="/depo_stoklari" class="sidebar-link">
-                    <i class="fa-solid fa-warehouse"></i>
-                    <span>Depomdaki Stoklar</span>
-                </a>
-                <a href="/depo_kabul" class="sidebar-link">
-                    <i class="fa-solid fa-boxes-packing"></i>
-                    <span>Depoya Kabul Et</span>
-                </a>
-                <a href="/kullaniciya-satis" class="sidebar-link">
-                    <i class="fa-solid fa-user-tag"></i>
-                    <span>Kullanıcıya Satış (Demo)</span>
-                </a>
-            </nav>
-
-            <div class="sidebar-footer">
-                <div class="system-status-pill">
-                    <span class="status-indicator online"></span>
-                    <span>Sistem Aktif</span>
-                </div>
-                <div class="user-profile-card">
-                    <div class="user-profile-info">
-                        <i class="fa-solid fa-user-circle user-avatar-icon"></i>
-                        <span id="sidebar-user-name" class="user-name-title">{{ current_user_name }}</span>
-                    </div>
-                    <button type="button" class="btn-logout-icon" onclick="logoutUser()" title="Oturumdan Çıkış Yap">
-                        <i class="fa-solid fa-power-off"></i>
-                    </button>
-                </div>
-                <div class="version-pill" id="versionBadge" onclick="showVersionModal()" title="Sürüm Bilgisi">
-                    <i class="fa-solid fa-code-branch" style="color: #38bdf8;"></i>
-                    <span id="versionText">{{ current_app_version }}</span>
-                </div>
-            </div>
-        </aside>
-
-        <!-- SAĞ ANA İÇERİK ALANI -->
-        <main class="main-content">
-
-        <!-- SÜRÜM & GÜNCELLEME MODALI -->
-        <div id="versionModal" class="modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px);">
-            <div style="background:#1e293b; color:#fff; max-width:450px; margin:10% auto; padding:24px; border-radius:16px; border:1px solid rgba(255,255,255,0.1); box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
-                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:12px; margin-bottom:16px;">
-                    <h3 style="margin:0; font-size:1.15rem; color:#38bdf8; display:flex; align-items:center; gap:8px;">
-                        <i class="fa-solid fa-circle-info"></i> Uygulama Sürüm Bilgisi
-                    </h3>
-                    <span onclick="closeVersionModal()" style="cursor:pointer; font-size:1.4rem; color:#94a3b8;">&times;</span>
-                </div>
-                <div style="font-size:0.95rem; line-height:1.8;">
-                    <p style="margin:6px 0;"><strong>📦 Sürüm Kodu:</strong> <span id="modalCommitHash" style="color:#38bdf8; font-family:monospace; font-weight:bold;">-</span></p>
-                    <p style="margin:6px 0;"><strong>📅 Son Güncelleme:</strong> <span id="modalCommitDate" style="color:#f1f5f9;">-</span></p>
-                    <p style="margin:6px 0;"><strong>📝 Son Değişiklik Notu:</strong></p>
-                    <div id="modalCommitMsg" style="background:#0f172a; padding:10px 14px; border-radius:8px; font-size:0.85rem; color:#cbd5e1; border:1px solid rgba(255,255,255,0.05); margin-top:4px;">-</div>
-                    <div style="margin-top:16px; background:rgba(34, 197, 94, 0.15); border:1px solid rgba(34, 197, 94, 0.3); color:#4ade80; padding:8px 12px; border-radius:8px; text-align:center; font-size:0.85rem; font-weight:600;">
-                        🟢 GitHub Sunucusu ile Eşitlendi & Güncel
-                    </div>
-                </div>
-                <div style="text-align:right; margin-top:20px;">
-                    <button onclick="closeVersionModal()" style="background:#3b82f6; color:#fff; border:none; padding:8px 18px; border-radius:8px; font-weight:600; cursor:pointer;">Kapat</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- HIZLI REHBER BAR -->
-        <div class="quick-guide-bar">
-            <div class="guide-item">
-                <span class="guide-num">1</span>
-                <div>
-                    <strong>Bakanlık Verisi</strong>
-                    <span>Sunucudan otomatik çekilir</span>
-                </div>
-            </div>
-            <div class="guide-item">
-                <span class="guide-num">2</span>
-                <div>
-                    <strong>Terek (Raf) Sayımı Yap</strong>
-                    <span>Koli / Ürün QR okutarak eksikleri bulun</span>
-                </div>
-            </div>
-            <div class="guide-item">
-                <span class="guide-num">3</span>
-                <div>
-                    <strong>Çıkış Listesine Aktar</strong>
-                    <span>Tereğinizde olmayan ürünleri tek tıkla düşüş yapın</span>
-                </div>
-            </div>
-        </div>
-
-        <!-- OTOMATİK YÜKLEME EKRANI (APPLICATION START LOADING OVERLAY) -->
-        <div id="auto-sync-loader" style="display:none; position:fixed; z-index:99999; left:0; top:0; width:100%; height:100%; background:rgba(10, 11, 16, 0.94); backdrop-filter:blur(14px); flex-direction:column; align-items:center; justify-content:center; text-align:center;">
-            <div style="background:rgba(15, 23, 42, 0.96); border:1px solid rgba(56, 189, 248, 0.35); border-radius:24px; padding:2.8rem 3rem; max-width:520px; width:90%; box-shadow:0 25px 50px rgba(0,0,0,0.8); transition: all 0.3s ease;">
-                <div id="loader-icon-box" style="width:80px; height:80px; border-radius:50%; background:rgba(56,189,248,0.15); border:2px solid rgba(56,189,248,0.4); margin:0 auto 1.5rem auto; display:flex; align-items:center; justify-content:center; transition: all 0.3s ease;">
-                    <i id="loader-icon" class="fa-solid fa-cloud-arrow-down fa-bounce" style="font-size:2.4rem; color:#38bdf8;"></i>
-                </div>
-                <h2 id="loader-title" style="font-family:var(--font-outfit); font-size:1.45rem; font-weight:800; color:#fff; margin:0 0 0.6rem 0;">
-                    Bakanlıktan Güncel Veriler Çekiliyor...
-                </h2>
-                <p id="loader-status" style="font-size:0.95rem; color:var(--text-muted); margin:0 0 1.6rem 0; line-height:1.6; transition: all 0.3s ease;">
-                    Lütfen bekleyin, BKST sunucusundan güncel stok ve karekod verileriniz otomatik çekiliyor.
-                </p>
-                <div style="background:rgba(255,255,255,0.06); height:6px; border-radius:10px; overflow:hidden; width:100%;">
-                    <div id="loader-progress-bar" style="background:linear-gradient(90deg, #38bdf8, #818cf8); height:100%; width:100%; transition: background 0.4s ease, width 0.4s ease;"></div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Terek (Raf) QR Sayım & Stok Eşitleme Paneli -->
-        <section class="panel glass-card audit-panel">
-            <div class="panel-head-flex">
-                <div class="panel-title-group">
-                    <i class="fa-solid fa-box-archive icon-green"></i>
-                    <div>
-                        <h2>Terek (Raf) QR Sayım & Stok Eşitleme</h2>
-                        <p class="panel-subtitle">Koli veya ürün QR okutun. Bakanlık stoğundaki eksik ürünler otomatik tespit edilir.</p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Barkod Okutma Kutusu -->
-            <div class="scan-input-wrapper">
-                <i class="fa-solid fa-barcode scan-icon"></i>
-                <input type="text" id="audit-input-main" onkeydown="window.handleAuditKeypress(event)" placeholder="Barkod veya İlaç QR okutun (Enter'a basın)..." autocomplete="off">
-                <button type="button" id="btn-audit-submit-trigger" class="btn btn-success btn-scan">
-                    <i class="fa-solid fa-magnifying-glass"></i> Oku / Ekle
-                </button>
-            </div>
-
-            <!-- Bildirim Kutusu -->
-            <div id="audit-msg-box" class="hidden audit-msg"></div>
-
-            <!-- Sayım Sonuçları Paneli -->
-            <div id="audit-results-wrapper" class="hidden">
-
-                <!-- Stok Eşitleme Bildirimi -->
-                <div id="audit-sync-alert-box" class="sync-alert-box">
-                    <i class="fa-solid fa-triangle-exclamation alert-icon"></i>
-                    <div id="audit-sync-alert-text" class="alert-text">
-                        Tereğinizde fiziken bulunmayan 🔴 0 adet ürünü Bakanlık sitesinden ÇIKIŞ yapmalısınız!
-                    </div>
-                </div>
-
-                <!-- İncelenen Koliler -->
-                <div class="koli-badges-container">
-                    <span class="koli-badges-label"><i class="fa-solid fa-boxes-packing color-blue"></i> İncelenen Koliler:</span>
-                    <div id="audit-kolis-list" class="koli-badges-list">
-                        <span class="badge">Henüz koli yüklenmedi</span>
-                    </div>
-                </div>
-
-                <!-- İstatistik Özeti -->
-                <div class="audit-stats-grid">
-                    <div class="audit-stat-card">
-                        <span class="audit-stat-lbl">Bakanlık Koli Stoğu</span>
-                        <span id="audit-cnt-total" class="audit-stat-val">0 Adet</span>
-                    </div>
-                    <div class="audit-stat-card card-ok">
-                        <span class="audit-stat-lbl">🟢 Tereğimde VAR</span>
-                        <span id="audit-cnt-ok" class="audit-stat-val text-ok">0 Adet</span>
-                    </div>
-                    <div class="audit-stat-card card-missing">
-                        <span class="audit-stat-lbl">🔴 Tereğimde YOK</span>
-                        <span id="audit-cnt-missing" class="audit-stat-val text-missing">0 Adet</span>
-                    </div>
-                </div>
-
-                <!-- Butonlar -->
-                <div class="audit-actions">
-                    <button class="btn btn-purple btn-sm" id="btn-audit-toggle-mode" type="button">
-                        <i class="fa-solid fa-layer-group"></i> 📊 Okutulan Kalemleri Tüm Depoyla Karşılaştır
-                    </button>
-                    <button class="btn btn-danger btn-sm" id="btn-audit-send-cikis" type="button" onclick="transferMissingToCikis()">
-                        <i class="fa-solid fa-box-open"></i> 🔴 Tereğimde Olmayanları Çıkış Listesine Aktar
-                    </button>
-                    <button class="btn btn-success btn-sm" id="btn-dl-audit-excel" type="button">
-                        <i class="fa-solid fa-file-excel"></i> 📥 Tereğümde Olmayan Ürünleri İndir (Excel)
-                    </button>
-                    <button id="btn-audit-reset-koli" class="btn btn-outline btn-sm" type="button">
-                        <i class="fa-solid fa-rotate-left"></i> Sayımı Temizle
-                    </button>
-                </div>
-
-                <!-- Tablo -->
-                <div class="table-scroll-container">
-                    <table class="data-table">
-                        <thead>
-                            <tr>
-                                <th>#</th>
-                                <th>Ürün Adı</th>
-                                <th>Koli No</th>
-                                <th>Karekod</th>
-                                <th>Seri No</th>
-                                <th>Parti No</th>
-                                <th>Palet No</th>
-                                <th style="text-align: center;">Terek Durumu</th>
-                                <th>Açıklama</th>
-                            </tr>
-                        </thead>
-                        <tbody id="audit-table-body"></tbody>
-                    </table>
-                </div>
-            </div>
-        </section>
-
-        <footer class="app-footer-bottom">
-            <p>&copy; 2026 QR Compare - Akıllı Stok & Karekod Eşitleme</p>
-        </footer>
-        </main>
-    </div>
-
-    <script src="/static/app.js?v=20261005_v3000"></script>
-</body>
-</html>
-
-```
-
----
-
 ### 📁 `templates/cikis.html`
 
 ```html
@@ -6285,9 +6523,9 @@ if (document.readyState === "loading") {
             </nav>
 
             <div class="sidebar-footer">
-                <div class="system-status-pill">
-                    <span class="status-indicator online"></span>
-                    <span>Sistem Aktif</span>
+                <div class="system-status-pill {{ 'offline' if not is_system_active else '' }}">
+                    <span class="status-indicator {{ system_status_cls | default('online') }}"></span>
+                    <span>{{ system_status_text | default('Sistem Aktif') }}</span>
                 </div>
                 <div class="user-profile-card">
                     <div class="user-profile-info">
@@ -6597,10 +6835,10 @@ function esc(str) {
                 <span onclick="closeVersionModal()" style="cursor:pointer; font-size:1.4rem; color:#94a3b8;">&times;</span>
             </div>
             <div style="font-size:0.95rem; line-height:1.8;">
-                <p style="margin:6px 0;"><strong>📦 Sürüm Kodu:</strong> <span id="modalCommitHash" style="color:#38bdf8; font-family:monospace; font-weight:bold;">v3.1.0</span></p>
-                <p style="margin:6px 0;"><strong>📅 Son Güncelleme:</strong> <span id="modalCommitDate" style="color:#f1f5f9;">08.10.2026</span></p>
+                <p style="margin:6px 0;"><strong>📦 Sürüm Kodu:</strong> <span id="modalCommitHash" style="color:#38bdf8; font-family:monospace; font-weight:bold;">{{ current_app_commit }}</span></p>
+                <p style="margin:6px 0;"><strong>📅 Son Güncelleme:</strong> <span id="modalCommitDate" style="color:#f1f5f9;">{{ current_app_date }}</span></p>
                 <p style="margin:6px 0;"><strong>📝 Son Değişiklik Notu:</strong></p>
-                <div id="modalCommitMsg" style="background:#0f172a; padding:10px 14px; border-radius:8px; font-size:0.85rem; color:#cbd5e1; border:1px solid rgba(255,255,255,0.05); margin-top:4px;">v3.1.0: Tam ekran masaüstü modu, SQLite DB entegrasyonu, otomatik kapanma ve stabilite güncellemeleri</div>
+                <div id="modalCommitMsg" style="background:#0f172a; padding:10px 14px; border-radius:8px; font-size:0.85rem; color:#cbd5e1; border:1px solid rgba(255,255,255,0.05); margin-top:4px;">{{ current_app_msg }}</div>
                 <div style="margin-top:16px; background:rgba(34, 197, 94, 0.15); border:1px solid rgba(34, 197, 94, 0.3); color:#4ade80; padding:8px 12px; border-radius:8px; text-align:center; font-size:0.85rem; font-weight:600;">
                     🟢 GitHub Sunucusu ile Eşitlendi & Güncel
                 </div>
@@ -6838,9 +7076,9 @@ function esc(str) {
             </nav>
 
             <div class="sidebar-footer">
-                <div class="system-status-pill">
-                    <span class="status-indicator online"></span>
-                    <span>Sistem Aktif</span>
+                <div class="system-status-pill {{ 'offline' if not is_system_active else '' }}">
+                    <span class="status-indicator {{ system_status_cls | default('online') }}"></span>
+                    <span>{{ system_status_text | default('Sistem Aktif') }}</span>
                 </div>
                 <div class="user-profile-card">
                     <div class="user-profile-info">
@@ -7029,11 +7267,16 @@ async function loadList() {
     }
 }
 
+function isTekrarKayit(r) {
+    if (!r) return false;
+    return r.tekrar_uyari === 1 || r.tekrar_uyari === '1';
+}
+
 function updateStats() {
     document.getElementById('stat-toplam').textContent = allData.length;
     const tekilSet = new Set(allData.map(r => r.ham_karekod));
     document.getElementById('stat-tekil').textContent  = tekilSet.size;
-    document.getElementById('stat-tekrar').textContent = allData.filter(r => r.tekrar_uyari).length;
+    document.getElementById('stat-tekrar').textContent = allData.filter(r => isTekrarKayit(r)).length;
 }
 
 function render() {
@@ -7070,14 +7313,16 @@ function render() {
         return;
     }
 
-    tbody.innerHTML = filtered.map((r, i) => `
-        <tr class="${r.tekrar_uyari ? 'warn-row' : ''}" data-id="${r.id}">
+    tbody.innerHTML = filtered.map((r, i) => {
+        const isTekrar = isTekrarKayit(r);
+        return `
+        <tr class="${isTekrar ? 'warn-row' : ''}" data-id="${r.id}">
 
             <!-- # + Silme butonu -->
             <td>
                 <div class="td-sira">
                     <span class="badge-sira">${i + 1}</span>
-                    <button class="btn-del" onclick="silKayit(${r.id}, this)"
+                    <button class="btn-del" data-id="${r.id}" onclick="silKayit(${r.id}, this)"
                             title="Bu kaydı sil">
                         <i class="fa-solid fa-trash-can"></i>
                     </button>
@@ -7089,7 +7334,7 @@ function render() {
 
             <!-- Ürün Adı -->
             <td style="max-width:220px; overflow:hidden; text-overflow:ellipsis;" title="${esc(r.urun_adi)}">
-                ${r.tekrar_uyari ? '<span class="tekrar-badge">TEKRAR</span> ' : ''}${esc(r.urun_adi||'—')}
+                ${isTekrar ? '<span class="tekrar-badge">TEKRAR</span> ' : ''}${esc(r.urun_adi||'—')}
             </td>
 
             <td>${esc(r.koli_no||'—')}</td>
@@ -7100,7 +7345,8 @@ function render() {
             <td>${esc(r.uretim_tarihi||'—')}</td>
             <td>${esc(r.skt||'—')}</td>
             <td style="font-size:.76rem; color:var(--text-muted);">${esc(r.tarih||'—')}</td>
-        </tr>`).join('');
+        </tr>`;
+    }).join('');
 }
 
 function sortBy(col) {
@@ -7117,27 +7363,53 @@ function sortBy(col) {
 
 async function silKayit(id, btn) {
     if (!confirm('Bu kaydı silmek istiyor musunuz?')) return;
-    btn.disabled = true;
-    const res  = await fetch(`/api/cikis/sil/${id}`, {method: 'DELETE'});
-    const data = await res.json();
-    if (data.success) {
-        allData = allData.filter(r => r.id !== id);
-        updateStats();
-        render();
-    } else {
-        btn.disabled = false;
-        alert('Silme işlemi başarısız.');
+    if (btn) btn.disabled = true;
+    try {
+        const fetchFn = window.apiFetch || fetch;
+        const res  = await fetchFn(`/api/cikis/sil/${id}`, {method: 'DELETE'});
+        const data = await res.json();
+        if (data.success) {
+            allData = allData.filter(r => String(r.id) !== String(id));
+            updateStats();
+            render();
+        } else {
+            if (btn) btn.disabled = false;
+            alert('Silme işlemi başarısız: ' + (data.error || ''));
+        }
+    } catch (e) {
+        if (btn) btn.disabled = false;
+        alert('Silme hatası: ' + e.message);
     }
+}
+
+// Delegated delete listener on tbody
+const mainTbody = document.getElementById('main-tbody');
+if (mainTbody) {
+    mainTbody.addEventListener('click', async (e) => {
+        const btn = e.target.closest('.btn-del');
+        if (!btn) return;
+        const id = btn.getAttribute('data-id');
+        if (id) {
+            await silKayit(id, btn);
+        }
+    });
 }
 
 document.getElementById('btn-tumunu-sil').addEventListener('click', async () => {
     if (!confirm(`Toplam ${allData.length} kaydın TAMAMI silinecek. Emin misiniz?`)) return;
-    const res  = await fetch('/api/cikis/temizle', {method: 'POST'});
-    const data = await res.json();
-    if (data.success) {
-        allData = [];
-        updateStats();
-        render();
+    try {
+        const fetchFn = window.apiFetch || fetch;
+        const res  = await fetchFn('/api/cikis/temizle', {method: 'POST'});
+        const data = await res.json();
+        if (data.success) {
+            allData = [];
+            updateStats();
+            render();
+        } else {
+            alert('Temizleme hatası: ' + (data.error || ''));
+        }
+    } catch (e) {
+        alert('İşlem hatası: ' + e.message);
     }
 });
 
@@ -7145,11 +7417,13 @@ document.getElementById('search-input').addEventListener('input', render);
 document.getElementById('filter-col').addEventListener('change', render);
 
 function esc(str) {
+    if (window.esc) return window.esc(str);
     return String(str||'')
         .replace(/&/g,'&amp;')
         .replace(/</g,'&lt;')
         .replace(/>/g,'&gt;')
-        .replace(/"/g,'&quot;');
+        .replace(/"/g,'&quot;')
+        .replace(/'/g,'&#39;');
 }
     </script>
 
@@ -7163,10 +7437,10 @@ function esc(str) {
                 <span onclick="closeVersionModal()" style="cursor:pointer; font-size:1.4rem; color:#94a3b8;">&times;</span>
             </div>
             <div style="font-size:0.95rem; line-height:1.8;">
-                <p style="margin:6px 0;"><strong>📦 Sürüm Kodu:</strong> <span id="modalCommitHash" style="color:#38bdf8; font-family:monospace; font-weight:bold;">v3.1.0</span></p>
-                <p style="margin:6px 0;"><strong>📅 Son Güncelleme:</strong> <span id="modalCommitDate" style="color:#f1f5f9;">08.10.2026</span></p>
+                <p style="margin:6px 0;"><strong>📦 Sürüm Kodu:</strong> <span id="modalCommitHash" style="color:#38bdf8; font-family:monospace; font-weight:bold;">{{ current_app_commit }}</span></p>
+                <p style="margin:6px 0;"><strong>📅 Son Güncelleme:</strong> <span id="modalCommitDate" style="color:#f1f5f9;">{{ current_app_date }}</span></p>
                 <p style="margin:6px 0;"><strong>📝 Son Değişiklik Notu:</strong></p>
-                <div id="modalCommitMsg" style="background:#0f172a; padding:10px 14px; border-radius:8px; font-size:0.85rem; color:#cbd5e1; border:1px solid rgba(255,255,255,0.05); margin-top:4px;">v3.1.0: Tam ekran masaüstü modu, SQLite DB entegrasyonu, otomatik kapanma ve stabilite güncellemeleri</div>
+                <div id="modalCommitMsg" style="background:#0f172a; padding:10px 14px; border-radius:8px; font-size:0.85rem; color:#cbd5e1; border:1px solid rgba(255,255,255,0.05); margin-top:4px;">{{ current_app_msg }}</div>
                 <div style="margin-top:16px; background:rgba(34, 197, 94, 0.15); border:1px solid rgba(34, 197, 94, 0.3); color:#4ade80; padding:8px 12px; border-radius:8px; text-align:center; font-size:0.85rem; font-weight:600;">
                     🟢 GitHub Sunucusu ile Eşitlendi & Güncel
                 </div>
@@ -7177,6 +7451,546 @@ function esc(str) {
         </div>
     </div>
 
+    <script src="/static/app.js?v=20261005_v3000"></script>
+</body>
+</html>
+
+```
+
+---
+
+### 📁 `templates/depo_kabul.html`
+
+```html
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Compare</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
+    <link rel="shortcut icon" href="/static/favicon.ico">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .page-container {
+            max-width: 1440px;
+            margin: 0 auto;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+        .nav-strip {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: .2rem;
+            flex-wrap: wrap;
+        }
+        .nav-strip a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: .85rem;
+            display: flex;
+            align-items: center;
+            gap: .4rem;
+            padding: .4rem .8rem;
+            border-radius: 8px;
+            background: rgba(255,255,255,.03);
+            border: 1px solid rgba(255,255,255,.07);
+            transition: all .2s;
+        }
+        .nav-strip a:hover, .nav-strip a.active {
+            color: var(--text-main);
+            background: rgba(88,101,242,.2);
+            border-color: rgba(88,101,242,.4);
+        }
+        .nav-strip a.active-green {
+            color: #6ee7b7;
+            background: rgba(16,185,129,.2);
+            border-color: rgba(16,185,129,.4);
+        }
+
+        .kabul-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+        @media (max-width: 1024px) {
+            .kabul-grid { grid-template-columns: 1fr; }
+        }
+
+        .data-table-wrapper {
+            overflow-x: auto;
+            max-height: 420px;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.08);
+            background: rgba(15, 23, 42, 0.6);
+        }
+        .kabul-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: .85rem;
+        }
+        .kabul-table th {
+            background: rgba(30, 41, 59, 0.9);
+            color: var(--text-muted);
+            font-weight: 600;
+            text-align: left;
+            padding: .75rem .9rem;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+            position: sticky;
+            top: 0;
+            z-index: 2;
+        }
+        .kabul-table td {
+            padding: .7rem .9rem;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            color: var(--text-main);
+        }
+        .kabul-table tbody tr {
+            cursor: pointer;
+            transition: background .15s;
+        }
+        .kabul-table tbody tr:hover {
+            background: rgba(88,101,242,0.12);
+        }
+        .kabul-table tbody tr.selected-row {
+            background: rgba(16, 185, 129, 0.18) !important;
+            border-left: 3px solid #10b981;
+        }
+
+        .btn-kabul-big {
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: #fff;
+            font-size: 1.1rem;
+            font-weight: 700;
+            padding: 0.95rem 1.6rem;
+            border-radius: 14px;
+            border: none;
+            cursor: pointer;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.7rem;
+            box-shadow: 0 6px 20px rgba(16,185,129,0.35);
+            transition: all .2s ease;
+        }
+        .btn-kabul-big:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(16,185,129,0.5);
+        }
+        .btn-kabul-big:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            box-shadow: none;
+            transform: none;
+        }
+
+        .badge-type {
+            background: rgba(139, 92, 246, 0.2);
+            color: #c084fc;
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body class="sidebar-layout">
+    <div class="glass-bg-decor1"></div>
+    <div class="glass-bg-decor2"></div>
+
+    <div class="app-wrapper">
+        <!-- SOL DİKİNE SIDEBAR NAVİGASYON -->
+        <aside class="sidebar">
+            <div class="sidebar-brand">
+                <i class="fa-solid fa-qrcode logo-icon"></i>
+                <div>
+                    <h2>QR Compare</h2>
+                    <p>Akıllı Stok Sistemi</p>
+                </div>
+            </div>
+
+            <nav class="sidebar-menu">
+                <a href="/cikis" class="sidebar-link">
+                    <i class="fa-solid fa-box-open"></i>
+                    <span>Barkod Okut & Çıkış</span>
+                </a>
+                <a href="/cikis-listesi" class="sidebar-link">
+                    <i class="fa-solid fa-list-check"></i>
+                    <span>Çıkış Listesi</span>
+                </a>
+                <a href="/stok-esitleme" class="sidebar-link">
+                    <i class="fa-solid fa-chart-line"></i>
+                    <span>Stok & Eşitleme</span>
+                </a>
+                <a href="/depo_stoklari" class="sidebar-link">
+                    <i class="fa-solid fa-warehouse"></i>
+                    <span>Depomdaki Stoklar</span>
+                </a>
+                <a href="/depo_kabul" class="sidebar-link active">
+                    <i class="fa-solid fa-boxes-packing"></i>
+                    <span>Depoya Kabul Et</span>
+                </a>
+                <a href="/kullaniciya-satis" class="sidebar-link">
+                    <i class="fa-solid fa-user-tag"></i>
+                    <span>Kullanıcıya Satış (Demo)</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="system-status-pill {{ 'offline' if not is_system_active else '' }}">
+                    <span class="status-indicator {{ system_status_cls | default('online') }}"></span>
+                    <span>{{ system_status_text | default('Sistem Aktif') }}</span>
+                </div>
+                <div class="user-profile-card">
+                    <div class="user-profile-info">
+                        <i class="fa-solid fa-user-circle user-avatar-icon"></i>
+                        <span id="sidebar-user-name" class="user-name-title">{{ current_user_name }}</span>
+                    </div>
+                    <button type="button" class="btn-logout-icon" onclick="logoutUser()" title="Oturumdan Çıkış Yap">
+                        <i class="fa-solid fa-power-off"></i>
+                    </button>
+                </div>
+                <div class="version-pill" onclick="showVersionModal()" title="Sürüm Bilgisi">
+                    <i class="fa-solid fa-code-branch" style="color: #38bdf8;"></i>
+                    <span id="versionText">{{ current_app_version }}</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- SAĞ ANA İÇERİK ALANI -->
+        <main class="main-content">
+            <header class="content-header">
+                <div>
+                    <h1 class="page-title"><i class="fa-solid fa-boxes-packing icon-green"></i> Depoya Kabul Et & Gelen Bildirimler</h1>
+                    <p class="page-subtitle">Toptancı ve üreticilerden size kesilen gelen faturaları görüntüleyin ve depoya kabul edin.</p>
+                </div>
+            </header>
+
+        <!-- ÜÇLÜ PANEL LAYOUT -->
+        <div class="kabul-grid">
+            
+            <!-- PANEL 1: GELEN BİLDİRİMLER (BKST) -->
+            <section class="panel glass-card">
+                <div class="panel-head-flex">
+                    <div class="panel-title-group">
+                        <i class="fa-solid fa-inbox icon-primary"></i>
+                        <div>
+                            <h2>1. Bölüm: Gelen / Bekleyen Bildirimler</h2>
+                            <p class="panel-subtitle">Toptancı veya üreticilerden size kesilen gelen irsaliye/faturalar.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="background:rgba(16, 185, 129, 0.1); border:1px solid rgba(16, 185, 129, 0.3); border-radius:10px; padding:0.75rem 1rem; margin-top:0.8rem; font-size:0.82rem; color:#6ee7b7; display:flex; align-items:center; gap:0.6rem;">
+                    <i class="fa-solid fa-shield-halved" style="font-size:1.2rem; color:#10b981;"></i>
+                    <div>
+                        <b>Güvenlik Filtresi Aktif:</b> Sadece tedarikçilerden size kesilen <b>"MAL ALIM" (Gelen)</b> bildirimleri listelenir. Satış veya çıkış bildirimleriniz buraya düşmez.
+                    </div>
+                </div>
+
+                <div class="bkst-controls margin-top-sm" style="display:flex; gap:0.8rem; flex-wrap:wrap;">
+                    <button type="button" id="btn-fetch-incoming" class="btn btn-primary" style="flex:1;">
+                        <i class="fa-solid fa-cloud-arrow-down"></i> 📥 1. Gelen Mal Alım Bildirimlerini Çek (BKST)
+                    </button>
+                </div>
+
+                <div id="incoming-msg-box" class="status-msg hidden margin-top-sm"></div>
+
+                <div class="data-table-wrapper margin-top-md">
+                    <table class="kabul-table" id="table-incoming">
+                        <thead>
+                            <tr>
+                                <th style="width:40px;">Seç</th>
+                                <th>Gönderici Firma / GLN</th>
+                                <th>Belge No</th>
+                                <th>Tarih</th>
+                                <th>Tip</th>
+                                <th>Adet</th>
+                                <th>Durum</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbody-incoming">
+                            <tr>
+                                <td colspan="7" style="text-align:center; color:var(--text-muted); padding:2.5rem;">
+                                    Henüz bildirim çekilmedi. <b>"Gelen Bildirimleri Çek"</b> butonuna basarak BKST üzerindeki faturaları listeleyebilirsiniz.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- PANEL 2: SEÇİLEN BİLDİRİM DETAYLARI & KABUL ET -->
+            <section class="panel glass-card">
+                <div class="panel-head-flex">
+                    <div class="panel-title-group">
+                        <i class="fa-solid fa-boxes-packing icon-green"></i>
+                        <div>
+                            <h2>2. Bölüm: Bildirim Detayı & Depoya Kabul</h2>
+                            <p class="panel-subtitle">Seçilen belgedeki karekodlar ve depoya ekleme işlemi.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); padding:0.9rem 1.1rem; border-radius:12px; display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <span style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Seçilen Belge No:</span>
+                        <h3 id="lbl-selected-doc" style="margin-top:2px; font-family:var(--font-outfit); font-size:1.15rem; color:#38bdf8;">Henüz Belge Seçilmedi</h3>
+                    </div>
+                    <div style="text-align:right;">
+                        <span style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Ürün Sayısı:</span>
+                        <h3 id="lbl-selected-count" style="margin-top:2px; font-family:var(--font-outfit); font-size:1.15rem; color:#10b981;">0 Adet</h3>
+                    </div>
+                </div>
+
+                <!-- TEK TUŞLA DEPOYA KABUL ET BUTONU -->
+                <button type="button" id="btn-accept-warehouse" class="btn-kabul-big margin-top-md" disabled>
+                    <i class="fa-solid fa-circle-check"></i> 🟢 Tek Tuşla Depoya Kabul Et (MALALIM)
+                </button>
+
+                <div id="accept-msg-box" class="status-msg hidden margin-top-sm"></div>
+
+                <!-- DETAY ÜRÜN TABLOSU -->
+                <div class="data-table-wrapper margin-top-md" style="max-height: 280px;">
+                    <table class="kabul-table" id="table-details">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Karekod</th>
+                                <th>Ürün Adı</th>
+                                <th>GTIN / Barkod</th>
+                                <th>Seri No</th>
+                                <th>SKT</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbody-details">
+                            <tr>
+                                <td colspan="6" style="text-align:center; color:var(--text-muted); padding:2rem;">
+                                    Lütfen sol taraftan detaylarını görmek istediğiniz bir bildirime tıklayın.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+        </div>
+        </main>
+    </div>
+
+    <!-- SÜRÜM & GÜNCELLEME MODALI -->
+    <div id="versionModal" class="modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px);">
+        <div style="background:#1e293b; color:#fff; max-width:450px; margin:10% auto; padding:24px; border-radius:16px; border:1px solid rgba(255,255,255,0.1); box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:12px; margin-bottom:16px;">
+                <h3 style="margin:0; font-size:1.15rem; color:#38bdf8; display:flex; align-items:center; gap:8px;">
+                    <i class="fa-solid fa-circle-info"></i> Uygulama Sürüm Bilgisi
+                </h3>
+                <span onclick="closeVersionModal()" style="cursor:pointer; font-size:1.4rem; color:#94a3b8;">&times;</span>
+            </div>
+            <div style="font-size:0.95rem; line-height:1.8;">
+                <p style="margin:6px 0;"><strong>📦 Sürüm Kodu:</strong> <span id="modalCommitHash" style="color:#38bdf8; font-family:monospace; font-weight:bold;">{{ current_app_commit }}</span></p>
+                <p style="margin:6px 0;"><strong>📅 Son Güncelleme:</strong> <span id="modalCommitDate" style="color:#f1f5f9;">{{ current_app_date }}</span></p>
+                <p style="margin:6px 0;"><strong>📝 Son Değişiklik Notu:</strong></p>
+                <div id="modalCommitMsg" style="background:#0f172a; padding:10px 14px; border-radius:8px; font-size:0.85rem; color:#cbd5e1; border:1px solid rgba(255,255,255,0.05); margin-top:4px;">{{ current_app_msg }}</div>
+                <div style="margin-top:16px; background:rgba(34, 197, 94, 0.15); border:1px solid rgba(34, 197, 94, 0.3); color:#4ade80; padding:8px 12px; border-radius:8px; text-align:center; font-size:0.85rem; font-weight:600;">
+                    🟢 GitHub Sunucusu ile Eşitlendi & Güncel
+                </div>
+            </div>
+            <div style="margin-top:16px; text-align:right;">
+                <button onclick="closeVersionModal()" style="background:#3b82f6; color:#fff; border:none; padding:8px 18px; border-radius:8px; font-weight:600; cursor:pointer;">Kapat</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let selectedNotificationData = null;
+
+        const btnFetchIncoming = document.getElementById('btn-fetch-incoming');
+        const btnAcceptWarehouse = document.getElementById('btn-accept-warehouse');
+        const incomingMsgBox = document.getElementById('incoming-msg-box');
+        const acceptMsgBox = document.getElementById('accept-msg-box');
+        const tbodyIncoming = document.getElementById('tbody-incoming');
+        const tbodyDetails = document.getElementById('tbody-details');
+        const lblSelectedDoc = document.getElementById('lbl-selected-doc');
+        const lblSelectedCount = document.getElementById('lbl-selected-count');
+
+        // Gelen Bildirimleri Çek
+        btnFetchIncoming.addEventListener('click', async () => {
+            btnFetchIncoming.disabled = true;
+            btnFetchIncoming.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> BKST Sunucusuna Bağlanılıyor...';
+            showMsg(incomingMsgBox, 'loading', 'Bakanlık gelen bildirim listesi sorgulanıyor, lütfen bekleyin...');
+
+            try {
+                const res = await fetch('/api/depo_kabul/gelen_listesi', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-Local-Token': localStorage.getItem('local_session_token') || ''
+                    }
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    showMsg(incomingMsgBox, 'success', data.message || 'Gelen bildirimler başarıyla çekildi.');
+                    renderIncomingTable(data.notifications || []);
+                } else {
+                    showMsg(incomingMsgBox, 'error', data.error || 'Gelen bildirimler çekilemedi.');
+                }
+            } catch (err) {
+                showMsg(incomingMsgBox, 'error', 'Bağlantı hatası: ' + err.message);
+            } finally {
+                btnFetchIncoming.disabled = false;
+                btnFetchIncoming.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> 📥 1. Gelen Mal Alım Bildirimlerini Çek (BKST)';
+            }
+        });
+
+        // Bildirim Tablosunu Bas
+        function renderIncomingTable(items) {
+            const validItems = (items || []).filter(item => {
+                const state = String(item.HEADERSTATE || '').toUpperCase();
+                return !state.includes('IPTAL') && !state.includes('İPTAL');
+            });
+
+            if (!validItems || validItems.length === 0) {
+                tbodyIncoming.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:2rem;">Gelen/bekleyen bildirim bulunamadı.</td></tr>';
+                return;
+            }
+
+            tbodyIncoming.innerHTML = validItems.map((item, index) => `
+                <tr onclick="selectNotification(${index}, this)" id="row-incoming-${index}">
+                    <td style="text-align:center;"><i class="fa-regular fa-circle radio-icon"></i></td>
+                    <td><b>${esc(item.CompanyTitle || item.SENDER || 'Bilinmiyor')}</b></td>
+                    <td><span style="font-family:monospace; color:#38bdf8;">${esc(item.WAYBILLNUMBER || '-')}</span></td>
+                    <td>${esc(item.WAYBILLDATE || item.OPERATIONDATE || '-')}</td>
+                    <td><span class="badge-type" style="background:rgba(16,185,129,0.2); color:#6ee7b7; border:1px solid rgba(16,185,129,0.4); padding:2px 8px; border-radius:6px; font-weight:700;">MAL ALIM</span></td>
+                    <td><b>${item.PRODUCTCOUNT || 0}</b></td>
+                    <td><span style="color:#10b981;">${esc(item.HEADERSTATE || 'Bekliyor')}</span></td>
+                </tr>
+            `).join('');
+
+            window.incomingItems = validItems;
+        }
+
+        // Satır Seçimi ve Detay Getirme
+        window.selectNotification = async function(index, trEl) {
+            document.querySelectorAll('#tbody-incoming tr').forEach(r => {
+                r.classList.remove('selected-row');
+                const ic = r.querySelector('.radio-icon');
+                if (ic) ic.className = 'fa-regular fa-circle radio-icon';
+            });
+
+            trEl.classList.add('selected-row');
+            const icon = trEl.querySelector('.radio-icon');
+            if (icon) icon.className = 'fa-solid fa-circle-dot radio-icon';
+
+            const item = window.incomingItems[index];
+            selectedNotificationData = item;
+
+            lblSelectedDoc.textContent = item.WAYBILLNUMBER || 'Belge #' + (index+1);
+            lblSelectedCount.textContent = (item.PRODUCTCOUNT || 0) + ' Adet';
+            btnAcceptWarehouse.disabled = false;
+
+            // Detayları Yükle
+            tbodyDetails.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:2rem;"><i class="fa-solid fa-spinner fa-spin"></i> Ürün detayları getiriliyor...</td></tr>';
+
+            try {
+                const res = await fetch('/api/depo_kabul/detay/' + encodeURIComponent(item.HEADERID || item.WAYBILLNUMBER || index), {
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-Local-Token': localStorage.getItem('local_session_token') || ''
+                    }
+                });
+                const data = await res.json();
+                if (data.success && data.products && data.products.length > 0) {
+                    selectedNotificationData.products = data.products;
+                    lblSelectedCount.textContent = data.products.length + ' Adet';
+                    renderDetailsTable(data.products);
+                } else {
+                    renderDetailsTable(item.products || []);
+                }
+            } catch (err) {
+                renderDetailsTable(item.products || []);
+            }
+        };
+
+        function renderDetailsTable(prods) {
+            if (!prods || prods.length === 0) {
+                tbodyDetails.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:1.5rem;">Bu bildirime ait karekod detayı bulunamadı.</td></tr>';
+                return;
+            }
+
+            tbodyDetails.innerHTML = prods.map((p, i) => `
+                <tr>
+                    <td>${i+1}</td>
+                    <td style="font-family:monospace; font-size:0.78rem; color:#6ee7b7;">${esc(p.Karekod || p.KAREKOD || '-')}</td>
+                    <td><b>${esc(p['Ürün Adı'] || p.STOCKNAME || '-')}</b></td>
+                    <td>${esc(p['Gtin / Barkod'] || p.BARCODE || '-')}</td>
+                    <td>${esc(p['Seri Numarası'] || p.SERIALNUMBER || '-')}</td>
+                    <td>${esc(p['Son Kullanma Tarihi'] || p.SKT || '-')}</td>
+                </tr>
+            `).join('');
+        }
+
+        // Tek Tuşla Depoya Kabul Et
+        btnAcceptWarehouse.addEventListener('click', async () => {
+            if (!selectedNotificationData) return;
+
+            btnAcceptWarehouse.disabled = true;
+            btnAcceptWarehouse.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Depoya Kabul Ediliyor (MALALIM)...';
+            showMsg(acceptMsgBox, 'loading', 'Mal alım bildirimi yapılıyor ve ürünler deponuza ekleniyor...');
+
+            try {
+                const res = await fetch('/api/depo_kabul/onayla', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-Local-Token': localStorage.getItem('local_session_token') || ''
+                    },
+                    body: JSON.stringify({
+                        header_id: selectedNotificationData.HEADERID,
+                        waybill_number: selectedNotificationData.WAYBILLNUMBER,
+                        product_count: selectedNotificationData.PRODUCTCOUNT,
+                        products: selectedNotificationData.products || []
+                    })
+                });
+
+                const data = await res.json();
+                if (data.success) {
+                    showMsg(acceptMsgBox, 'success', data.message || '🟢 Bildirim deponuza başarıyla kabul edildi!');
+                    btnAcceptWarehouse.innerHTML = '<i class="fa-solid fa-check-double"></i> 🟢 Depoya Kabul Edildi!';
+                    btnAcceptWarehouse.style.background = '#059669';
+                } else {
+                    showMsg(acceptMsgBox, 'error', data.error || 'Depoya kabul edilemedi.');
+                    btnAcceptWarehouse.disabled = false;
+                    btnAcceptWarehouse.innerHTML = '<i class="fa-solid fa-circle-check"></i> 🟢 Tek Tuşla Depoya Kabul Et (MALALIM)';
+                }
+            } catch (err) {
+                showMsg(acceptMsgBox, 'error', 'Hata: ' + err.message);
+                btnAcceptWarehouse.disabled = false;
+                btnAcceptWarehouse.innerHTML = '<i class="fa-solid fa-circle-check"></i> 🟢 Tek Tuşla Depoya Kabul Et (MALALIM)';
+            }
+        });
+
+        function showMsg(box, type, txt) {
+            box.className = 'status-msg ' + (type === 'loading' ? 'msg-loading' : type === 'success' ? 'msg-success' : 'msg-error');
+            box.innerHTML = txt;
+            box.classList.remove('hidden');
+        }
+
+    </script>
     <script src="/static/app.js?v=20261005_v3000"></script>
 </body>
 </html>
@@ -7356,9 +8170,9 @@ function esc(str) {
             </nav>
 
             <div class="sidebar-footer">
-                <div class="system-status-pill">
-                    <span class="status-indicator online"></span>
-                    <span>Sistem Aktif</span>
+                <div class="system-status-pill {{ 'offline' if not is_system_active else '' }}">
+                    <span class="status-indicator {{ system_status_cls | default('online') }}"></span>
+                    <span>{{ system_status_text | default('Sistem Aktif') }}</span>
                 </div>
                 <div class="user-profile-card">
                     <div class="user-profile-info">
@@ -7557,10 +8371,10 @@ function esc(str) {
                 <span onclick="closeVersionModal()" style="cursor:pointer; font-size:1.4rem; color:#94a3b8;">&times;</span>
             </div>
             <div style="font-size:0.95rem; line-height:1.8;">
-                <p style="margin:6px 0;"><strong>📦 Sürüm Kodu:</strong> <span id="modalCommitHash" style="color:#38bdf8; font-family:monospace; font-weight:bold;">v3.1.0</span></p>
-                <p style="margin:6px 0;"><strong>📅 Son Güncelleme:</strong> <span id="modalCommitDate" style="color:#f1f5f9;">08.10.2026</span></p>
+                <p style="margin:6px 0;"><strong>📦 Sürüm Kodu:</strong> <span id="modalCommitHash" style="color:#38bdf8; font-family:monospace; font-weight:bold;">{{ current_app_commit }}</span></p>
+                <p style="margin:6px 0;"><strong>📅 Son Güncelleme:</strong> <span id="modalCommitDate" style="color:#f1f5f9;">{{ current_app_date }}</span></p>
                 <p style="margin:6px 0;"><strong>📝 Son Değişiklik Notu:</strong></p>
-                <div id="modalCommitMsg" style="background:#0f172a; padding:10px 14px; border-radius:8px; font-size:0.85rem; color:#cbd5e1; border:1px solid rgba(255,255,255,0.05); margin-top:4px;">v3.1.0: Tam ekran masaüstü modu, SQLite DB entegrasyonu, otomatik kapanma ve stabilite güncellemeleri</div>
+                <div id="modalCommitMsg" style="background:#0f172a; padding:10px 14px; border-radius:8px; font-size:0.85rem; color:#cbd5e1; border:1px solid rgba(255,255,255,0.05); margin-top:4px;">{{ current_app_msg }}</div>
                 <div style="margin-top:16px; background:rgba(34, 197, 94, 0.15); border:1px solid rgba(34, 197, 94, 0.3); color:#4ade80; padding:8px 12px; border-radius:8px; text-align:center; font-size:0.85rem; font-weight:600;">
                     🟢 GitHub Sunucusu ile Eşitlendi & Güncel
                 </div>
@@ -7592,7 +8406,12 @@ function esc(str) {
 
         async function loadDepoStoklari() {
             try {
-                const res = await fetch('/api/depo_stoklari');
+                const res = await fetch('/api/depo_stoklari', {
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-Local-Token': localStorage.getItem('local_session_token') || ''
+                    }
+                });
                 const data = await res.json();
                 if (data.success && data.products) {
                     allProducts = data.products;
@@ -7611,17 +8430,43 @@ function esc(str) {
             const originalText = btn.innerHTML;
             btn.disabled = true;
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Veriler Çekiliyor...';
+            if (window.updateSystemStatusPill) window.updateSystemStatusPill('fetching', 'Bağlantı Kuruluyor...');
             
             try {
                 const res = await fetch('/api/bkst/fetch_api', { method: 'POST' });
                 const data = await res.json();
                 if (data.success) {
-                    alert('✅ BKST verileri başarıyla güncellendi!');
-                    await loadDepoStoklari();
+                    let pollAttempts = 0;
+                    let finalStatus = null;
+                    while (pollAttempts < 45) {
+                        await new Promise(r => setTimeout(r, 1500));
+                        pollAttempts++;
+                        try {
+                            const sRes = await fetch('/api/bkst/fetch_status');
+                            if (sRes.ok) {
+                                finalStatus = await sRes.json();
+                                if (!finalStatus.running) break;
+                            }
+                        } catch (_) {}
+                    }
+
+                    if (finalStatus && finalStatus.online === true && finalStatus.fetched_count > 0) {
+                        if (window.updateSystemStatusPill) window.updateSystemStatusPill(true, 'Sistem Aktif', `Bakanlıktan ${finalStatus.fetched_count} adet stok çekildi.`);
+                        alert(`🟢 BKST verileri başarıyla güncellendi! Toplam ${finalStatus.fetched_count} adet stok sisteme yüklendi. (Sistem Aktif)`);
+                        await loadDepoStoklari();
+                    } else {
+                        const msg = (finalStatus && finalStatus.message) || 'Bakanlık sunucusundan 0 adet veri çekildi.';
+                        const locCnt = (finalStatus && finalStatus.local_count) || 0;
+                        if (window.updateSystemStatusPill) window.updateSystemStatusPill(false, 'Sistem Deaktif', msg);
+                        alert(`⚠️ BAKANLIK BAĞLANTI UYARISI: 0 adet veri çekildi!\n\n🔴 Sistem Deaktif durumdadır.\n\n${msg}\n\nYerel veritabanındaki son kayıtlı ${locCnt} adet stok kullanılmaya devam ediliyor.`);
+                        await loadDepoStoklari();
+                    }
                 } else {
-                    alert('❌ Hata: ' + (data.error || 'Veri çekilemedi.'));
+                    if (window.updateSystemStatusPill) window.updateSystemStatusPill(false, 'Sistem Deaktif', data.error);
+                    alert('❌ Hata: ' + (data.error || 'Veri çekilemedi. Sistem Deaktif.'));
                 }
             } catch (err) {
+                if (window.updateSystemStatusPill) window.updateSystemStatusPill(false, 'Sistem Deaktif', err.message);
                 alert('❌ Bağlantı Hatası: ' + err.message);
             } finally {
                 btn.disabled = false;
@@ -7653,6 +8498,27 @@ function esc(str) {
             return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         }
 
+        function getGtin(p) {
+            if (!p) return '-';
+            let g = p['Gtin Numarası'] || p['Gtin / Barkod'] || p.GTIN || p.gtin || p.BARCODE || p.barkod || '';
+            g = String(g).trim();
+            if (g && g !== '-' && g !== 'None' && g !== 'nan' && g !== 'null' && g !== 'BELİRSİZ') {
+                return g;
+            }
+            let qr = String(p['Karekod'] || p.tam_karekod || p.ham_karekod || p.KAREKOD || '').trim();
+            if (qr.startsWith(']d2') || qr.startsWith(']Q3')) {
+                qr = qr.substring(3);
+            }
+            if (qr.startsWith('01') && qr.length >= 16 && /^\d{14}$/.test(qr.substring(2, 16))) {
+                return qr.substring(2, 16);
+            }
+            const match = qr.match(/(?:^|\D)01(\d{14})/);
+            if (match) return match[1];
+            const d14 = qr.match(/\d{14}/);
+            if (d14) return d14[0];
+            return '-';
+        }
+
         function updateSummaryStats() {
             statTotal.textContent = allProducts.length;
 
@@ -7660,9 +8526,9 @@ function esc(str) {
             let sktCriticalCount = 0;
 
             allProducts.forEach(p => {
-                const gtin = p['Gtin / Barkod'] || p.BARCODE || p.GTIN || 'BELİRSİZ';
+                const gtin = getGtin(p);
                 const name = p['Ürün Adı'] || p.STOCKNAME || p.URUNADI || 'İsimsiz Ürün';
-                const key = gtin + '___' + name;
+                const key = (gtin !== '-' ? gtin : '') + '___' + name;
 
                 if (!gtinGroupMap[key]) {
                     gtinGroupMap[key] = [];
@@ -7702,7 +8568,7 @@ function esc(str) {
                     const searchStr = [
                         p['Ürün Adı'], p.STOCKNAME, p.URUNADI,
                         p['Karekod'], p.KAREKOD,
-                        p['Gtin / Barkod'], p.BARCODE, p.GTIN,
+                        getGtin(p), p['Gtin Numarası'], p['Gtin / Barkod'], p.BARCODE, p.GTIN,
                         p['Seri Numarası'], p.SERIALNUMBER, p.SERINO,
                         p['Parti Numarası'], p.SARJNO, p.LOT,
                         p['Koli Numarası'], p.PAKETNO
@@ -7745,12 +8611,14 @@ function esc(str) {
 
             const groups = {};
             items.forEach(p => {
-                const gtin = p['Gtin / Barkod'] || p.BARCODE || p.GTIN || '-';
                 const name = p['Ürün Adı'] || p.STOCKNAME || p.URUNADI || 'Tanımsız Ürün';
-                const key = gtin + '___' + name;
+                const gtin = getGtin(p);
+                const key = (gtin !== '-' ? gtin : '') + '___' + name;
 
                 if (!groups[key]) {
                     groups[key] = { gtin, name, key, products: [] };
+                } else if (groups[key].gtin === '-' && gtin !== '-') {
+                    groups[key].gtin = gtin;
                 }
                 groups[key].products.push(p);
             });
@@ -7783,12 +8651,12 @@ function esc(str) {
                     <tr>
                         <td style="text-align:center;"><span class="badge-sira">${idx + 1}</span></td>
                         <td>
-                            <a class="product-link-btn" onclick="openDetailModal('${esc(key)}')">
+                            <a class="product-link-btn btn-open-detail" data-group-key="${escAttr(key)}" style="cursor:pointer;">
                                 <i class="fa-solid fa-box-open" style="color:#38bdf8;"></i>
                                 <span class="prod-name-clamp" title="${esc(g.name)}"><b>${esc(g.name)}</b></span>
                             </a>
                         </td>
-                        <td class="nowrap-cell"><span style="font-family:monospace;">${esc(g.gtin)}</span></td>
+                        <td class="nowrap-cell"><span style="font-family:monospace; font-weight:600; color:#38bdf8;">${esc(g.gtin)}</span></td>
                         <td style="text-align:center;" class="nowrap-cell">
                             <span style="background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); padding:4px 12px; border-radius:8px; font-weight:800; font-size:0.9rem;">
                                 ${count} Adet
@@ -7796,7 +8664,7 @@ function esc(str) {
                         </td>
                         <td class="nowrap-cell">${sktBadge}</td>
                         <td style="text-align:center;" class="nowrap-cell">
-                            <button class="btn btn-outline btn-sm" onclick="openDetailModal('${esc(key)}')">
+                            <button class="btn btn-outline btn-sm btn-open-detail" data-group-key="${escAttr(key)}" type="button">
                                 <i class="fa-solid fa-magnifying-glass-plus"></i> Karekodları Gör (${count})
                             </button>
                         </td>
@@ -7830,7 +8698,7 @@ function esc(str) {
             tbody.innerHTML = items.map((p, idx) => {
                 const qr = p['Karekod'] || p.KAREKOD || '-';
                 const name = p['Ürün Adı'] || p.STOCKNAME || p.URUNADI || '-';
-                const gtin = p['Gtin / Barkod'] || p.BARCODE || p.GTIN || '-';
+                const gtin = getGtin(p);
                 const seri = p['Seri Numarası'] || p.SERIALNUMBER || p.SERINO || '-';
                 const parti = p['Parti Numarası'] || p.SARJNO || p.LOT || '-';
                 const koli = p['Koli Numarası'] || p.PAKETNO || p.KOLINO || '-';
@@ -7849,7 +8717,7 @@ function esc(str) {
                         <td style="text-align:center;"><span class="badge-sira">${idx + 1}</span></td>
                         <td><span class="prod-name-clamp" title="${esc(name)}"><b>${esc(name)}</b></span></td>
                         <td style="font-family:monospace; font-size:0.78rem; color:#38bdf8;" class="nowrap-cell">${esc(qr)}</td>
-                        <td class="nowrap-cell">${esc(gtin)}</td>
+                        <td class="nowrap-cell" style="font-family:monospace; color:#38bdf8; font-weight:600;">${esc(gtin)}</td>
                         <td class="nowrap-cell">${esc(seri)}</td>
                         <td class="nowrap-cell">${esc(parti)}</td>
                         <td class="nowrap-cell"><span style="font-family:monospace; color:#fbbf24;">${esc(koli)}</span></td>
@@ -7876,6 +8744,15 @@ function esc(str) {
             renderModalTable(currentModalProducts);
             document.getElementById('productDetailModal').style.display = 'block';
         };
+
+        // Event delegation for opening detail modal
+        tbody.addEventListener('click', (e) => {
+            const trigger = e.target.closest('.btn-open-detail');
+            if (trigger) {
+                const groupKey = trigger.getAttribute('data-group-key');
+                if (groupKey) openDetailModal(groupKey);
+            }
+        });
 
         function renderModalTable(items) {
             const modalTbody = document.getElementById('modal-tbody-details');
@@ -7947,7 +8824,12 @@ function esc(str) {
         });
 
         function esc(str) {
-            return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+            if (window.esc) return window.esc(str);
+            return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g, '&#39;');
+        }
+        function escAttr(str) {
+            if (window.escAttr) return window.escAttr(str);
+            return String(str || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
         }
 
         loadDepoStoklari();
@@ -7960,7 +8842,7 @@ function esc(str) {
 
 ---
 
-### 📁 `templates/depo_kabul.html`
+### 📁 `templates/index.html`
 
 ```html
 <!DOCTYPE html>
@@ -7972,144 +8854,18 @@ function esc(str) {
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
     <link rel="shortcut icon" href="/static/favicon.ico">
-    <!-- Google Fonts -->
+    <!-- Google Fonts Outfit & Inter -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
     <!-- FontAwesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/static/style.css">
-    <style>
-        .page-container {
-            max-width: 1440px;
-            margin: 0 auto;
-            padding: 1.5rem;
-            display: flex;
-            flex-direction: column;
-            gap: 1.5rem;
-        }
-        .nav-strip {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-            margin-bottom: .2rem;
-            flex-wrap: wrap;
-        }
-        .nav-strip a {
-            color: var(--text-muted);
-            text-decoration: none;
-            font-size: .85rem;
-            display: flex;
-            align-items: center;
-            gap: .4rem;
-            padding: .4rem .8rem;
-            border-radius: 8px;
-            background: rgba(255,255,255,.03);
-            border: 1px solid rgba(255,255,255,.07);
-            transition: all .2s;
-        }
-        .nav-strip a:hover, .nav-strip a.active {
-            color: var(--text-main);
-            background: rgba(88,101,242,.2);
-            border-color: rgba(88,101,242,.4);
-        }
-        .nav-strip a.active-green {
-            color: #6ee7b7;
-            background: rgba(16,185,129,.2);
-            border-color: rgba(16,185,129,.4);
-        }
-
-        .kabul-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 1.5rem;
-        }
-        @media (max-width: 1024px) {
-            .kabul-grid { grid-template-columns: 1fr; }
-        }
-
-        .data-table-wrapper {
-            overflow-x: auto;
-            max-height: 420px;
-            border-radius: 12px;
-            border: 1px solid rgba(255,255,255,0.08);
-            background: rgba(15, 23, 42, 0.6);
-        }
-        .kabul-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: .85rem;
-        }
-        .kabul-table th {
-            background: rgba(30, 41, 59, 0.9);
-            color: var(--text-muted);
-            font-weight: 600;
-            text-align: left;
-            padding: .75rem .9rem;
-            border-bottom: 1px solid rgba(255,255,255,0.08);
-            position: sticky;
-            top: 0;
-            z-index: 2;
-        }
-        .kabul-table td {
-            padding: .7rem .9rem;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-            color: var(--text-main);
-        }
-        .kabul-table tbody tr {
-            cursor: pointer;
-            transition: background .15s;
-        }
-        .kabul-table tbody tr:hover {
-            background: rgba(88,101,242,0.12);
-        }
-        .kabul-table tbody tr.selected-row {
-            background: rgba(16, 185, 129, 0.18) !important;
-            border-left: 3px solid #10b981;
-        }
-
-        .btn-kabul-big {
-            background: linear-gradient(135deg, #10b981, #059669);
-            color: #fff;
-            font-size: 1.1rem;
-            font-weight: 700;
-            padding: 0.95rem 1.6rem;
-            border-radius: 14px;
-            border: none;
-            cursor: pointer;
-            width: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 0.7rem;
-            box-shadow: 0 6px 20px rgba(16,185,129,0.35);
-            transition: all .2s ease;
-        }
-        .btn-kabul-big:hover:not(:disabled) {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(16,185,129,0.5);
-        }
-        .btn-kabul-big:disabled {
-            opacity: 0.4;
-            cursor: not-allowed;
-            box-shadow: none;
-            transform: none;
-        }
-
-        .badge-type {
-            background: rgba(139, 92, 246, 0.2);
-            color: #c084fc;
-            padding: 2px 8px;
-            border-radius: 6px;
-            font-size: 0.75rem;
-            font-weight: 600;
-        }
-    </style>
 </head>
 <body class="sidebar-layout">
     <div class="glass-bg-decor1"></div>
     <div class="glass-bg-decor2"></div>
-
+    
     <div class="app-wrapper">
         <!-- SOL DİKİNE SIDEBAR NAVİGASYON -->
         <aside class="sidebar">
@@ -8130,7 +8886,7 @@ function esc(str) {
                     <i class="fa-solid fa-list-check"></i>
                     <span>Çıkış Listesi</span>
                 </a>
-                <a href="/stok-esitleme" class="sidebar-link">
+                <a href="/stok-esitleme" class="sidebar-link active">
                     <i class="fa-solid fa-chart-line"></i>
                     <span>Stok & Eşitleme</span>
                 </a>
@@ -8138,7 +8894,7 @@ function esc(str) {
                     <i class="fa-solid fa-warehouse"></i>
                     <span>Depomdaki Stoklar</span>
                 </a>
-                <a href="/depo_kabul" class="sidebar-link active">
+                <a href="/depo_kabul" class="sidebar-link">
                     <i class="fa-solid fa-boxes-packing"></i>
                     <span>Depoya Kabul Et</span>
                 </a>
@@ -8149,9 +8905,9 @@ function esc(str) {
             </nav>
 
             <div class="sidebar-footer">
-                <div class="system-status-pill">
-                    <span class="status-indicator online"></span>
-                    <span>Sistem Aktif</span>
+                <div class="system-status-pill {{ 'offline' if not is_system_active else '' }}">
+                    <span class="status-indicator {{ system_status_cls | default('online') }}"></span>
+                    <span>{{ system_status_text | default('Sistem Aktif') }}</span>
                 </div>
                 <div class="user-profile-card">
                     <div class="user-profile-info">
@@ -8162,7 +8918,7 @@ function esc(str) {
                         <i class="fa-solid fa-power-off"></i>
                     </button>
                 </div>
-                <div class="version-pill" onclick="showVersionModal()" title="Sürüm Bilgisi">
+                <div class="version-pill" id="versionBadge" onclick="showVersionModal()" title="Sürüm Bilgisi">
                     <i class="fa-solid fa-code-branch" style="color: #38bdf8;"></i>
                     <span id="versionText">{{ current_app_version }}</span>
                 </div>
@@ -8171,314 +8927,177 @@ function esc(str) {
 
         <!-- SAĞ ANA İÇERİK ALANI -->
         <main class="main-content">
-            <header class="content-header">
+
+        <!-- SÜRÜM & GÜNCELLEME MODALI -->
+        <div id="versionModal" class="modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px);">
+            <div style="background:#1e293b; color:#fff; max-width:450px; margin:10% auto; padding:24px; border-radius:16px; border:1px solid rgba(255,255,255,0.1); box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
+                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:12px; margin-bottom:16px;">
+                    <h3 style="margin:0; font-size:1.15rem; color:#38bdf8; display:flex; align-items:center; gap:8px;">
+                        <i class="fa-solid fa-circle-info"></i> Uygulama Sürüm Bilgisi
+                    </h3>
+                    <span onclick="closeVersionModal()" style="cursor:pointer; font-size:1.4rem; color:#94a3b8;">&times;</span>
+                </div>
+                <div style="font-size:0.95rem; line-height:1.8;">
+                    <p style="margin:6px 0;"><strong>📦 Sürüm Kodu:</strong> <span id="modalCommitHash" style="color:#38bdf8; font-family:monospace; font-weight:bold;">{{ current_app_commit }}</span></p>
+                    <p style="margin:6px 0;"><strong>📅 Son Güncelleme:</strong> <span id="modalCommitDate" style="color:#f1f5f9;">{{ current_app_date }}</span></p>
+                    <p style="margin:6px 0;"><strong>📝 Son Değişiklik Notu:</strong></p>
+                    <div id="modalCommitMsg" style="background:#0f172a; padding:10px 14px; border-radius:8px; font-size:0.85rem; color:#cbd5e1; border:1px solid rgba(255,255,255,0.05); margin-top:4px;">{{ current_app_msg }}</div>
+                    <div style="margin-top:16px; background:rgba(34, 197, 94, 0.15); border:1px solid rgba(34, 197, 94, 0.3); color:#4ade80; padding:8px 12px; border-radius:8px; text-align:center; font-size:0.85rem; font-weight:600;">
+                        🟢 GitHub Sunucusu ile Eşitlendi & Güncel
+                    </div>
+                </div>
+                <div style="text-align:right; margin-top:20px;">
+                    <button onclick="closeVersionModal()" style="background:#3b82f6; color:#fff; border:none; padding:8px 18px; border-radius:8px; font-weight:600; cursor:pointer;">Kapat</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- HIZLI REHBER BAR -->
+        <div class="quick-guide-bar">
+            <div class="guide-item">
+                <span class="guide-num">1</span>
                 <div>
-                    <h1 class="page-title"><i class="fa-solid fa-boxes-packing icon-green"></i> Depoya Kabul Et & Gelen Bildirimler</h1>
-                    <p class="page-subtitle">Toptancı ve üreticilerden size kesilen gelen faturaları görüntüleyin ve depoya kabul edin.</p>
+                    <strong>Bakanlık Verisi</strong>
+                    <span>Sunucudan otomatik çekilir</span>
                 </div>
-            </header>
-
-        <!-- ÜÇLÜ PANEL LAYOUT -->
-        <div class="kabul-grid">
-            
-            <!-- PANEL 1: GELEN BİLDİRİMLER (BKST) -->
-            <section class="panel glass-card">
-                <div class="panel-head-flex">
-                    <div class="panel-title-group">
-                        <i class="fa-solid fa-inbox icon-primary"></i>
-                        <div>
-                            <h2>1. Bölüm: Gelen / Bekleyen Bildirimler</h2>
-                            <p class="panel-subtitle">Toptancı veya üreticilerden size kesilen gelen irsaliye/faturalar.</p>
-                        </div>
-                    </div>
+            </div>
+            <div class="guide-item">
+                <span class="guide-num">2</span>
+                <div>
+                    <strong>Terek (Raf) Sayımı Yap</strong>
+                    <span>Koli / Ürün QR okutarak eksikleri bulun</span>
                 </div>
+            </div>
+            <div class="guide-item">
+                <span class="guide-num">3</span>
+                <div>
+                    <strong>Çıkış Listesine Aktar</strong>
+                    <span>Tereğinizde olmayan ürünleri tek tıkla düşüş yapın</span>
+                </div>
+            </div>
+        </div>
 
-                <div style="background:rgba(16, 185, 129, 0.1); border:1px solid rgba(16, 185, 129, 0.3); border-radius:10px; padding:0.75rem 1rem; margin-top:0.8rem; font-size:0.82rem; color:#6ee7b7; display:flex; align-items:center; gap:0.6rem;">
-                    <i class="fa-solid fa-shield-halved" style="font-size:1.2rem; color:#10b981;"></i>
+        <!-- OTOMATİK YÜKLEME EKRANI (APPLICATION START LOADING OVERLAY) -->
+        <div id="auto-sync-loader" style="display:none; position:fixed; z-index:99999; left:0; top:0; width:100%; height:100%; background:rgba(10, 11, 16, 0.94); backdrop-filter:blur(14px); flex-direction:column; align-items:center; justify-content:center; text-align:center;">
+            <div style="background:rgba(15, 23, 42, 0.96); border:1px solid rgba(56, 189, 248, 0.35); border-radius:24px; padding:2.8rem 3rem; max-width:520px; width:90%; box-shadow:0 25px 50px rgba(0,0,0,0.8); transition: all 0.3s ease;">
+                <div id="loader-icon-box" style="width:80px; height:80px; border-radius:50%; background:rgba(56,189,248,0.15); border:2px solid rgba(56,189,248,0.4); margin:0 auto 1.5rem auto; display:flex; align-items:center; justify-content:center; transition: all 0.3s ease;">
+                    <i id="loader-icon" class="fa-solid fa-cloud-arrow-down fa-bounce" style="font-size:2.4rem; color:#38bdf8;"></i>
+                </div>
+                <h2 id="loader-title" style="font-family:var(--font-outfit); font-size:1.45rem; font-weight:800; color:#fff; margin:0 0 0.6rem 0;">
+                    Bakanlıktan Güncel Veriler Çekiliyor...
+                </h2>
+                <p id="loader-status" style="font-size:0.95rem; color:var(--text-muted); margin:0 0 1.6rem 0; line-height:1.6; transition: all 0.3s ease;">
+                    Lütfen bekleyin, BKST sunucusundan güncel stok ve karekod verileriniz otomatik çekiliyor.
+                </p>
+                <div style="background:rgba(255,255,255,0.06); height:6px; border-radius:10px; overflow:hidden; width:100%;">
+                    <div id="loader-progress-bar" style="background:linear-gradient(90deg, #38bdf8, #818cf8); height:100%; width:100%; transition: background 0.4s ease, width 0.4s ease;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Terek (Raf) QR Sayım & Stok Eşitleme Paneli -->
+        <section class="panel glass-card audit-panel">
+            <div class="panel-head-flex">
+                <div class="panel-title-group">
+                    <i class="fa-solid fa-box-archive icon-green"></i>
                     <div>
-                        <b>Güvenlik Filtresi Aktif:</b> Sadece tedarikçilerden size kesilen <b>"MAL ALIM" (Gelen)</b> bildirimleri listelenir. Satış veya çıkış bildirimleriniz buraya düşmez.
+                        <h2>Terek (Raf) QR Sayım & Stok Eşitleme</h2>
+                        <p class="panel-subtitle">Koli veya ürün QR okutun. Bakanlık stoğundaki eksik ürünler otomatik tespit edilir.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Barkod Okutma Kutusu -->
+            <div class="scan-input-wrapper">
+                <i class="fa-solid fa-barcode scan-icon"></i>
+                <input type="text" id="audit-input-main" onkeydown="window.handleAuditKeypress(event)" placeholder="Barkod veya İlaç QR okutun (Enter'a basın)..." autocomplete="off">
+                <button type="button" id="btn-audit-submit-trigger" class="btn btn-success btn-scan">
+                    <i class="fa-solid fa-magnifying-glass"></i> Oku / Ekle
+                </button>
+            </div>
+
+            <!-- Bildirim Kutusu -->
+            <div id="audit-msg-box" class="hidden audit-msg"></div>
+
+            <!-- Sayım Sonuçları Paneli -->
+            <div id="audit-results-wrapper" class="hidden">
+
+                <!-- Stok Eşitleme Bildirimi -->
+                <div id="audit-sync-alert-box" class="sync-alert-box">
+                    <i class="fa-solid fa-triangle-exclamation alert-icon"></i>
+                    <div id="audit-sync-alert-text" class="alert-text">
+                        Tereğinizde fiziken bulunmayan 🔴 0 adet ürünü Bakanlık sitesinden ÇIKIŞ yapmalısınız!
                     </div>
                 </div>
 
-                <div class="bkst-controls margin-top-sm" style="display:flex; gap:0.8rem; flex-wrap:wrap;">
-                    <button type="button" id="btn-fetch-incoming" class="btn btn-primary" style="flex:1;">
-                        <i class="fa-solid fa-cloud-arrow-down"></i> 📥 1. Gelen Mal Alım Bildirimlerini Çek (BKST)
+                <!-- İncelenen Koliler -->
+                <div class="koli-badges-container">
+                    <span class="koli-badges-label"><i class="fa-solid fa-boxes-packing color-blue"></i> İncelenen Koliler:</span>
+                    <div id="audit-kolis-list" class="koli-badges-list">
+                        <span class="badge">Henüz koli yüklenmedi</span>
+                    </div>
+                </div>
+
+                <!-- İstatistik Özeti -->
+                <div class="audit-stats-grid">
+                    <div class="audit-stat-card">
+                        <span class="audit-stat-lbl">Bakanlık Koli Stoğu</span>
+                        <span id="audit-cnt-total" class="audit-stat-val">0 Adet</span>
+                    </div>
+                    <div class="audit-stat-card card-ok">
+                        <span class="audit-stat-lbl">🟢 Tereğimde VAR</span>
+                        <span id="audit-cnt-ok" class="audit-stat-val text-ok">0 Adet</span>
+                    </div>
+                    <div class="audit-stat-card card-missing">
+                        <span class="audit-stat-lbl">🔴 Tereğimde YOK</span>
+                        <span id="audit-cnt-missing" class="audit-stat-val text-missing">0 Adet</span>
+                    </div>
+                </div>
+
+                <!-- Butonlar -->
+                <div class="audit-actions">
+                    <button class="btn btn-purple btn-sm" id="btn-audit-toggle-mode" type="button">
+                        <i class="fa-solid fa-layer-group"></i> 📊 Okutulan Kalemleri Tüm Depoyla Karşılaştır
+                    </button>
+                    <button class="btn btn-danger btn-sm" id="btn-audit-send-cikis" type="button" onclick="transferMissingToCikis()">
+                        <i class="fa-solid fa-box-open"></i> 🔴 Tereğimde Olmayanları Çıkış Listesine Aktar
+                    </button>
+                    <button class="btn btn-success btn-sm" id="btn-dl-audit-excel" type="button">
+                        <i class="fa-solid fa-file-excel"></i> 📥 Tereğümde Olmayan Ürünleri İndir (Excel)
+                    </button>
+                    <button id="btn-audit-reset-koli" class="btn btn-outline btn-sm" type="button">
+                        <i class="fa-solid fa-rotate-left"></i> Sayımı Temizle
                     </button>
                 </div>
 
-                <div id="incoming-msg-box" class="status-msg hidden margin-top-sm"></div>
-
-                <div class="data-table-wrapper margin-top-md">
-                    <table class="kabul-table" id="table-incoming">
-                        <thead>
-                            <tr>
-                                <th style="width:40px;">Seç</th>
-                                <th>Gönderici Firma / GLN</th>
-                                <th>Belge No</th>
-                                <th>Tarih</th>
-                                <th>Tip</th>
-                                <th>Adet</th>
-                                <th>Durum</th>
-                            </tr>
-                        </thead>
-                        <tbody id="tbody-incoming">
-                            <tr>
-                                <td colspan="7" style="text-align:center; color:var(--text-muted); padding:2.5rem;">
-                                    Henüz bildirim çekilmedi. <b>"Gelen Bildirimleri Çek"</b> butonuna basarak BKST üzerindeki faturaları listeleyebilirsiniz.
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </section>
-
-            <!-- PANEL 2: SEÇİLEN BİLDİRİM DETAYLARI & KABUL ET -->
-            <section class="panel glass-card">
-                <div class="panel-head-flex">
-                    <div class="panel-title-group">
-                        <i class="fa-solid fa-boxes-packing icon-green"></i>
-                        <div>
-                            <h2>2. Bölüm: Bildirim Detayı & Depoya Kabul</h2>
-                            <p class="panel-subtitle">Seçilen belgedeki karekodlar ve depoya ekleme işlemi.</p>
-                        </div>
-                    </div>
-                </div>
-
-                <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); padding:0.9rem 1.1rem; border-radius:12px; display:flex; justify-content:space-between; align-items:center;">
-                    <div>
-                        <span style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Seçilen Belge No:</span>
-                        <h3 id="lbl-selected-doc" style="margin-top:2px; font-family:var(--font-outfit); font-size:1.15rem; color:#38bdf8;">Henüz Belge Seçilmedi</h3>
-                    </div>
-                    <div style="text-align:right;">
-                        <span style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Ürün Sayısı:</span>
-                        <h3 id="lbl-selected-count" style="margin-top:2px; font-family:var(--font-outfit); font-size:1.15rem; color:#10b981;">0 Adet</h3>
-                    </div>
-                </div>
-
-                <!-- TEK TUŞLA DEPOYA KABUL ET BUTONU -->
-                <button type="button" id="btn-accept-warehouse" class="btn-kabul-big margin-top-md" disabled>
-                    <i class="fa-solid fa-circle-check"></i> 🟢 Tek Tuşla Depoya Kabul Et (MALALIM)
-                </button>
-
-                <div id="accept-msg-box" class="status-msg hidden margin-top-sm"></div>
-
-                <!-- DETAY ÜRÜN TABLOSU -->
-                <div class="data-table-wrapper margin-top-md" style="max-height: 280px;">
-                    <table class="kabul-table" id="table-details">
+                <!-- Tablo -->
+                <div class="table-scroll-container">
+                    <table class="data-table">
                         <thead>
                             <tr>
                                 <th>#</th>
-                                <th>Karekod</th>
                                 <th>Ürün Adı</th>
-                                <th>GTIN / Barkod</th>
+                                <th>Koli No</th>
+                                <th>Karekod</th>
                                 <th>Seri No</th>
-                                <th>SKT</th>
+                                <th>Parti No</th>
+                                <th>Palet No</th>
+                                <th style="text-align: center;">Terek Durumu</th>
+                                <th>Açıklama</th>
                             </tr>
                         </thead>
-                        <tbody id="tbody-details">
-                            <tr>
-                                <td colspan="6" style="text-align:center; color:var(--text-muted); padding:2rem;">
-                                    Lütfen sol taraftan detaylarını görmek istediğiniz bir bildirime tıklayın.
-                                </td>
-                            </tr>
-                        </tbody>
+                        <tbody id="audit-table-body"></tbody>
                     </table>
                 </div>
-            </section>
+            </div>
+        </section>
 
-        </div>
+        <footer class="app-footer-bottom">
+            <p>&copy; 2026 QR Compare - Akıllı Stok & Karekod Eşitleme</p>
+        </footer>
         </main>
     </div>
 
-    <!-- SÜRÜM & GÜNCELLEME MODALI -->
-    <div id="versionModal" class="modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px);">
-        <div style="background:#1e293b; color:#fff; max-width:450px; margin:10% auto; padding:24px; border-radius:16px; border:1px solid rgba(255,255,255,0.1); box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
-            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:12px; margin-bottom:16px;">
-                <h3 style="margin:0; font-size:1.15rem; color:#38bdf8; display:flex; align-items:center; gap:8px;">
-                    <i class="fa-solid fa-circle-info"></i> Uygulama Sürüm Bilgisi
-                </h3>
-                <span onclick="closeVersionModal()" style="cursor:pointer; font-size:1.4rem; color:#94a3b8;">&times;</span>
-            </div>
-            <div style="font-size:0.95rem; line-height:1.8;">
-                <p style="margin:6px 0;"><strong>📦 Sürüm Kodu:</strong> <span id="modalCommitHash" style="color:#38bdf8; font-family:monospace; font-weight:bold;">v3.1.0</span></p>
-                <p style="margin:6px 0;"><strong>📅 Son Güncelleme:</strong> <span id="modalCommitDate" style="color:#f1f5f9;">08.10.2026</span></p>
-                <p style="margin:6px 0;"><strong>📝 Son Değişiklik Notu:</strong></p>
-                <div id="modalCommitMsg" style="background:#0f172a; padding:10px 14px; border-radius:8px; font-size:0.85rem; color:#cbd5e1; border:1px solid rgba(255,255,255,0.05); margin-top:4px;">v3.1.0: Tam ekran masaüstü modu, SQLite DB entegrasyonu, otomatik kapanma ve stabilite güncellemeleri</div>
-                <div style="margin-top:16px; background:rgba(34, 197, 94, 0.15); border:1px solid rgba(34, 197, 94, 0.3); color:#4ade80; padding:8px 12px; border-radius:8px; text-align:center; font-size:0.85rem; font-weight:600;">
-                    🟢 GitHub Sunucusu ile Eşitlendi & Güncel
-                </div>
-            </div>
-            <div style="margin-top:16px; text-align:right;">
-                <button onclick="closeVersionModal()" style="background:#3b82f6; color:#fff; border:none; padding:8px 18px; border-radius:8px; font-weight:600; cursor:pointer;">Kapat</button>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        let selectedNotificationData = null;
-
-        const btnFetchIncoming = document.getElementById('btn-fetch-incoming');
-        const btnAcceptWarehouse = document.getElementById('btn-accept-warehouse');
-        const incomingMsgBox = document.getElementById('incoming-msg-box');
-        const acceptMsgBox = document.getElementById('accept-msg-box');
-        const tbodyIncoming = document.getElementById('tbody-incoming');
-        const tbodyDetails = document.getElementById('tbody-details');
-        const lblSelectedDoc = document.getElementById('lbl-selected-doc');
-        const lblSelectedCount = document.getElementById('lbl-selected-count');
-
-        // Gelen Bildirimleri Çek
-        btnFetchIncoming.addEventListener('click', async () => {
-            btnFetchIncoming.disabled = true;
-            btnFetchIncoming.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> BKST Sunucusuna Bağlanılıyor...';
-            showMsg(incomingMsgBox, 'loading', 'Bakanlık gelen bildirim listesi sorgulanıyor, lütfen bekleyin...');
-
-            try {
-                const res = await fetch('/api/depo_kabul/gelen_listesi', { method: 'POST' });
-                const data = await res.json();
-
-                if (data.success) {
-                    showMsg(incomingMsgBox, 'success', data.message || 'Gelen bildirimler başarıyla çekildi.');
-                    renderIncomingTable(data.notifications || []);
-                } else {
-                    showMsg(incomingMsgBox, 'error', data.error || 'Gelen bildirimler çekilemedi.');
-                }
-            } catch (err) {
-                showMsg(incomingMsgBox, 'error', 'Bağlantı hatası: ' + err.message);
-            } finally {
-                btnFetchIncoming.disabled = false;
-                btnFetchIncoming.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> 📥 1. Gelen Bildirimleri Çek (BKST)';
-            }
-        });
-
-        // Bildirim Tablosunu Bas
-        function renderIncomingTable(items) {
-            // Güvenlik Önlemi: Satış veya Çıkış türündeki tüm bildirimleri kesin olarak süz
-            const validItems = (items || []).filter(item => {
-                const op = String(item.OPERATION || item.OperationName || '').toUpperCase();
-                return !op.includes('SATIS') && !op.includes('SATIŞ') && !op.includes('CIKIS') && !op.includes('ÇIKIŞ') && !op.includes('GİDEN');
-            });
-
-            if (!validItems || validItems.length === 0) {
-                tbodyIncoming.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:2rem;">Tipi "MAL ALIM" olan gelen/bekleyen bildirim bulunamadı.</td></tr>';
-                return;
-            }
-
-            tbodyIncoming.innerHTML = validItems.map((item, index) => `
-                <tr onclick="selectNotification(${index}, this)" id="row-incoming-${index}">
-                    <td style="text-align:center;"><i class="fa-regular fa-circle radio-icon"></i></td>
-                    <td><b>${esc(item.CompanyTitle || item.SENDER || 'Bilinmiyor')}</b></td>
-                    <td><span style="font-family:monospace; color:#38bdf8;">${esc(item.WAYBILLNUMBER || '-')}</span></td>
-                    <td>${esc(item.WAYBILLDATE || item.OPERATIONDATE || '-')}</td>
-                    <td><span class="badge-type" style="background:rgba(16,185,129,0.2); color:#6ee7b7; border:1px solid rgba(16,185,129,0.4); padding:2px 8px; border-radius:6px; font-weight:700;">MAL ALIM</span></td>
-                    <td><b>${item.PRODUCTCOUNT || 0}</b></td>
-                    <td><span style="color:#10b981;">${esc(item.HEADERSTATE || 'Bekliyor')}</span></td>
-                </tr>
-            `).join('');
-
-            window.incomingItems = validItems;
-        }
-
-        // Satır Seçimi ve Detay Getirme
-        window.selectNotification = async function(index, trEl) {
-            document.querySelectorAll('#tbody-incoming tr').forEach(r => {
-                r.classList.remove('selected-row');
-                const ic = r.querySelector('.radio-icon');
-                if (ic) ic.className = 'fa-regular fa-circle radio-icon';
-            });
-
-            trEl.classList.add('selected-row');
-            const icon = trEl.querySelector('.radio-icon');
-            if (icon) icon.className = 'fa-solid fa-circle-dot radio-icon';
-
-            const item = window.incomingItems[index];
-            selectedNotificationData = item;
-
-            lblSelectedDoc.textContent = item.WAYBILLNUMBER || 'Belge #' + (index+1);
-            lblSelectedCount.textContent = (item.PRODUCTCOUNT || 0) + ' Adet';
-            btnAcceptWarehouse.disabled = false;
-
-            // Detayları Yükle
-            tbodyDetails.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:2rem;"><i class="fa-solid fa-spinner fa-spin"></i> Ürün detayları getiriliyor...</td></tr>';
-
-            try {
-                const res = await fetch('/api/depo_kabul/detay/' + encodeURIComponent(item.HEADERID || item.WAYBILLNUMBER || index));
-                const data = await res.json();
-                if (data.success && data.products) {
-                    renderDetailsTable(data.products);
-                } else {
-                    renderDetailsTable(item.products || []);
-                }
-            } catch (err) {
-                renderDetailsTable(item.products || []);
-            }
-        };
-
-        function renderDetailsTable(prods) {
-            if (!prods || prods.length === 0) {
-                tbodyDetails.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:1.5rem;">Bu bildirime ait karekod detayı bulunamadı.</td></tr>';
-                return;
-            }
-
-            tbodyDetails.innerHTML = prods.map((p, i) => `
-                <tr>
-                    <td>${i+1}</td>
-                    <td style="font-family:monospace; font-size:0.78rem; color:#6ee7b7;">${esc(p.Karekod || p.KAREKOD || '-')}</td>
-                    <td><b>${esc(p['Ürün Adı'] || p.STOCKNAME || '-')}</b></td>
-                    <td>${esc(p['Gtin / Barkod'] || p.BARCODE || '-')}</td>
-                    <td>${esc(p['Seri Numarası'] || p.SERIALNUMBER || '-')}</td>
-                    <td>${esc(p['Son Kullanma Tarihi'] || p.SKT || '-')}</td>
-                </tr>
-            `).join('');
-        }
-
-        // Tek Tuşla Depoya Kabul Et
-        btnAcceptWarehouse.addEventListener('click', async () => {
-            if (!selectedNotificationData) return;
-
-            btnAcceptWarehouse.disabled = true;
-            btnAcceptWarehouse.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Depoya Kabul Ediliyor (MALALIM)...';
-            showMsg(acceptMsgBox, 'loading', 'Mal alım bildirimi yapılıyor ve ürünler deponuza ekleniyor...');
-
-            try {
-                const res = await fetch('/api/depo_kabul/onayla', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        header_id: selectedNotificationData.HEADERID,
-                        waybill_number: selectedNotificationData.WAYBILLNUMBER,
-                        product_count: selectedNotificationData.PRODUCTCOUNT,
-                        products: selectedNotificationData.products || []
-                    })
-                });
-
-                const data = await res.json();
-                if (data.success) {
-                    showMsg(acceptMsgBox, 'success', data.message || '🟢 Bildirim deponuza başarıyla kabul edildi!');
-                    btnAcceptWarehouse.innerHTML = '<i class="fa-solid fa-check-double"></i> 🟢 Depoya Kabul Edildi!';
-                    btnAcceptWarehouse.style.background = '#059669';
-                } else {
-                    showMsg(acceptMsgBox, 'error', data.error || 'Depoya kabul edilemedi.');
-                    btnAcceptWarehouse.disabled = false;
-                    btnAcceptWarehouse.innerHTML = '<i class="fa-solid fa-circle-check"></i> 🟢 Tek Tuşla Depoya Kabul Et (MALALIM)';
-                }
-            } catch (err) {
-                showMsg(acceptMsgBox, 'error', 'Hata: ' + err.message);
-                btnAcceptWarehouse.disabled = false;
-                btnAcceptWarehouse.innerHTML = '<i class="fa-solid fa-circle-check"></i> 🟢 Tek Tuşla Depoya Kabul Et (MALALIM)';
-            }
-        });
-
-        function showMsg(box, type, txt) {
-            box.className = 'status-msg ' + (type === 'loading' ? 'msg-loading' : type === 'success' ? 'msg-success' : 'msg-error');
-            box.innerHTML = txt;
-            box.classList.remove('hidden');
-        }
-
-        function esc(str) {
-            return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-        }
-
-    </script>
     <script src="/static/app.js?v=20261005_v3000"></script>
 </body>
 </html>
@@ -8699,9 +9318,9 @@ function esc(str) {
             </nav>
 
             <div class="sidebar-footer">
-                <div class="system-status-pill">
-                    <span class="status-indicator online"></span>
-                    <span>Sistem Aktif</span>
+                <div class="system-status-pill {{ 'offline' if not is_system_active else '' }}">
+                    <span class="status-indicator {{ system_status_cls | default('online') }}"></span>
+                    <span>{{ system_status_text | default('Sistem Aktif') }}</span>
                 </div>
                 <div class="user-profile-card">
                     <div class="user-profile-info">
@@ -8967,10 +9586,10 @@ function esc(str) {
                 <span onclick="closeVersionModal()" style="cursor:pointer; font-size:1.4rem; color:#94a3b8;">&times;</span>
             </div>
             <div style="font-size:0.95rem; line-height:1.8;">
-                <p style="margin:6px 0;"><strong>📦 Sürüm Kodu:</strong> <span id="modalCommitHash" style="color:#38bdf8; font-family:monospace; font-weight:bold;">v3.1.0</span></p>
-                <p style="margin:6px 0;"><strong>📅 Son Güncelleme:</strong> <span id="modalCommitDate" style="color:#f1f5f9;">08.10.2026</span></p>
+                <p style="margin:6px 0;"><strong>📦 Sürüm Kodu:</strong> <span id="modalCommitHash" style="color:#38bdf8; font-family:monospace; font-weight:bold;">{{ current_app_commit }}</span></p>
+                <p style="margin:6px 0;"><strong>📅 Son Güncelleme:</strong> <span id="modalCommitDate" style="color:#f1f5f9;">{{ current_app_date }}</span></p>
                 <p style="margin:6px 0;"><strong>📝 Son Değişiklik Notu:</strong></p>
-                <div id="modalCommitMsg" style="background:#0f172a; padding:10px 14px; border-radius:8px; font-size:0.85rem; color:#cbd5e1; border:1px solid rgba(255,255,255,0.05); margin-top:4px;">v3.1.0: Tam ekran masaüstü modu, SQLite DB entegrasyonu, otomatik kapanma ve stabilite güncellemeleri</div>
+                <div id="modalCommitMsg" style="background:#0f172a; padding:10px 14px; border-radius:8px; font-size:0.85rem; color:#cbd5e1; border:1px solid rgba(255,255,255,0.05); margin-top:4px;">{{ current_app_msg }}</div>
                 <div style="margin-top:16px; background:rgba(34, 197, 94, 0.15); border:1px solid rgba(34, 197, 94, 0.3); color:#4ade80; padding:8px 12px; border-radius:8px; text-align:center; font-size:0.85rem; font-weight:600;">
                     🟢 GitHub Sunucusu ile Eşitlendi & Güncel
                 </div>
@@ -9225,7 +9844,8 @@ function esc(str) {
         }
 
         function esc(str) {
-            return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+            if (window.esc) return window.esc(str);
+            return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
         }
 
     </script>
@@ -9436,7 +10056,11 @@ function esc(str) {
                 const data = await res.json();
 
                 if (data.success) {
-                    sessionStorage.clear();
+                    if (data.token) {
+                        localStorage.setItem('local_session_token', data.token);
+                    }
+                    sessionStorage.removeItem('app_launch_synced');
+                    sessionStorage.setItem('startup_update_checked', 'true');
                     showAlert('🟢 Giriş başarılı! Yönlendiriliyorsunuz...', false);
                     setTimeout(() => {
                         window.location.href = '/cikis?force_sync=1';
@@ -9473,11 +10097,234 @@ function esc(str) {
                 fetch('/api/system/heartbeat', { method: 'POST' }).catch(() => {});
             }
             sendPing();
-            setInterval(sendPing, 3000);
+            setInterval(sendPing, 10000);
         })();
+
+        // İlk Açılışta Arka Plan Güncelleme Kontrolü (Login Formu Öncesi)
+        (async function checkLoginStartupUpdate() {
+            if (sessionStorage.getItem('startup_update_checked')) {
+                return;
+            }
+            sessionStorage.setItem('startup_update_checked', 'true');
+
+            try {
+                const res = await fetch('/api/system/check_update');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data && data.has_update) {
+                        showLoginUpdateOverlay(data);
+                    }
+                }
+            } catch (e) {
+                console.warn("Login update check error:", e);
+            }
+        })();
+
+        function showLoginUpdateOverlay(updateInfo) {
+            let overlay = document.getElementById('loginUpdateOverlay');
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'loginUpdateOverlay';
+                overlay.style.cssText = `
+                    position: fixed;
+                    top: 0; left: 0; width: 100vw; height: 100vh;
+                    background: #0f172a;
+                    color: #ffffff;
+                    z-index: 9999999;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    font-family: 'Outfit', 'Inter', sans-serif;
+                    text-align: center;
+                    padding: 20px;
+                `;
+                overlay.innerHTML = `
+                    <div style="background: rgba(30, 41, 59, 0.95); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 24px; padding: 40px 32px; max-width: 480px; width: 90%; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.8); backdrop-filter: blur(12px);">
+                        <div style="width: 80px; height: 80px; margin: 0 auto 20px; background: rgba(56, 189, 248, 0.12); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                            <i class="fa-solid fa-cloud-arrow-down fa-bounce" style="font-size: 38px; color: #38bdf8;"></i>
+                        </div>
+                        <h2 style="font-size: 1.55rem; font-weight: 800; margin-bottom: 10px; color: #f8fafc;">Uygulama Güncelleniyor</h2>
+                        <p id="loginUpdateMsg" style="font-size: 0.95rem; color: #94a3b8; line-height: 1.6; margin-bottom: 24px;">
+                            Yeni sürüm (${updateInfo.remote_version || 'v3.1.x'}) tespit edildi. Güncelleme paketleri indiriliyor ve sisteme entegre ediliyor...
+                        </p>
+                        <div style="width: 100%; height: 8px; background: #334155; border-radius: 999px; overflow: hidden; position: relative;">
+                            <div id="loginUpdateBar" style="width: 45%; height: 100%; background: linear-gradient(90deg, #38bdf8, #3b82f6); border-radius: 999px; transition: width 0.4s ease; animation: updateProgressAnim 1.8s infinite linear;"></div>
+                        </div>
+                        <p id="loginUpdateSub" style="font-size: 0.82rem; color: #64748b; margin-top: 18px; font-weight: 500;">
+                            <i class="fa-solid fa-circle-info" style="color: #38bdf8; margin-right: 4px;"></i> İşlem tamamlandığında program sıfırdan otomatik başlatılacaktır.
+                        </p>
+                    </div>
+                    <style>
+                        @keyframes updateProgressAnim {
+                            0% { transform: translateX(-100%); width: 30%; }
+                            50% { width: 60%; }
+                            100% { transform: translateX(350%); width: 30%; }
+                        }
+                    </style>
+                `;
+                document.body.appendChild(overlay);
+            }
+
+            fetch('/api/system/apply_update', { method: 'POST' })
+                .then(res => res.json())
+                .then(async data => {
+                    const msgEl = document.getElementById('loginUpdateMsg');
+                    const barEl = document.getElementById('loginUpdateBar');
+                    const subEl = document.getElementById('loginUpdateSub');
+
+                    if (data.success && data.updated) {
+                        if (barEl) {
+                            barEl.style.animation = 'none';
+                            barEl.style.width = '100%';
+                        }
+                        if (msgEl) {
+                            msgEl.style.color = '#4ade80';
+                            msgEl.innerHTML = '<strong>✅ Güncelleme Başarıyla Tamamlandı!</strong><br>Program sıfırdan yeniden başlatılıyor...';
+                        }
+                        if (subEl) subEl.textContent = 'Yeni sistem yükleniyor, lütfen bekleyin...';
+
+                        await new Promise(r => setTimeout(r, 2200));
+                        for (let i = 0; i < 30; i++) {
+                            await new Promise(r => setTimeout(r, 800));
+                            try {
+                                const ping = await fetch('/api/system/heartbeat', { method: 'POST' });
+                                if (ping.ok) break;
+                            } catch (_) {}
+                        }
+                        window.location.reload(true);
+                    } else {
+                        if (msgEl) msgEl.textContent = data.message || "Sistem zaten güncel.";
+                        setTimeout(() => { if (overlay) overlay.remove(); }, 1200);
+                    }
+                })
+                .catch(err => {
+                    console.error("Login apply update error:", err);
+                    setTimeout(() => { if (overlay) overlay.remove(); }, 2000);
+                });
+        }
     </script>
 </body>
 </html>
+
+```
+
+---
+
+### 📁 `Calistir.bat`
+
+```bat
+@echo off
+cd /d "%~dp0"
+chcp 65001 > nul
+title QR Stok Yonetim Sistemi
+
+:: 1. Python kontrolu
+python --version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo ============================================================
+    echo [HATA] Python bu bilgisayarda bulunamadi!
+    echo.
+    echo Lutfen https://www.python.org adresinden Python'u indirin.
+    echo KURULUM SIRASINDA EN ALTTAKI "Add Python to PATH" KUTUCUGUNU
+    echo MUTLAKA ISARETLEYIN!
+    echo ============================================================
+    echo.
+    pause
+    exit /b 1
+)
+
+:: 2. Gerekli kutuphaneler kontrolu
+python -c "import flask, waitress, pandas, openpyxl, requests" >nul 2>&1
+if %errorlevel% neq 0 (
+    echo ============================================================
+    echo [BILGI] Ilk calisma icin gerekli paketler kuruluyor...
+    echo (waitress, flask, pandas, openpyxl, requests vb.)
+    echo Lutfen bekleyin, bu islem sadece bir kez yapilacaktir...
+    echo ============================================================
+    echo.
+    python -m pip install --upgrade pip >nul 2>&1
+    python -m pip install -r requirements.txt
+    if %errorlevel% neq 0 (
+        echo.
+        echo [BILGI] requirements.txt tam yuklenemedi, temel kutuphaneler kuruluyor...
+        python -m pip install flask waitress pandas openpyxl requests xlrd
+    )
+    echo.
+    echo [BASARILI] Tum paketler kuruldu, program baslatiliyor...
+    timeout /t 2 >nul
+)
+
+:: 3. Calistir
+if exist "%~dp0Calistir.exe" (
+    start "" "%~dp0Calistir.exe"
+) else (
+    start "" pythonw launcher.py
+)
+exit
+
+```
+
+---
+
+### 📁 `Guncelle.bat`
+
+```bat
+@echo off
+cd /d "%~dp0"
+set PYTHONIOENCODING=utf-8
+chcp 65001 > nul
+title QR Stok Yonetim Sistemi - Guncelleyici
+
+echo.
+echo ============================================================
+echo      QR STOK YONETIM SISTEMI - GUNCELLEME SERVISI
+echo ============================================================
+echo.
+
+python guncelleme_kontrol.py
+
+echo.
+echo ============================================================
+echo [TAMAMLANDI] Islem sona erdi.
+echo ============================================================
+echo.
+echo Pencereyi kapatmak icin herhangi bir tusa basin...
+pause >nul
+exit
+
+```
+
+---
+
+### 📁 `Kapat.bat`
+
+```bat
+@echo off
+cd /d "%~dp0"
+chcp 65001 > nul
+title QR Stok Yonetim Sistemi - Kapatici
+
+echo.
+echo ============================================================
+echo   QR STOK YÖNETİM SİSTEMİ ARKA PLAN SUNUCUSU KAPATILIYOR...
+echo ============================================================
+echo.
+
+powershell -Command "Get-Process python,pythonw,py -ErrorAction SilentlyContinue | Stop-Process -Force" > nul 2>&1
+taskkill /F /IM python.exe > nul 2>&1
+taskkill /F /IM pythonw.exe > nul 2>&1
+taskkill /F /IM py.exe > nul 2>&1
+
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr :5000 ^| findstr LISTENING') do (
+    taskkill /F /PID %%a > nul 2>&1
+)
+
+echo.
+echo 🟢 Arka plandaki tüm sunucu süreçleri başarıyla kapatıldı.
+echo.
+timeout /t 2 > nul
+exit
 
 ```
 

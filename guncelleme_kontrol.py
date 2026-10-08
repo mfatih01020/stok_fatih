@@ -4,6 +4,7 @@ import subprocess
 import shutil
 import json
 import time
+import re
 from datetime import datetime
 
 # Çalışma dizinini script'in bulunduğu klasöre sabitle
@@ -91,7 +92,30 @@ def recompile_exe_if_possible():
         except Exception:
             pass
 
+def is_dev_mode():
+    if os.environ.get("DEV_MODE") == "1":
+        return True
+    if os.path.exists(os.path.join(BASE_DIR, ".dev_mode")):
+        return True
+    return False
+
+def parse_version_tuple(v_str):
+    try:
+        clean = re.sub(r'[^0-9.]', '', str(v_str))
+        parts = [int(p) for p in clean.split('.') if p.isdigit()]
+        return tuple(parts)
+    except Exception:
+        return (0, 0, 0)
+
 def http_update():
+    if is_dev_mode():
+        print(f"\n{YELLOW}{BOLD} =============================================================={RESET}")
+        print(f"{YELLOW}{BOLD}  🔧 [GELİŞTİRİCİ MODU AKTİF] (.dev_mode dosyası mevcut){RESET}")
+        print(f"{WHITE}  Yerel kodlar korunuyor, GitHub'dan indirme/ezme yapılmayacak.{RESET}")
+        print(f"{YELLOW}{BOLD} =============================================================={RESET}\n")
+        install_dependencies()
+        return False
+
     print(f"  {CYAN}[1/3] GitHub sunucusundan en güncel sürüm bilgisi sorgulanıyor...{RESET}")
     try:
         import requests
@@ -130,17 +154,24 @@ def http_update():
 
         local_vpath = os.path.join(BASE_DIR, "version.json")
         local_commit = ""
+        local_version = "v1.0"
         if os.path.exists(local_vpath):
             try:
                 with open(local_vpath, "r", encoding="utf-8") as f:
-                    local_commit = str(json.load(f).get("commit", "")).strip()
+                    v_raw = json.load(f)
+                    local_commit = str(v_raw.get("commit", "")).strip()
+                    local_version = str(v_raw.get("version", "v1.0")).strip()
             except Exception:
                 pass
 
-        if local_commit and local_commit == remote_commit:
+        # Sürüm karşılaştırması: Uzak sürüm yerel sürümden büyük değilse güncelleme yapma!
+        remote_tup = parse_version_tuple(remote_version)
+        local_tup = parse_version_tuple(local_version)
+
+        if remote_tup <= local_tup or (local_commit and local_commit == remote_commit):
             print(f"\n{GREEN}{BOLD} =============================================================={RESET}")
-            print(f"{GREEN}{BOLD}  🟢 [GÜNCEL] Sisteminiz zaten en son sürümde ({remote_version}).{RESET}")
-            print(f"{WHITE}  📦 Sürüm: {remote_version} | Tarih: {remote_date}{RESET}")
+            print(f"{GREEN}{BOLD}  🟢 [GÜNCEL] Sisteminiz zaten en son sürümde ({local_version}).{RESET}")
+            print(f"{WHITE}  📦 Yerel Sürüm: {local_version} | Uzak Sürüm: {remote_version}{RESET}")
             print(f"{GREEN}{BOLD} =============================================================={RESET}\n")
             install_dependencies()
             return False

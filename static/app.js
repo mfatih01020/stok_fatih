@@ -1,46 +1,38 @@
 // ── QR COMPARE APP.JS ──────────────────────────────────────────────────────
 console.log("QR Compare app.js loading...");
 
-// Native Fetch Interceptor for Automatic Session Token Attachment
-const _nativeFetch = window.fetch;
-window.fetch = async function(resource, init = {}) {
+// Global HTML & Attribute Escaping Helpers
+window.esc = function(str) {
+    return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+};
+
+window.escAttr = function(str) {
+    return String(str || '')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+};
+
+// Global Session Authenticated Fetch Helper
+window.apiFetch = async function(resource, init = {}) {
     init = init || {};
     const urlStr = typeof resource === 'string' ? resource : (resource && resource.url ? resource.url : '');
-    if (urlStr && urlStr.startsWith('/api/')) {
-        const token = localStorage.getItem('local_session_token');
-        if (token) {
-            if (init.headers instanceof Headers) {
-                if (!init.headers.has('X-Local-Token')) {
-                    init.headers.append('X-Local-Token', token);
-                }
-            } else {
-                init.headers = init.headers || {};
-                if (!init.headers['X-Local-Token']) {
-                    init.headers['X-Local-Token'] = token;
-                }
-            }
-        }
+    if (init.headers instanceof Headers) {
+        if (!init.headers.has('X-Requested-With')) init.headers.append('X-Requested-With', 'XMLHttpRequest');
+    } else {
+        init.headers = init.headers || {};
+        if (!init.headers['X-Requested-With']) init.headers['X-Requested-With'] = 'XMLHttpRequest';
     }
-    const response = await _nativeFetch(resource, init);
+    const response = await fetch(resource, init);
     if (response.status === 401 && urlStr && urlStr.startsWith('/api/') && !urlStr.startsWith('/api/system/heartbeat') && !urlStr.startsWith('/api/system/user_info')) {
         window.location.href = '/login';
     }
     return response;
 };
-
-// Global Session Authenticated Fetch Wrapper
-window.apiFetch = window.fetch;
-
-(function syncSessionToken() {
-    fetch('/api/system/user_info')
-        .then(res => res.json())
-        .then(data => {
-            if (data && data.token) {
-                localStorage.setItem('local_session_token', data.token);
-            }
-        })
-        .catch(() => {});
-})();
 
 (function initAppWindowControl() {
     if (window.outerWidth < screen.availWidth || window.outerHeight < screen.availHeight) {

@@ -246,6 +246,10 @@
                     <i class="fa-solid fa-boxes-packing"></i>
                     <span>Depoya Kabul Et</span>
                 </a>
+                <a href="/istatistikler" class="sidebar-link">
+                    <i class="fa-solid fa-chart-pie"></i>
+                    <span>İstatistikler & Raporlar</span>
+                </a>
                 <a href="/kullaniciya-satis" class="sidebar-link">
                     <i class="fa-solid fa-user-tag"></i>
                     <span>Kullanıcıya Satış (Demo)</span>
@@ -436,9 +440,17 @@ async function okutBarkod(barkod) {
 
         if (data.success) {
             barkodInput.classList.add('input-success');
-            showResultCard(data.kayit, data.tekrar_uyari);
-            prependRow(data.kayit, data.tekrar_uyari);
-            cntToplam.textContent = parseInt(cntToplam.textContent || '0') + 1;
+            if (data.is_bulk && data.kayitlar && data.kayitlar.length) {
+                showBulkResultCard(data);
+                data.kayitlar.forEach(item => {
+                    prependRow(item, item.tekrar_uyari);
+                });
+                cntToplam.textContent = parseInt(cntToplam.textContent || '0') + data.kayitlar.length;
+            } else {
+                showResultCard(data.kayit, data.tekrar_uyari);
+                prependRow(data.kayit, data.tekrar_uyari);
+                cntToplam.textContent = parseInt(cntToplam.textContent || '0') + 1;
+            }
         } else {
             barkodInput.classList.add('input-error');
             showErrorCard(data.error);
@@ -452,6 +464,26 @@ async function okutBarkod(barkod) {
         barkodInput.focus();
         setTimeout(() => barkodInput.classList.remove('input-success','input-error'), 1500);
     }
+}
+
+function showBulkResultCard(data) {
+    const k = data.kayit || {};
+    const warnHtml = data.tekrar_uyari
+        ? `<span class="uyari-badge"><i class="fa-solid fa-triangle-exclamation"></i> Kolide daha önce okutulmuş mükerrer ürünler var!</span>`
+        : '';
+    resultCard.className = 'result-card ' + (data.tekrar_uyari ? 'warn-card' : 'success-card');
+    resultCard.innerHTML = `
+        <p class="result-card-title"><i class="fa-solid fa-boxes-stacked" style="color:var(--success)"></i> Toplu Koli Çıkışı Başarılı (${data.count} Adet)</p>
+        ${warnHtml}
+        <div class="result-urun-adi">${esc(k.urun_adi || 'Koli')} <span style="font-size:0.88rem; color:#38bdf8; font-weight:600;">(${data.count} Kutu Eklendi)</span></div>
+        <div class="result-grid">
+            <div class="result-field"><span class="label">Koli Numarası</span><span class="val">${esc(k.koli_no || '—')}</span></div>
+            <div class="result-field"><span class="label">Eklenen Kutu</span><span class="val" style="color:#10b981; font-weight:700;">${data.count} Adet</span></div>
+            <div class="result-field"><span class="label">Gtin/Barkod</span><span class="val">${esc(k.barkod || '—')}</span></div>
+            <div class="result-field"><span class="label">Parti Numarası</span><span class="val">${esc(k.parti_no || '—')}</span></div>
+            <div class="result-field"><span class="label">SKT</span><span class="val">${esc(k.skt || '—')}</span></div>
+            <div class="result-field"><span class="label">Kayıt Zamanı</span><span class="val">${esc(k.tarih || '—')}</span></div>
+        </div>`;
 }
 
 function showResultCard(k, tekrar) {

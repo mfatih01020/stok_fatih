@@ -65,7 +65,9 @@
 
         .data-table-wrapper {
             overflow-x: auto;
-            max-height: 420px;
+            overflow-y: auto;
+            height: 480px;
+            max-height: 480px;
             border-radius: 12px;
             border: 1px solid rgba(255,255,255,0.08);
             background: rgba(15, 23, 42, 0.6);
@@ -176,6 +178,10 @@
                 <a href="/depo_kabul" class="sidebar-link active">
                     <i class="fa-solid fa-boxes-packing"></i>
                     <span>Depoya Kabul Et</span>
+                </a>
+                <a href="/istatistikler" class="sidebar-link">
+                    <i class="fa-solid fa-chart-pie"></i>
+                    <span>İstatistikler & Raporlar</span>
                 </a>
                 <a href="/kullaniciya-satis" class="sidebar-link">
                     <i class="fa-solid fa-user-tag"></i>
@@ -298,7 +304,7 @@
                 <div id="accept-msg-box" class="status-msg hidden margin-top-sm"></div>
 
                 <!-- DETAY ÜRÜN TABLOSU -->
-                <div class="data-table-wrapper margin-top-md" style="max-height: 280px;">
+                <div class="data-table-wrapper margin-top-md">
                     <table class="kabul-table" id="table-details">
                         <thead>
                             <tr>
@@ -308,11 +314,12 @@
                                 <th>GTIN / Barkod</th>
                                 <th>Seri No</th>
                                 <th>SKT</th>
+                                <th style="text-align:center;">Durum</th>
                             </tr>
                         </thead>
                         <tbody id="tbody-details">
                             <tr>
-                                <td colspan="6" style="text-align:center; color:var(--text-muted); padding:2rem;">
+                                <td colspan="7" style="text-align:center; color:var(--text-muted); padding:2rem;">
                                     Lütfen sol taraftan detaylarını görmek istediğiniz bir bildirime tıklayın.
                                 </td>
                             </tr>
@@ -350,6 +357,26 @@
     </div>
 
     <script>
+        window.LOCAL_SESSION_TOKEN = "{{ local_session_token }}";
+        if (window.LOCAL_SESSION_TOKEN && window.LOCAL_SESSION_TOKEN !== 'undefined') {
+            localStorage.setItem('local_session_token', window.LOCAL_SESSION_TOKEN);
+        } else if (localStorage.getItem('local_session_token') === 'undefined' || localStorage.getItem('local_session_token') === 'null') {
+            localStorage.removeItem('local_session_token');
+        }
+
+        function getAuthHeaders(extraHeaders = {}) {
+            const token = window.LOCAL_SESSION_TOKEN || localStorage.getItem('local_session_token') || '';
+            const headers = {
+                'X-Requested-With': 'XMLHttpRequest',
+                ...extraHeaders
+            };
+            if (token && token !== 'undefined' && token !== 'null') {
+                headers['X-Local-Token'] = token;
+                headers['X-Session-Token'] = token;
+            }
+            return headers;
+        }
+
         let selectedNotificationData = null;
 
         const btnFetchIncoming = document.getElementById('btn-fetch-incoming');
@@ -368,7 +395,10 @@
             showMsg(incomingMsgBox, 'loading', 'Bakanlık gelen bildirim listesi sorgulanıyor, lütfen bekleyin...');
 
             try {
-                const res = await fetch('/api/depo_kabul/gelen_listesi', { method: 'POST' });
+                const res = await fetch('/api/depo_kabul/gelen_listesi', {
+                    method: 'POST',
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' })
+                });
                 const data = await res.json();
 
                 if (data.success) {
@@ -381,24 +411,30 @@
                 showMsg(incomingMsgBox, 'error', 'Bağlantı hatası: ' + err.message);
             } finally {
                 btnFetchIncoming.disabled = false;
-                btnFetchIncoming.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> 📥 1. Gelen Bildirimleri Çek (BKST)';
+                btnFetchIncoming.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> 📥 1. Gelen Mal Alım Bildirimlerini Çek (BKST)';
             }
         });
 
         // Bildirim Tablosunu Bas
         function renderIncomingTable(items) {
-            // Güvenlik Önlemi: Satış veya Çıkış türündeki tüm bildirimleri kesin olarak süz
             const validItems = (items || []).filter(item => {
-                const op = String(item.OPERATION || item.OperationName || '').toUpperCase();
-                return !op.includes('SATIS') && !op.includes('SATIŞ') && !op.includes('CIKIS') && !op.includes('ÇIKIŞ') && !op.includes('GİDEN');
+                const state = String(item.HEADERSTATE || '').toUpperCase();
+                return !state.includes('IPTAL') && !state.includes('İPTAL');
             });
 
             if (!validItems || validItems.length === 0) {
-                tbodyIncoming.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:2rem;">Tipi "MAL ALIM" olan gelen/bekleyen bildirim bulunamadı.</td></tr>';
+                tbodyIncoming.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:2rem;">Gelen bildirim bulunamadı.</td></tr>';
                 return;
             }
 
-            tbodyIncoming.innerHTML = validItems.map((item, index) => `
+            tbodyIncoming.innerHTML = validItems.map((item, index) => {
+                const isKabulBekliyor = (item.HEADERSTATE === 'Kabul Bekliyor');
+                const waitingCnt = item.WAITINGCOUNT || 0;
+                const badgeHtml = isKabulBekliyor
+                    ? `<span style="background:rgba(16,185,129,0.18); color:#34d399; border:1px solid rgba(16,185,129,0.4); padding:3px 10px; border-radius:999px; font-weight:700; font-size:0.78rem; display:inline-flex; align-items:center; gap:5px;"><i class="fa-solid fa-circle-dot" style="font-size:0.6rem;"></i> Kabul Bekliyor${waitingCnt > 0 ? ` (${waitingCnt} bekleyen)` : ''}</span>`
+                    : `<span style="background:rgba(56,189,248,0.12); color:#93c5fd; border:1px solid rgba(56,189,248,0.25); padding:3px 10px; border-radius:999px; font-weight:600; font-size:0.78rem; display:inline-flex; align-items:center; gap:5px;"><i class="fa-solid fa-boxes-packing" style="font-size:0.7rem;"></i> Stoğa Alınmış</span>`;
+
+                return `
                 <tr onclick="selectNotification(${index}, this)" id="row-incoming-${index}">
                     <td style="text-align:center;"><i class="fa-regular fa-circle radio-icon"></i></td>
                     <td><b>${esc(item.CompanyTitle || item.SENDER || 'Bilinmiyor')}</b></td>
@@ -406,9 +442,10 @@
                     <td>${esc(item.WAYBILLDATE || item.OPERATIONDATE || '-')}</td>
                     <td><span class="badge-type" style="background:rgba(16,185,129,0.2); color:#6ee7b7; border:1px solid rgba(16,185,129,0.4); padding:2px 8px; border-radius:6px; font-weight:700;">MAL ALIM</span></td>
                     <td><b>${item.PRODUCTCOUNT || 0}</b></td>
-                    <td><span style="color:#10b981;">${esc(item.HEADERSTATE || 'Bekliyor')}</span></td>
+                    <td>${badgeHtml}</td>
                 </tr>
-            `).join('');
+                `;
+            }).join('');
 
             window.incomingItems = validItems;
         }
@@ -430,15 +467,40 @@
 
             lblSelectedDoc.textContent = item.WAYBILLNUMBER || 'Belge #' + (index+1);
             lblSelectedCount.textContent = (item.PRODUCTCOUNT || 0) + ' Adet';
-            btnAcceptWarehouse.disabled = false;
 
             // Detayları Yükle
-            tbodyDetails.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:2rem;"><i class="fa-solid fa-spinner fa-spin"></i> Ürün detayları getiriliyor...</td></tr>';
+            tbodyDetails.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:2rem;"><i class="fa-solid fa-spinner fa-spin"></i> Ürün detayları getiriliyor...</td></tr>';
 
             try {
-                const res = await fetch('/api/depo_kabul/detay/' + encodeURIComponent(item.HEADERID || item.WAYBILLNUMBER || index));
+                const res = await fetch('/api/depo_kabul/detay/' + encodeURIComponent(item.HEADERID || item.WAYBILLNUMBER || index), {
+                    headers: getAuthHeaders()
+                });
                 const data = await res.json();
-                if (data.success && data.products) {
+                if (data.success && data.products && data.products.length > 0) {
+                    selectedNotificationData.products = data.products;
+                    lblSelectedCount.textContent = data.products.length + ' Adet';
+
+                    const isWaiting = (data.overall_status === 'Kabul Bekliyor') || (data.bekleyen_adet && data.bekleyen_adet > 0);
+
+                    lblSelectedDoc.innerHTML = esc(item.WAYBILLNUMBER || 'Belge #' + (index+1)) + ' ' + 
+                        (isWaiting 
+                            ? '<span style="font-size:0.75rem; background:rgba(16,185,129,0.2); color:#34d399; padding:2px 8px; border-radius:6px; font-weight:700;">🟢 Kabul Bekliyor</span>' 
+                            : '<span style="font-size:0.75rem; background:rgba(56,189,248,0.2); color:#93c5fd; padding:2px 8px; border-radius:6px; font-weight:600;">📦 Stoğa Alınmış</span>');
+
+                    if (isWaiting) {
+                        btnAcceptWarehouse.disabled = false;
+                        btnAcceptWarehouse.style.background = '#10b981';
+                        btnAcceptWarehouse.style.cursor = 'pointer';
+                        btnAcceptWarehouse.style.opacity = '1';
+                        btnAcceptWarehouse.innerHTML = `<i class="fa-solid fa-circle-check"></i> 🟢 Tek Tuşla Depoya Kabul Et (${data.bekleyen_adet || data.products.length} Adet Bekliyor)`;
+                    } else {
+                        btnAcceptWarehouse.disabled = true;
+                        btnAcceptWarehouse.style.background = 'rgba(255,255,255,0.08)';
+                        btnAcceptWarehouse.style.cursor = 'not-allowed';
+                        btnAcceptWarehouse.style.opacity = '0.6';
+                        btnAcceptWarehouse.innerHTML = `<i class="fa-solid fa-check-double"></i> ✅ Bu Belgedeki Ürünler Zaten Stoğa Alınmış`;
+                    }
+
                     renderDetailsTable(data.products);
                 } else {
                     renderDetailsTable(item.products || []);
@@ -450,11 +512,17 @@
 
         function renderDetailsTable(prods) {
             if (!prods || prods.length === 0) {
-                tbodyDetails.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:1.5rem;">Bu bildirime ait karekod detayı bulunamadı.</td></tr>';
+                tbodyDetails.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:1.5rem;">Bu bildirime ait karekod detayı bulunamadı.</td></tr>';
                 return;
             }
 
-            tbodyDetails.innerHTML = prods.map((p, i) => `
+            tbodyDetails.innerHTML = prods.map((p, i) => {
+                const isBekliyor = (p.durum === 'Kabul Bekliyor');
+                const durumPill = isBekliyor
+                    ? `<span style="color:#34d399; font-weight:700; font-size:0.8rem;"><i class="fa-solid fa-circle-dot"></i> Kabul Bekliyor</span>`
+                    : `<span style="color:#93c5fd; font-size:0.8rem;"><i class="fa-solid fa-boxes-packing"></i> Stoğa Alınmış</span>`;
+
+                return `
                 <tr>
                     <td>${i+1}</td>
                     <td style="font-family:monospace; font-size:0.78rem; color:#6ee7b7;">${esc(p.Karekod || p.KAREKOD || '-')}</td>
@@ -462,8 +530,10 @@
                     <td>${esc(p['Gtin / Barkod'] || p.BARCODE || '-')}</td>
                     <td>${esc(p['Seri Numarası'] || p.SERIALNUMBER || '-')}</td>
                     <td>${esc(p['Son Kullanma Tarihi'] || p.SKT || '-')}</td>
+                    <td style="text-align:center;">${durumPill}</td>
                 </tr>
-            `).join('');
+                `;
+            }).join('');
         }
 
         // Tek Tuşla Depoya Kabul Et
@@ -477,7 +547,7 @@
             try {
                 const res = await fetch('/api/depo_kabul/onayla', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify({
                         header_id: selectedNotificationData.HEADERID,
                         waybill_number: selectedNotificationData.WAYBILLNUMBER,
@@ -507,10 +577,6 @@
             box.className = 'status-msg ' + (type === 'loading' ? 'msg-loading' : type === 'success' ? 'msg-success' : 'msg-error');
             box.innerHTML = txt;
             box.classList.remove('hidden');
-        }
-
-        function esc(str) {
-            return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
         }
 
     </script>
