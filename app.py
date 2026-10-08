@@ -1409,7 +1409,10 @@ def _do_fetch_api_worker():
                 if gln_guid and len(gln_guid) >= 32:
                     break
         if not gln_guid or len(gln_guid) < 32:
-            gln_guid = "8aaf058e-7444-48bb-bd74-4077173fa6a8"
+            gln_guid = address_id or ""
+            if not gln_guid or len(gln_guid) < 32:
+                _mark_offline("Bakanlık şirket adres (GLN) bilgisi bulunamadı. Lütfen tekrar giriş yapınız.")
+                return
 
         # 4) Stok listesi
         r_grid = session.post("https://bkst.tarbil.gov.tr/Main/GetStockList",
