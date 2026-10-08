@@ -39,9 +39,21 @@ public class AppLauncher {
                 } catch {}
             }
 
-            for (int i = 0; i < 24; i++) {
+            for (int i = 0; i < 32; i++) {
                 Thread.Sleep(250);
                 if (IsPortOpen("127.0.0.1", 5000)) break;
+            }
+
+            if (!IsPortOpen("127.0.0.1", 5000)) {
+                try {
+                    ProcessStartInfo diagPsi = new ProcessStartInfo();
+                    diagPsi.FileName = "cmd.exe";
+                    diagPsi.Arguments = "/k echo [HATA] Lokal sunucu acilamadi, Python hata ciktisi calistiriliyor... && python app.py";
+                    diagPsi.WorkingDirectory = baseDir;
+                    diagPsi.UseShellExecute = true;
+                    Process.Start(diagPsi);
+                    return;
+                } catch {}
             }
         }
 
@@ -70,7 +82,6 @@ public class AppLauncher {
         }
 
         // Python sunucusu arka planda bağımsız bir servis olarak çalışmaya devam etmeli.
-        // Tarayıcının hemen dönmesi durumunda sunucu asla kapatılmamalıdır.
     }
 
     private static void MaximizeBrowserWindows() {
@@ -104,14 +115,22 @@ public class AppLauncher {
 
     private static string FindPythonwPath() {
         string[] candidates = new string[] {
+            @"C:\Program Files\Python313\pythonw.exe",
+            @"C:\Program Files\Python312\pythonw.exe",
             @"C:\Program Files\Python311\pythonw.exe",
             @"C:\Program Files\Python310\pythonw.exe",
-            @"C:\Program Files\Python312\pythonw.exe",
             @"C:\Program Files\Python39\pythonw.exe",
+            @"C:\Program Files (x86)\Python313\pythonw.exe",
+            @"C:\Program Files (x86)\Python312\pythonw.exe",
             @"C:\Program Files (x86)\Python311\pythonw.exe",
+            @"C:\Python313\pythonw.exe",
+            @"C:\Python312\pythonw.exe",
+            @"C:\Python311\pythonw.exe",
+            @"C:\Python310\pythonw.exe",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Python\Python313\pythonw.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Python\Python312\pythonw.exe"),
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Python\Python311\pythonw.exe"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Python\Python310\pythonw.exe"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Python\Python312\pythonw.exe")
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Python\Python310\pythonw.exe")
         };
 
         foreach (string path in candidates) {
@@ -121,8 +140,10 @@ public class AppLauncher {
         string pathEnv = Environment.GetEnvironmentVariable("PATH");
         if (!string.IsNullOrEmpty(pathEnv)) {
             foreach (string p in pathEnv.Split(';')) {
-                string full = Path.Combine(p.Trim(), "pythonw.exe");
-                if (File.Exists(full)) return full;
+                string w = Path.Combine(p.Trim(), "pythonw.exe");
+                if (File.Exists(w)) return w;
+                string py = Path.Combine(p.Trim(), "python.exe");
+                if (File.Exists(py)) return py;
             }
         }
 

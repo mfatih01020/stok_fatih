@@ -40,8 +40,23 @@ def open_as_desktop_app(url="http://127.0.0.1:5000"):
     webbrowser.open(url)
     return False
 
+def ensure_dependencies():
+    packages = ["flask", "waitress", "pandas", "openpyxl", "requests"]
+    missing = []
+    for pkg in packages:
+        try:
+            __import__(pkg)
+        except ImportError:
+            missing.append(pkg)
+    if missing:
+        try:
+            subprocess.run([sys.executable, "-m", "pip", "install", *missing], check=True, creationflags=NO_WINDOW)
+        except Exception:
+            pass
+
 def launch():
     if not is_port_in_use(5000):
+        ensure_dependencies()
         py_dir = os.path.dirname(sys.executable)
         pythonw_cand = os.path.join(py_dir, "pythonw.exe")
         target_py = pythonw_cand if os.path.exists(pythonw_cand) else sys.executable
@@ -50,7 +65,7 @@ def launch():
             flags |= 0x00000008  # DETACHED_PROCESS
         subprocess.Popen([target_py, "app.py"], cwd=BASE_DIR, creationflags=flags)
 
-        for _ in range(24):
+        for _ in range(32):
             time.sleep(0.25)
             if is_port_in_use(5000):
                 break

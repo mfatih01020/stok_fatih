@@ -2556,15 +2556,35 @@ def api_system_logout():
     return jsonify({'success': True, 'message': 'Oturum kapatıldı.'})
 
 if __name__ == '__main__':
-    from waitress import serve
-    logger.info("Starting QR-Compare server with Waitress (threads=32, port=5000)...")
-    serve(
-        app,
-        host='127.0.0.1',
-        port=5000,
-        threads=32,
-        connection_limit=200,
-        channel_timeout=180,
-        cleanup_interval=30,
-        ident='QR-Compare'
-    )
+    try:
+        from waitress import serve
+        logger.info("Starting QR-Compare server with Waitress (threads=32, port=5000)...")
+        serve(
+            app,
+            host='127.0.0.1',
+            port=5000,
+            threads=32,
+            connection_limit=200,
+            channel_timeout=180,
+            cleanup_interval=30,
+            ident='QR-Compare'
+        )
+    except ImportError:
+        logger.warning("Waitress bulunamadı, otomatik pip ile yüklenmeye çalışılıyor...")
+        try:
+            import subprocess
+            subprocess.run([sys.executable, "-m", "pip", "install", "waitress"], check=True)
+            from waitress import serve
+            serve(
+                app,
+                host='127.0.0.1',
+                port=5000,
+                threads=32,
+                connection_limit=200,
+                channel_timeout=180,
+                cleanup_interval=30,
+                ident='QR-Compare'
+            )
+        except Exception as e:
+            logger.warning(f"Waitress kurulamadı ({e}), Flask development server ile başlatılıyor...")
+            app.run(host='127.0.0.1', port=5000, threaded=True)
