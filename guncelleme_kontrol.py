@@ -4,7 +4,6 @@ import subprocess
 import shutil
 import json
 import time
-import re
 from datetime import datetime
 
 # Çalışma dizinini script'in bulunduğu klasöre sabitle
@@ -31,13 +30,6 @@ BOLD = '\033[1m'
 DIM = '\033[2m'
 RESET = '\033[0m'
 
-def is_git_installed():
-    try:
-        res = subprocess.run(["git", "--version"], capture_output=True, text=True, timeout=2, cwd=BASE_DIR, creationflags=NO_WINDOW)
-        return res.returncode == 0
-    except Exception:
-        return False
-
 def clear_pycache():
     for dirpath, dirnames, filenames in os.walk(BASE_DIR):
         if "__pycache__" in dirnames:
@@ -47,10 +39,6 @@ def clear_pycache():
                 pass
 
 def get_unified_version_info():
-    """
-    Sürüm bilgisini version.json dosyasından ve git geçmişinden birleştirerek sunar.
-    Tek Gerçeklik Kaynağı: version.json
-    """
     v_code = "v3.1.2"
     v_commit = "3.1.2"
     v_date = "08.10.2026"
@@ -68,62 +56,42 @@ def get_unified_version_info():
         except Exception:
             pass
 
-    commit_hash = ""
-    commit_date = ""
-    commit_msg = ""
-    try:
-        head_path = os.path.join(BASE_DIR, '.git', 'HEAD')
-        if os.path.exists(head_path):
-            with open(head_path, "r", encoding="utf-8", errors="ignore") as f:
-                head_content = f.read().strip()
+    return f"{v_code} ({v_commit})", v_date, v_msg
 
-            if head_content.startswith("ref:"):
-                ref_rel = head_content.split(": ", 1)[1].strip()
-                ref_path = os.path.join(BASE_DIR, '.git', ref_rel)
-                if os.path.exists(ref_path):
-                    with open(ref_path, "r", encoding="utf-8", errors="ignore") as f:
-                        commit_hash = f.read().strip()[:7]
+def install_dependencies():
+    print(f"  {CYAN}[3/3] Gerekli Python kütüphaneleri kontrol ediliyor ve kuruluyor...{RESET}")
+    req_file = os.path.join(BASE_DIR, "requirements.txt")
+    if os.path.exists(req_file):
+        try:
+            res = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"],
+                capture_output=True, text=True, cwd=BASE_DIR, creationflags=NO_WINDOW
+            )
+            if res.returncode == 0:
+                print(f"  {GREEN}  ✓ Tüm Python paketleri başarıyla doğrulandı ve yüklendi.{RESET}")
             else:
-                commit_hash = head_content[:7]
+                print(f"  {YELLOW}  • Temel paketler (waitress, flask, pandas, openpyxl, requests) kuruluyor...{RESET}")
+                subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "waitress", "flask", "pandas", "openpyxl", "requests", "xlrd"],
+                    capture_output=True, text=True, cwd=BASE_DIR, creationflags=NO_WINDOW
+                )
+                print(f"  {GREEN}  ✓ Temel paketler başarıyla yüklendi.{RESET}")
+        except Exception as e:
+            print(f"  {YELLOW}  • Paket yükleme uyarısı: {e}{RESET}")
 
-            log_path = os.path.join(BASE_DIR, '.git', 'logs', 'HEAD')
-            if os.path.exists(log_path):
-                with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
-                    lines = [l for l in f.readlines() if l.strip()]
-                    if lines:
-                        last_line = lines[-1]
-                        parts = last_line.strip().split('\t', 1)
-                        if len(parts) > 1:
-                            commit_msg = parts[1].replace("commit: ", "").replace("checkout: ", "").strip()
-                        meta_parts = parts[0].split()
-                        if len(meta_parts) >= 5 and meta_parts[-2].isdigit():
-                            dt = datetime.fromtimestamp(int(meta_parts[-2]))
-                            commit_date = dt.strftime("%d.%m.%Y %H:%M")
-    except Exception:
-        pass
+def recompile_exe_if_possible():
+    ps1_file = os.path.join(BASE_DIR, "build_exe.ps1")
+    if os.path.exists(ps1_file) and os.name == 'nt':
+        try:
+            subprocess.run(
+                ["powershell", "-ExecutionPolicy", "Bypass", "-File", "build_exe.ps1"],
+                capture_output=True, text=True, cwd=BASE_DIR, creationflags=NO_WINDOW
+            )
+        except Exception:
+            pass
 
-    final_version_code = f"{v_code} ({commit_hash or v_commit})"
-    final_date = commit_date or v_date
-    final_message = v_msg or commit_msg or f"{v_code} Sürümü"
-
-    return final_version_code, final_date, final_message
-
-def get_latest_remote_commit_sha(requests_module):
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-    try:
-        atom_url = f"https://github.com/mfatih01020/stok_fatih/commits/main.atom?t={time.time_ns()}"
-        r = requests_module.get(atom_url, verify=False, timeout=8, headers=headers)
-        if r.status_code == 200:
-            matches = re.findall(r'/commit/([0-9a-f]{40})', r.text)
-            if matches:
-                return matches[0]
-    except Exception:
-        pass
-    return "main"
-
-def http_fallback_update():
-    print(f"  {CYAN}  • Güncelleme sunucusu kontrol ediliyor...{RESET}")
-    
+def http_update():
+    print(f"  {CYAN}[1/3] GitHub sunucusundan en güncel sürüm bilgisi sorgulanıyor...{RESET}")
     try:
         import requests
         import urllib3
@@ -131,8 +99,12 @@ def http_fallback_update():
         import io
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     except ImportError:
-        print(f"  {RED}[HATA] Güncelleme için gerekli kütüphaneler bulunamadı.{RESET}")
-        return False
+        print(f"  {YELLOW}  • requests kütüphanesi yükleniyor...{RESET}")
+        subprocess.run([sys.executable, "-m", "pip", "install", "requests", "urllib3"], capture_output=True, creationflags=NO_WINDOW)
+        import requests
+        import urllib3
+        import zipfile
+        import io
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
@@ -140,19 +112,18 @@ def http_fallback_update():
         "Pragma": "no-cache"
     }
 
-    latest_sha = get_latest_remote_commit_sha(requests)
     timestamp = time.time_ns()
-    remote_vurl = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/{latest_sha}/version.json?t={timestamp}"
+    remote_vurl = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/main/version.json?t={timestamp}"
 
     try:
         resp = requests.get(remote_vurl, verify=False, timeout=10, headers=headers)
         if resp.status_code != 200:
-            print(f"  {RED}[HATA] Sunucu yanıt vermedi (HTTP {resp.status_code}){RESET}")
+            print(f"  {RED}[HATA] Güncelleme sunucusuna ulaşılamadı (HTTP {resp.status_code}){RESET}")
             return False
 
         remote_data = resp.json()
         remote_commit = str(remote_data.get("commit", "")).strip()
-        remote_version = str(remote_data.get("version", "v1.0")).strip()
+        remote_version = str(remote_data.get("version", "")).strip()
         remote_date = str(remote_data.get("date", "")).strip()
         remote_msg = str(remote_data.get("message", "")).strip()
 
@@ -167,21 +138,28 @@ def http_fallback_update():
 
         if local_commit and local_commit == remote_commit:
             print(f"\n{GREEN}{BOLD} =============================================================={RESET}")
-            print(f"{GREEN}{BOLD}  🟢 [GÜNCEL] Sisteminiz en son sürümde ({remote_version}).{RESET}")
+            print(f"{GREEN}{BOLD}  🟢 [GÜNCEL] Sisteminiz zaten en son sürümde ({remote_version}).{RESET}")
+            print(f"{WHITE}  📦 Sürüm: {remote_version} | Tarih: {remote_date}{RESET}")
             print(f"{GREEN}{BOLD} =============================================================={RESET}\n")
+            install_dependencies()
             return False
 
-        print(f"\n  {YELLOW}{BOLD}[🔄 GÜNCELLEME BULUNDU] Sürüm {remote_version} paketi indiriliyor...{RESET}")
+        print(f"\n  {YELLOW}{BOLD}[2/3] [🔄 YENİ SÜRÜM TESPİT EDİLDİ: {remote_version}] Dosyalar indiriliyor...{RESET}")
 
         zip_url = f"https://github.com/mfatih01020/stok_fatih/archive/refs/heads/main.zip?t={timestamp}"
-        zip_resp = requests.get(zip_url, verify=False, timeout=35, headers=headers)
+        zip_resp = requests.get(zip_url, verify=False, timeout=40, headers=headers)
 
         if zip_resp.status_code != 200:
-            print(f"  {RED}[HATA] Güncelleme paketi indirilemedi (HTTP {zip_resp.status_code}){RESET}")
+            print(f"  {RED}[HATA] Güncelleme zip paketi indirilemedi (HTTP {zip_resp.status_code}){RESET}")
             return False
 
-        ignored_extensions = ('.db', '.sqlite', '.sqlite3')
-        ignored_filenames = ('cikis_kayitlari.db', 'stok_takip.db', 'bakanlik_giris_bilgileri.txt', 'msedgedriver.exe', 'chromedriver.exe')
+        # Asla ezilmeyecek kullanıcı dosyaları
+        ignored_extensions = ('.db', '.sqlite', '.sqlite3', '.log')
+        ignored_filenames = (
+            'cikis_kayitlari.db', 'stok.db', 'stok_takip.db', 
+            'bakanlik_giris_bilgileri.txt', 'günlük satışlar.txt',
+            '.session_token'
+        )
 
         with zipfile.ZipFile(io.BytesIO(zip_resp.content)) as zf:
             for member in zf.infolist():
@@ -198,23 +176,29 @@ def http_fallback_update():
 
                 dest_path = os.path.join(BASE_DIR, rel_path.replace('/', os.sep))
                 os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-                with zf.open(member) as source, open(dest_path, "wb") as target:
-                    target.write(source.read())
+                try:
+                    with zf.open(member) as source, open(dest_path, "wb") as target:
+                        target.write(source.read())
+                except PermissionError:
+                    # Dosya o an kullanımda ise (örneğin Calistir.exe açık ise) atla
+                    pass
 
         with open(local_vpath, "w", encoding="utf-8") as f:
             json.dump(remote_data, f, ensure_ascii=False, indent=2)
 
         clear_pycache()
+        install_dependencies()
+        recompile_exe_if_possible()
 
         print(f"\n{GREEN}{BOLD} =============================================================={RESET}")
-        print(f"{GREEN}{BOLD}  🟢 [BAŞARILI] Tüm yeni dosyalar entegre edilerek {remote_version} sürümüne güncellendi.{RESET}")
+        print(f"{GREEN}{BOLD}  🟢 [BAŞARILI] Sistem başarıyla {remote_version} sürümüne güncellendi!{RESET}")
         print(f"{WHITE}{BOLD}  📦 Sürüm: {remote_version} ({remote_commit}) | {remote_date}{RESET}")
         print(f"{WHITE}  📝 Not  : {remote_msg}{RESET}")
         print(f"{GREEN}{BOLD} =============================================================={RESET}\n")
         return True
 
     except Exception as e:
-        print(f"  {RED}[HATA] Güncelleme işlemi başarısız: {e}{RESET}")
+        print(f"  {RED}[HATA] Güncelleme işlemi sırasında beklenmeyen hata: {e}{RESET}")
         return False
 
 def force_update():
@@ -223,45 +207,12 @@ def force_update():
     print(f"{CYAN}{BOLD} =============================================================={RESET}\n")
 
     cur_hash, cur_date, cur_msg = get_unified_version_info()
-    print(f"  {WHITE}{BOLD}📌 MEVCUT SÜRÜM BİLGİLERİ:{RESET}")
-    print(f"  {DIM}  • Yüklü Sürüm: {RESET}{WHITE}{cur_hash}{RESET}")
-    print(f"  {DIM}  • Tarih       : {RESET}{WHITE}{cur_date}{RESET}")
-    print(f"  {DIM}  • Not         : {RESET}{WHITE}{cur_msg}{RESET}\n")
+    print(f"  {WHITE}{BOLD}📌 MEVCUT YÜKLÜ SÜRÜM:{RESET}")
+    print(f"  {DIM}  • Sürüm Kodu: {RESET}{WHITE}{cur_hash}{RESET}")
+    print(f"  {DIM}  • Tarih     : {RESET}{WHITE}{cur_date}{RESET}")
+    print(f"  {DIM}  • Not       : {RESET}{WHITE}{cur_msg}{RESET}\n")
 
-    git_works = is_git_installed()
-    if git_works:
-        env = os.environ.copy()
-        env["GIT_TERMINAL_PROMPT"] = "0"
-        env["GIT_ASKPASS"] = "echo"
-        env["GIT_SSL_NO_VERIFY"] = "true"
-        subprocess.run(["git", "config", "--global", "--add", "safe.directory", "*"], capture_output=True, text=True, cwd=BASE_DIR, creationflags=NO_WINDOW)
-
-        print(f"  {CYAN}[1/2] Sunucu kontrol ediliyor...{RESET}")
-        repo_url = "https://github.com/mfatih01020/stok_fatih.git"
-        fetch_res = subprocess.run(["git", "-c", "http.sslVerify=false", "fetch", repo_url, "main", "--force"], capture_output=True, text=True, timeout=20, env=env, cwd=BASE_DIR, creationflags=NO_WINDOW)
-
-        if fetch_res.returncode == 0:
-            local_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR, creationflags=NO_WINDOW).stdout.strip()
-            remote_hash = subprocess.run(["git", "-c", "http.sslVerify=false", "rev-parse", "FETCH_HEAD"], capture_output=True, text=True, env=env, cwd=BASE_DIR, creationflags=NO_WINDOW).stdout.strip()
-
-            if remote_hash and (local_hash != remote_hash or local_hash == "Bilinmiyor" or not local_hash):
-                print(f"\n  {YELLOW}{BOLD}[🔄 GÜNCELLEME BULUNDU] Yeni sürüm yükleniyor...{RESET}")
-                subprocess.run(["git", "-c", "http.sslVerify=false", "checkout", "-B", "main", "FETCH_HEAD", "--force"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR, creationflags=NO_WINDOW)
-                subprocess.run(["git", "-c", "http.sslVerify=false", "reset", "--hard", "FETCH_HEAD"], capture_output=True, text=True, timeout=15, env=env, cwd=BASE_DIR, creationflags=NO_WINDOW)
-                clear_pycache()
-
-                new_hash, new_date, new_msg = get_unified_version_info()
-                print(f"\n{GREEN}{BOLD} =============================================================={RESET}")
-                print(f"{GREEN}{BOLD}  🟢 [BAŞARILI] Sistem güncellendi ({new_hash}).{RESET}")
-                print(f"{GREEN}{BOLD} =============================================================={RESET}\n")
-                return True
-            else:
-                print(f"\n{GREEN}{BOLD} =============================================================={RESET}")
-                print(f"{GREEN}{BOLD}  🟢 [GÜNCEL] Sisteminiz en son sürümde ({cur_hash}).{RESET}")
-                print(f"{GREEN}{BOLD} =============================================================={RESET}\n")
-                return False
-
-    return http_fallback_update()
+    return http_update()
 
 if __name__ == "__main__":
-    force_update()
+    success = force_update()

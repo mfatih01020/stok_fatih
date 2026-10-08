@@ -2479,7 +2479,7 @@ def api_system_sync_status():
 @app.route('/api/system/check_update', methods=['GET'])
 def api_system_check_update():
     try:
-        from guncelleme_kontrol import get_unified_version_info, get_latest_remote_commit_sha
+        from guncelleme_kontrol import get_unified_version_info
         import requests
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -2491,12 +2491,8 @@ def api_system_check_update():
             with open(local_vpath, "r", encoding="utf-8") as f:
                 local_commit = str(json.load(f).get("commit", "")).strip()
 
-        latest_sha = get_latest_remote_commit_sha(requests)
-        if not latest_sha or latest_sha == "main":
-            return jsonify({'has_update': False, 'current_version': cur_code})
-
-        headers = {"User-Agent": "Mozilla/5.0", "Cache-Control": "no-cache"}
-        remote_vurl = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/{latest_sha}/version.json?t={time.time_ns()}"
+        headers = {"User-Agent": "Mozilla/5.0", "Cache-Control": "no-cache, no-store, must-revalidate"}
+        remote_vurl = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/main/version.json?t={time.time_ns()}"
         resp = requests.get(remote_vurl, verify=False, timeout=(4, 8), headers=headers)
         if resp.status_code == 200:
             rdata = resp.json()
