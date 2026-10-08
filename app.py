@@ -181,6 +181,7 @@ DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cikis_kayitl
 def save_bkst_data_to_db(df, username=""):
     if df is None or df.empty:
         return
+    ensure_db_schema()
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
@@ -247,6 +248,8 @@ def save_bkst_data_to_db(df, username=""):
         logger.error(f"save_bkst_data_to_db transaction error: {e}", exc_info=True)
         conn.rollback()
         conn.close()
+        # Otomatik onarımı tetikle
+        ensure_db_schema()
         raise e
     conn.close()
 
@@ -256,11 +259,16 @@ def save_bkst_data_to_db(df, username=""):
         if user_key in _cache_access_order:
             _cache_access_order.remove(user_key)
 
-def init_db():
-    conn = sqlite3.connect(DB_PATH, timeout=30.0)
+def ensure_db_schema(conn=None):
+    close_at_end = False
+    if conn is None:
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        close_at_end = True
     c = conn.cursor()
     c.execute("PRAGMA journal_mode=WAL")
     c.execute("PRAGMA synchronous=NORMAL")
+
+    # 1. cikis_kayitlari tablosu
     c.execute('''CREATE TABLE IF NOT EXISTS cikis_kayitlari (
         id           INTEGER PRIMARY KEY AUTOINCREMENT,
         tarih        TEXT NOT NULL,
@@ -277,12 +285,28 @@ def init_db():
         kullanici_adi TEXT
     )''')
     c.execute("PRAGMA table_info(cikis_kayitlari)")
-    cols = [row[1] for row in c.fetchall()]
-    if "kullanici_adi" not in cols:
-        c.execute("ALTER TABLE cikis_kayitlari ADD COLUMN kullanici_adi TEXT")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_ham_karekod ON cikis_kayitlari(ham_karekod)")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_kullanici_adi ON cikis_kayitlari(kullanici_adi)")
+    cikis_cols = {row[1].lower() for row in c.fetchall()}
+    for col, col_type in [
+        ("tarih", "TEXT NOT NULL DEFAULT ''"),
+        ("urun_adi", "TEXT"),
+        ("barkod", "TEXT"),
+        ("koli_no", "TEXT"),
+        ("seri_no", "TEXT"),
+        ("parti_no", "TEXT"),
+        ("palet_no", "TEXT"),
+        ("uretim_tarihi", "TEXT"),
+        ("skt", "TEXT"),
+        ("ham_karekod", "TEXT"),
+        ("tekrar_uyari", "INTEGER DEFAULT 0"),
+        ("kullanici_adi", "TEXT")
+    ]:
+        if col.lower() not in cikis_cols:
+            try:
+                c.execute(f"ALTER TABLE cikis_kayitlari ADD COLUMN {col} {col_type}")
+            except Exception as e:
+                logger.warning(f"Could not add column {col} to cikis_kayitlari: {e}")
 
+    # 2. bkst_depo_verileri tablosu
     c.execute('''CREATE TABLE IF NOT EXISTS bkst_depo_verileri (
         id               INTEGER PRIMARY KEY AUTOINCREMENT,
         gtin             TEXT,
@@ -299,10 +323,20 @@ def init_db():
         kullanici_adi    TEXT,
         guncelleme_tarihi TEXT
     )''')
-    c.execute("CREATE INDEX IF NOT EXISTS idx_bkst_karekod ON bkst_depo_verileri(tam_karekod)")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_bkst_gtin ON bkst_depo_verileri(gtin)")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_bkst_kullanici ON bkst_depo_verileri(kullanici_adi)")
+    c.execute("PRAGMA table_info(bkst_depo_verileri)")
+    bkst_cols = {row[1].lower() for row in c.fetchall()}
+    for col in [
+        "gtin", "urun_adi", "seri_no", "parti_no", "koli_no",
+        "palet_no", "uretim_tarihi", "skt", "tam_karekod",
+        "gln", "adres_id", "kullanici_adi", "guncelleme_tarihi"
+    ]:
+        if col.lower() not in bkst_cols:
+            try:
+                c.execute(f"ALTER TABLE bkst_depo_verileri ADD COLUMN {col} TEXT")
+            except Exception as e:
+                logger.warning(f"Could not add column {col} to bkst_depo_verileri: {e}")
 
+    # 3. bkst_depo_verileri_staging tablosu
     c.execute('''CREATE TABLE IF NOT EXISTS bkst_depo_verileri_staging (
         id               INTEGER PRIMARY KEY AUTOINCREMENT,
         gtin             TEXT,
@@ -319,6 +353,37 @@ def init_db():
         kullanici_adi    TEXT,
         guncelleme_tarihi TEXT
     )''')
+    c.execute("PRAGMA table_info(bkst_depo_verileri_staging)")
+    staging_cols = {row[1].lower() for row in c.fetchall()}
+    for col in [
+        "gtin", "urun_adi", "seri_no", "parti_no", "koli_no",
+        "palet_no", "uretim_tarihi", "skt", "tam_karekod",
+        "gln", "adres_id", "kullanici_adi", "guncelleme_tarihi"
+    ]:
+        if col.lower() not in staging_cols:
+            try:
+                c.execute(f"ALTER TABLE bkst_depo_verileri_staging ADD COLUMN {col} TEXT")
+            except Exception as e:
+                logger.warning(f"Could not add column {col} to bkst_depo_verileri_staging: {e}")
+
+    # İndeksler
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_ham_karekod ON cikis_kayitlari(ham_karekod)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_kullanici_adi ON cikis_kayitlari(kullanici_adi)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_bkst_karekod ON bkst_depo_verileri(tam_karekod)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_bkst_gtin ON bkst_depo_verileri(gtin)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_bkst_kullanici ON bkst_depo_verileri(kullanici_adi)")
+    except Exception:
+        pass
+
+    conn.commit()
+    if close_at_end:
+        conn.close()
+
+def init_db():
+    ensure_db_schema()
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
+    c = conn.cursor()
 
     # ── Otomatik GTIN Onarımı / Geriye Dönük Veri Doldurma ────────────────────
     try:
@@ -546,10 +611,20 @@ def get_bkst_cache():
         else:
             df = pd.read_sql_query("SELECT * FROM bkst_depo_verileri", conn)
     except Exception as e:
-        logger.error(f"Error querying bkst_depo_verileri: {e}")
-        df = pd.DataFrame()
+        logger.error(f"Error querying bkst_depo_verileri, repairing schema: {e}")
+        try:
+            ensure_db_schema()
+            if username:
+                df = pd.read_sql_query("SELECT * FROM bkst_depo_verileri WHERE kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = ''", conn, params=(username,))
+            else:
+                df = pd.read_sql_query("SELECT * FROM bkst_depo_verileri", conn)
+        except Exception:
+            df = pd.DataFrame()
     finally:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
 
     if df is None or df.empty:
         return None, {}, {}, {}
@@ -1480,7 +1555,18 @@ def _do_fetch_api_worker():
                 _mark_offline(f"Bakanlık'tan 0 adet karekod detayı alınabildi ({detail_errors} istek başarısız).")
             return
 
-        save_bkst_data_to_db(pd.DataFrame(all_rows), username)
+        try:
+            save_bkst_data_to_db(pd.DataFrame(all_rows), username)
+        except Exception as db_err:
+            logger.error(f"Error saving to db, attempting auto-repair: {db_err}", exc_info=True)
+            try:
+                ensure_db_schema()
+                save_bkst_data_to_db(pd.DataFrame(all_rows), username)
+            except Exception as retry_err:
+                logger.error(f"Failed to save to db after repair: {retry_err}", exc_info=True)
+                _mark_offline(f"Bakanlık verileri çekildi ancak veritabanı kayıt hatası oluştu ({type(retry_err).__name__}).")
+                return
+
         with _state_lock:
             _app_bkst_synced = True
         msg = f"🟢 SİSTEM AKTİF: Bakanlık'tan {fetched} adet stok verisi başarıyla çekildi."
