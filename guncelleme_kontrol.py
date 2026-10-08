@@ -39,9 +39,9 @@ def clear_pycache():
                 pass
 
 def get_unified_version_info():
-    v_code = "v3.1.3"
-    v_commit = "3.1.3"
-    v_date = "08.10.2026"
+    v_code = "v1.0"
+    v_commit = ""
+    v_date = datetime.now().strftime("%d.%m.%Y")
     v_msg = "Sistem Güncel"
 
     v_path = os.path.join(BASE_DIR, "version.json")
@@ -49,14 +49,15 @@ def get_unified_version_info():
         try:
             with open(v_path, "r", encoding="utf-8") as f:
                 v_data = json.load(f)
-                v_code = v_data.get("version", "v3.1.3")
-                v_commit = v_data.get("commit", "3.1.3")
-                v_date = v_data.get("date", "08.10.2026")
-                v_msg = v_data.get("message", f"{v_code} Sürümü")
+                v_code = str(v_data.get("version", "v1.0")).strip()
+                v_commit = str(v_data.get("commit", "")).strip()
+                v_date = str(v_data.get("date", "")).strip()
+                v_msg = str(v_data.get("message", "Sistem Güncel")).strip()
         except Exception:
             pass
 
-    return f"{v_code} ({v_commit})", v_date, v_msg
+    full_ver = f"{v_code} ({v_commit})" if v_commit else v_code
+    return full_ver, v_date, v_msg
 
 def install_dependencies():
     print(f"  {CYAN}[3/3] Gerekli Python kütüphaneleri kontrol ediliyor ve kuruluyor...{RESET}")

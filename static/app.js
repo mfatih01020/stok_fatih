@@ -87,6 +87,12 @@ window.apiFetch = window.fetch;
 
 // ── Unified Startup Auto Update Engine ───────────────────────────────────────
 async function performStartupUpdateCheck() {
+    // Sadece oturumun İLK açılışında bir kez çalışır. Sayfalar arası geçişlerde veya buton tıklamalarında ASLA tekrar çalışmaz!
+    if (sessionStorage.getItem('startup_update_checked')) {
+        return false;
+    }
+    sessionStorage.setItem('startup_update_checked', 'true');
+
     try {
         const res = await fetch('/api/system/check_update');
         if (!res.ok) return false;
@@ -122,6 +128,7 @@ function showUpdateScreenAndApply(updateInfo) {
                 text-align: center;
                 padding: 20px;
             `;
+            const remVer = (updateInfo && updateInfo.remote_version) ? updateInfo.remote_version : 'yeni sürüm';
             overlay.innerHTML = `
                 <div style="background: rgba(30, 41, 59, 0.95); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 24px; padding: 40px 32px; max-width: 480px; width: 90%; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.8); backdrop-filter: blur(12px);">
                     <div style="width: 80px; height: 80px; margin: 0 auto 20px; background: rgba(56, 189, 248, 0.12); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
@@ -129,7 +136,7 @@ function showUpdateScreenAndApply(updateInfo) {
                     </div>
                     <h2 style="font-size: 1.55rem; font-weight: 800; margin-bottom: 10px; color: #f8fafc;">Uygulama Güncelleniyor</h2>
                     <p id="updateStatusMsg" style="font-size: 0.95rem; color: #94a3b8; line-height: 1.6; margin-bottom: 24px;">
-                        Yeni sürüm (${updateInfo.remote_version || 'v3.1.x'}) tespit edildi. Güncelleme paketleri indiriliyor ve sisteme entegre ediliyor...
+                        Yeni sürüm (${remVer}) tespit edildi. Güncelleme paketleri indiriliyor ve sisteme entegre ediliyor...
                     </p>
                     <div style="width: 100%; height: 8px; background: #334155; border-radius: 999px; overflow: hidden; position: relative;">
                         <div id="updateProgressBar" style="width: 45%; height: 100%; background: linear-gradient(90deg, #38bdf8, #3b82f6); border-radius: 999px; transition: width 0.4s ease; animation: updateProgressAnim 1.8s infinite linear;"></div>
@@ -1013,17 +1020,19 @@ function loadSystemVersion() {
         .then(r => r.json())
         .then(data => {
             if (data.success) {
-                const verStr = data.version || 'v3.1.3';
-                document.querySelectorAll('#versionText, .version-text').forEach(el => {
-                    el.textContent = verStr;
-                });
+                const verStr = data.version || '';
+                if (verStr) {
+                    document.querySelectorAll('#versionText, .version-text').forEach(el => {
+                        el.textContent = verStr;
+                    });
+                }
                 
                 const h = document.getElementById('modalCommitHash');
                 const d = document.getElementById('modalCommitDate');
                 const m = document.getElementById('modalCommitMsg');
-                if (h) h.textContent = data.commit_hash || verStr;
-                if (d) d.textContent = data.commit_date || '08.10.2026';
-                if (m) m.textContent = data.commit_msg || 'v3.1.3: BKST veri çekme hatası düzeltmesi, şeffaf güncelleme motoru ve kararlılık geliştirmeleri';
+                if (h && data.commit_hash) h.textContent = data.commit_hash;
+                if (d && data.commit_date) d.textContent = data.commit_date;
+                if (m && data.commit_msg) m.textContent = data.commit_msg;
             }
         })
         .catch(e => console.warn('Version check error:', e));
@@ -1048,12 +1057,12 @@ window.showVersionModal = function() {
             <span onclick="closeVersionModal()" style="cursor:pointer; font-size:1.4rem; color:#94a3b8;">&times;</span>
         </div>
         <div style="font-size:0.95rem; line-height:1.8;">
-            <p style="margin:6px 0;"><strong>📦 Sürüm Kodu:</strong> <span id="modalCommitHash" style="color:#38bdf8; font-family:monospace; font-weight:bold;">v3.1.3</span></p>
-            <p style="margin:6px 0;"><strong>📅 Son Güncelleme:</strong> <span id="modalCommitDate" style="color:#f1f5f9;">08.10.2026</span></p>
+            <p style="margin:6px 0;"><strong>📦 Sürüm Kodu:</strong> <span id="modalCommitHash" style="color:#38bdf8; font-family:monospace; font-weight:bold;">Yükleniyor...</span></p>
+            <p style="margin:6px 0;"><strong>📅 Son Güncelleme:</strong> <span id="modalCommitDate" style="color:#f1f5f9;">-</span></p>
             <p style="margin:6px 0;"><strong>📝 Son Değişiklik Notu:</strong></p>
-            <div id="modalCommitMsg" style="background:#0f172a; padding:10px 14px; border-radius:8px; font-size:0.85rem; color:#cbd5e1; border:1px solid rgba(255,255,255,0.05); margin-top:4px;">v3.1.3: BKST veri çekme hatası düzeltmesi, şeffaf güncelleme motoru ve kararlılık geliştirmeleri</div>
+            <div id="modalCommitMsg" style="background:#0f172a; padding:10px 14px; border-radius:8px; font-size:0.85rem; color:#cbd5e1; border:1px solid rgba(255,255,255,0.05); margin-top:4px;">Yükleniyor...</div>
             <div style="margin-top:16px; background:rgba(34, 197, 94, 0.15); border:1px solid rgba(34, 197, 94, 0.3); color:#4ade80; padding:8px 12px; border-radius:8px; text-align:center; font-size:0.85rem; font-weight:600;">
-                🟢 GitHub Sunucusu ile Eşitlendi & Güncel
+                🟢 Sistem Güncel
             </div>
         </div>
         <div style="margin-top:16px; text-align:right;">
@@ -1161,13 +1170,22 @@ window.updateSystemStatusPill = function(isOnline, statusText, details) {
 };
 
 // ── Otomatik Bakanlık Veri Senkronizasyonu (Uygulama Açıldığında) ──────────────────────────
-async function runAutoBkstSync() {
+async function runAutoBkstSync(force = false) {
     if (window.location.pathname === '/login') return;
 
-    if (sessionStorage.getItem('app_launch_synced')) {
+    const urlForce = window.location.search.includes('force_sync=1');
+    const alreadySynced = sessionStorage.getItem('app_launch_synced');
+
+    if (!force && !urlForce && alreadySynced) {
         return;
     }
     sessionStorage.setItem('app_launch_synced', 'true');
+
+    if (urlForce) {
+        try {
+            window.history.replaceState({}, document.title, window.location.pathname);
+        } catch (_) {}
+    }
 
     let loader = document.getElementById('auto-sync-loader');
     if (!loader) {
@@ -1319,16 +1337,35 @@ async function checkWebSystemUpdate() {
 
 async function initApp() {
     loadUserInfo();
+    loadSystemVersion();
 
-    // 1. Önce Arka Planda Güncelleme Kontrolü Yap
-    // Eğer güncelleme varsa; Bakanlıktan Veri Çekme modalı ASLA açılmaz, doğrudan Güncelleme Ekranı gelir ve günceller
+    // 1. Sadece oturumun ilk açılışında arka planda güncelleme kontrolü yap
+    // (sessionStorage sayesinde butonlara basıldığında veya sayfa geçişlerinde ASLA tekrar çalışmaz)
     const hasUpdate = await performStartupUpdateCheck();
     if (hasUpdate) {
         return;
     }
 
-    // 2. Güncelleme yoksa normal çalışma akışına geç ve Bakanlık senkronizasyonunu başlat
-    runAutoBkstSync();
+    // 2. Bakanlık Senkronizasyonu Kontrolü:
+    // Sunucunun senkronizasyon durumunu sorgula
+    let serverNeedsSync = false;
+    try {
+        const syncRes = await fetch('/api/system/sync_status');
+        if (syncRes.ok) {
+            const syncData = await syncRes.json();
+            if (!syncData.synced) {
+                serverNeedsSync = true;
+            }
+        }
+    } catch (_) {}
+
+    const urlForce = window.location.search.includes('force_sync=1');
+    const sessionSynced = sessionStorage.getItem('app_launch_synced');
+
+    // Sunucu yeni başladıysa VEYA zorlama varsa VEYA bu oturumda henüz veri çekilmediyse veri çek
+    if (serverNeedsSync || urlForce || !sessionSynced) {
+        await runAutoBkstSync(true);
+    }
 }
 
 if (document.readyState === "loading") {

@@ -134,43 +134,32 @@ def check_authentication():
     return None
 
 # ── Sürüm & Güncelleme Bilgisi ────────────────────────────────────────────────
+@app.route('/api/system/version', methods=['GET'])
 def get_version_info():
-    try:
-        from guncelleme_kontrol import get_unified_version_info
-        ver_code, ver_date, ver_msg = get_unified_version_info()
-        return {
-            "success": True,
-            "version": ver_code,
-            "commit_hash": ver_code,
-            "commit_date": ver_date,
-            "commit_msg": ver_msg
-        }
-    except Exception as e:
-        logger.error(f"Error loading version info: {e}")
-
     v_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.json")
+    v_code = "v1.0"
+    v_commit = ""
+    v_date = datetime.now().strftime("%d.%m.%Y")
+    v_msg = "Sistem Güncel"
     if os.path.exists(v_path):
         try:
             with open(v_path, "r", encoding="utf-8") as f:
                 v_data = json.load(f)
-                v_code = v_data.get("version", "v3.1.3")
-                return {
-                    "success": True,
-                    "version": f"{v_code} ({v_data.get('commit', '3.1.3')})",
-                    "commit_hash": f"{v_code} ({v_data.get('commit', '3.1.3')})",
-                    "commit_date": v_data.get("date", "08.10.2026"),
-                    "commit_msg": v_data.get("message", f"{v_code} Sürümü")
-                }
+                v_code = str(v_data.get("version", "v1.0")).strip()
+                v_commit = str(v_data.get("commit", "")).strip()
+                v_date = str(v_data.get("date", "")).strip()
+                v_msg = str(v_data.get("message", "Sistem Güncel")).strip()
         except Exception as e:
-            logger.error(f"Error reading version.json fallback: {e}")
+            logger.error(f"Error reading version.json: {e}")
 
-    return {
+    full_hash = f"{v_code} ({v_commit})" if v_commit else v_code
+    return jsonify({
         "success": True,
-        "version": "v3.1.3",
-        "commit_hash": "v3.1.3",
-        "commit_date": "08.10.2026",
-        "commit_msg": "v3.1.3 Sürümü"
-    }
+        "version": v_code,
+        "commit_hash": full_hash,
+        "commit_date": v_date,
+        "commit_msg": v_msg
+    })
 
 @app.route('/api/system/heartbeat', methods=['POST', 'GET'])
 def system_heartbeat():
@@ -179,10 +168,6 @@ def system_heartbeat():
     payload = _bkst_state_payload()
     payload["local_count"] = _local_item_count()
     return jsonify(payload)
-
-@app.route('/api/system/version', methods=['GET'])
-def system_version_api():
-    return jsonify(get_version_info())
 
 @app.route('/api/heartbeat', methods=['POST', 'GET'])
 def api_heartbeat():
@@ -427,19 +412,23 @@ def inject_global_template_vars():
                 pass
         user_name = clean_user_name(user_name or username)
 
-    version_str = "v3.1.3"
     v_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.json")
+    v_code = "v1.0"
+    v_commit = ""
+    v_date = datetime.now().strftime("%d.%m.%Y")
+    v_msg = "Sistem Güncel"
     if os.path.exists(v_path):
         try:
             with open(v_path, "r", encoding="utf-8") as f:
                 v_data = json.load(f)
-                v_code = v_data.get("version", "3.1.3")
-                if not str(v_code).startswith("v"):
-                    version_str = f"v{v_code}"
-                else:
-                    version_str = str(v_code)
+                v_code = str(v_data.get("version", "v1.0")).strip()
+                v_commit = str(v_data.get("commit", "")).strip()
+                v_date = str(v_data.get("date", "")).strip()
+                v_msg = str(v_data.get("message", "Sistem Güncel")).strip()
         except Exception:
             pass
+
+    full_commit = f"{v_code} ({v_commit})" if v_commit else v_code
 
     global bkst_online, bkst_status
     is_offline = (bkst_online is False or bkst_status in ("offline", "error"))
@@ -448,7 +437,10 @@ def inject_global_template_vars():
 
     return dict(
         current_user_name=user_name,
-        current_app_version=version_str,
+        current_app_version=v_code,
+        current_app_commit=full_commit,
+        current_app_date=v_date,
+        current_app_msg=v_msg,
         bkst_online=bkst_online,
         is_system_active=not is_offline,
         system_status_text=system_status_text,
@@ -2486,20 +2478,30 @@ def api_system_sync_status():
         payload["synced"] = _app_bkst_synced
     return jsonify(payload)
 
+_last_update_check_time = 0
+_cached_update_response = {'has_update': False}
+
 @app.route('/api/system/check_update', methods=['GET'])
 def api_system_check_update():
+    global _last_update_check_time, _cached_update_response
+    now = time.time()
+    # Son 3 dakika içinde kontrol edildiyse önbellekten dön (gereksiz ağ gecikmesini önler)
+    if now - _last_update_check_time < 180 and _cached_update_response is not None:
+        return jsonify(_cached_update_response)
+
     try:
-        from guncelleme_kontrol import get_unified_version_info
         import requests
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-        cur_code, cur_date, cur_msg = get_unified_version_info()
         local_vpath = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.json")
         local_commit = ""
+        cur_code = "v1.0"
         if os.path.exists(local_vpath):
             with open(local_vpath, "r", encoding="utf-8") as f:
-                local_commit = str(json.load(f).get("commit", "")).strip()
+                v_data = json.load(f)
+                local_commit = str(v_data.get("commit", "")).strip()
+                cur_code = str(v_data.get("version", "v1.0")).strip()
 
         headers = {"User-Agent": "Mozilla/5.0", "Cache-Control": "no-cache, no-store, must-revalidate"}
         remote_vurl = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/main/version.json?t={time.time_ns()}"
@@ -2508,14 +2510,19 @@ def api_system_check_update():
             rdata = resp.json()
             remote_commit = str(rdata.get("commit", "")).strip()
             remote_version = str(rdata.get("version", "v1.0")).strip()
+            _last_update_check_time = now
             if remote_commit and remote_commit != local_commit:
-                return jsonify({
+                _cached_update_response = {
                     'has_update': True,
                     'current_version': cur_code,
                     'remote_version': remote_version,
                     'remote_commit': remote_commit,
                     'message': rdata.get("message", "Yeni sistem güncellemesi mevcut.")
-                })
+                }
+                return jsonify(_cached_update_response)
+            else:
+                _cached_update_response = {'has_update': False}
+                return jsonify(_cached_update_response)
     except Exception as e:
         logger.error(f"Check update error: {e}")
 

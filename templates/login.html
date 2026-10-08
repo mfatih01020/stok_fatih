@@ -197,7 +197,8 @@
                     if (data.token) {
                         localStorage.setItem('local_session_token', data.token);
                     }
-                    sessionStorage.clear();
+                    sessionStorage.removeItem('app_launch_synced');
+                    sessionStorage.setItem('startup_update_checked', 'true');
                     showAlert('🟢 Giriş başarılı! Yönlendiriliyorsunuz...', false);
                     setTimeout(() => {
                         window.location.href = '/cikis?force_sync=1';
@@ -239,6 +240,11 @@
 
         // İlk Açılışta Arka Plan Güncelleme Kontrolü (Login Formu Öncesi)
         (async function checkLoginStartupUpdate() {
+            if (sessionStorage.getItem('startup_update_checked')) {
+                return;
+            }
+            sessionStorage.setItem('startup_update_checked', 'true');
+
             try {
                 const res = await fetch('/api/system/check_update');
                 if (res.ok) {
