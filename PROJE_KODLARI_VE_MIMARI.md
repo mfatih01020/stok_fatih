@@ -1,6 +1,6 @@
 # QR COMPARE STOK & KAREKOD YÖNETİM SİSTEMİ - TÜM PROJE KODLARI VE MİMARİSİ
 
-> **Sürüm:** v3.2.0 (Son Güncelleme: 09.10.2026 - Çoklu Yıl Destekli İstatistikler, Depoya Kabul Gerçek Durum Tespiti)  
+> **Sürüm:** v3.2.0 (Son Güncelleme: 09.10.2026 - Çoklu Yıl Destekli İstatistikler, Depoya Kabul Gerçek Durum Tespiti, GTIN/Koli Geliştirmeleri)  
 > **Konum:** `c:\Users\fatih\Desktop\asım iş`
 
 ---
@@ -9,10 +9,10 @@
 
 QR Compare, Bitki Koruma Ürünleri (BKST) stok takibi, karekod eşitleme ve raf/terek sayımı yapmak üzere tasarlanmış modern, yüksek performanslı, çevrimdışı (offline-first) destekli ve tam sertleştirilmiş bir Flask web uygulamasıdır.
 
-### 🌟 Ana Mimari İlkeler ve Güvenlik Tasarımı (v3.1.5):
+### 🌟 Ana Mimari İlkeler ve Güvenlik Tasarımı (v3.2.0):
 
 1. **SQLite Kalıcılığı & WAL Modu (Excel Bağımlılığı Sıfır)**:
-   - Tüm iç veri saklama katmanı `cikis_kayitlari.db` SQLite veritabanı üzerinden WAL (`PRAGMA journal_mode=WAL`) ve `synchronous=NORMAL` modunda yürütülür (`bkst_depo_verileri` ve `cikis_kayitlari` tabloları).
+   - Tüm iç veri saklama katmanı `cikis_kayitlari.db` SQLite veritabanı üzerinden WAL (`PRAGMA journal_mode=WAL`) ve `synchronous=NORMAL` modunda yürütülür (`bkst_depo_verileri`, `cikis_kayitlari`, `satis_arsivi` tabloları).
    - Excel dosyaları (`bkst_depo_verileri.xlsx`) **kesinlikle dahili depolama olarak kullanılmaz**. Excel indirmeleri ve raporlamaları Flask üzerinden dinamik `io.BytesIO()` bellek akışları ile anlık üretilir.
 
 2. **Waitress Production WSGI Sunucusu**:
@@ -52,11 +52,12 @@ QR Compare, Bitki Koruma Ürünleri (BKST) stok takibi, karekod eşitleme ve raf
 10. **Doğru Tip Dönüşümü, Koli/Palet Toplu Çıkış & Tekrar Okutma Yönetimi (`tekrar_uyari`)**:
     - İlk kez okutulan ürünler kesinlikle `tekrar_uyari = 0` (False) olarak kaydedilir ve yeşil kartla onaylanır.
     - Daha önce okutulmuş bir ürün tekrar okutulduğunda `tekrar_uyari = 1` ve `tekrar_uyari: True` dönülerek arayüzde sarı uyarı kartı ve TEKRAR rozeti gösterilir.
-    - Koli/palet barkodu okutulduğunda kolideki tüm ürünler topluca çıkış kayıtlarına işlenir.
+    - Koli/palet barkodu okutulduğunda kolideki tüm ürünler topluca çıkış kayıtlarına işlenir ve arayüzdeki çıkış tablosunda koli içindeki ürünlerin tamamı tek tek listelenir.
     - Karekod eşleştirmelerinde casefold yapılarak büyük/küçük harf varyasyonları duplicate kaçaklarına yol açmaz.
 
-11. **Şablon Değişkenleri 30sn TTL Bellek Önbelleği**:
+11. **Şablon Değişkenleri 30sn TTL Bellek Önbelleği & Dinamik Şablon Yenileme**:
     - `inject_global_template_vars` her sayfa isteğinde diskten dosya okumak yerine verileri 30 saniyelik TTL ile önbellekten sunarak CPU ve disk I/O yükünü sıfıra indirir.
+    - `app.config['TEMPLATES_AUTO_RELOAD'] = True` ile güncellenen şablonlar anlık olarak devreye girer.
 
 12. **Çift Katmanlı Satış Mimarisi: Kalıcı Satış Arşivi (`satis_arsivi`) ve Çalışma Sepeti (`cikis_kayitlari`)**:
     - Kullanıcı iş akışında "Sistemden Çıkacaklar Listesi"ni (`cikis_kayitlari`) aktif bir sevk sepeti olarak kullanır; ürünler Bakanlık sistemine aktarıldıkça veya sevk tamamlandıkça bu listeden silinebilir veya "Tümünü Sil" ile temizlenebilir.
@@ -65,27 +66,34 @@ QR Compare, Bitki Koruma Ürünleri (BKST) stok takibi, karekod eşitleme ve raf
     - Mükerrer okutma denetimi (`tekrar_uyari`), hem çalışma listesini hem de `satis_arsivi` tablosunu `UNION ALL` ile tarar; böylece aylar/yıllar önce çıkılmış bir ürün bile okutulsa anında geçmiş çıkış tarihiyle birlikte tespit edilir.
     - **İstatistikleri Sıfırlama (`POST /api/istatistikler/sifirla`)**: İstatistikler sayfasındaki "İstatistikleri Sıfırla" butonu ile kalıcı arşiv (`satis_arsivi`) çift onaylı olarak güvenle sıfırlanabilir. Aktif çalışma listesindeki sepet kayıtları bu işlemden etkilenmez. Tek seferlik migration koruması (`schema_migrations`) sayesinde sistem yeniden başlatıldığında sıfırlanan veriler eski listelerden tekrar geri yüklenmez.
 
-13. **Gelişmiş Koli/Palet Barkod Doğrulaması**:
-    - `find_matching_koli` içinde 6 karakterden kısa verilerin yanlışlıkla koli/palet sayılması engellenmiştir.
+13. **Gelişmiş Barkod & Karekod Doğrulama (GTIN ve Koli Ayrımı)**:
+    - Barkod okutma alanına karekod yerine yalnızca GTIN okutulduğunda ürün çıkışı yapılması engellenir; sistem kullanıcıyı "Bu bir karekod değildir, ürünün karekodunu okutunuz" şeklinde uyarır.
+    - Koli/palet aramalarında (`find_matching_koli`) 6 karakterden kısa girdilerin yanlışlıkla koli sanılması engellenmiştir.
 
-14. **Bakanlık Depoya Kabul Et Modülü: Gerçek Durum Tespiti (`Kabul Bekliyor` vs `Stoğa Alınmış`)**:
+14. **Bakanlık Depoya Kabul Et Modülü: Gerçek Durum Tespiti (`🟢 Kabul Bekliyor` vs `📦 Stoğa Alınmış`)**:
     - Bakanlık BKST `GetReceivedNotificationList` servisinin her geçerli/iptal edilmemiş faturayı yanıltıcı şekilde `HEADERSTATE: 'AKTIF'` döndürmesi sorunu çözülmüştür.
-    - Sistem, gelen bildirimlerin detaylarını eşzamanlı `ThreadPoolExecutor(max_workers=20)` ile paralel sorgulayarak satır bazında `DETAILSTATE == 'ALIMA UYGUN'` olan ürünleri anlık tespit eder.
+    - Sistem, gelen bildirimlerin detaylarını eşzamanlı `ThreadPoolExecutor(max_workers=25)` ile paralel sorgulayarak satır bazında `DETAILSTATE == 'ALIMA UYGUN'` olan ürünleri anlık tespit eder.
     - Henüz depoya kabul edilmemiş ürün içeren bildirimler `🟢 Kabul Bekliyor` olarak işaretlenir ve faturadaki bekleyen ürün sayısıyla birlikte listenin en başına sabitlenir. Tüm ürünleri önceden depoya alınmış bildirimler ise `📦 Stoğa Alınmış` olarak gösterilir.
     - Belge detayında ürünler tablo halinde incelenirken her kalemin durumu ('Kabul Bekliyor' veya 'Stoğa Alınmış') açıkça gösterilir. 'Tek Tuşla Depoya Kabul Et' butonu yalnızca kabul bekleyen ürünler varsa aktifleşir; zaten stoğa alınmış faturalarda '✅ Bu Belgedeki Ürünler Zaten Stoğa Alınmış' rozetiyle güvenli biçimde kilitlenir.
+    - Bildirim tablosu ile detay tablosu `480px` sabit yükseklik ile simetrik olarak dengelenmiştir.
+
+15. **Single-Instance Mutex & Bring-to-Front Desteği (`Calistir.exe`)**:
+    - Windows native C# ile derlenen `Calistir.exe`, `Global\QRCompare_SingleInstance_Mutex` ve Windows API (`EnumWindows`, `SetForegroundWindow`, `ShowWindow`) kullanarak uygulamanın birden fazla açılmasını engeller; çift tıklandığında var olan pencereyi anında öne getirir ve maksimize eder.
 
 ---
 
 ## 2. Proje Dosya ve Kodları
 
+Aşağıda QR Compare v3.2.0 projesinin tüm kaynak kodları eksiksiz olarak listelenmiştir:
+
 ### 📁 `version.json`
 
 ```json
 {
-  "version": "v3.1.5",
-  "commit": "3.1.5",
-  "date": "08.10.2026",
-  "message": "v3.1.5: Tekrar çıkış rozeti ve GTIN görüntüleme düzeltmesi, Single-Instance & Bring-to-Front desteği, güvenlik ve önbellek iyileştirmeleri",
+  "version": "v3.2.0",
+  "commit": "3.2.0",
+  "date": "09.10.2026",
+  "message": "v3.2.0: Çoklu yıl destekli İstatistikler & Satış Raporları, aylık trend grafikleri, Depoya Kabul Et gerçek durum filtreleme (Kabul Bekliyor / Stoğa Alınmış), GTIN ve koli eşleme geliştirmeleri",
   "files": [
     ".gitignore",
     "Calistir.bat",
@@ -100,6 +108,7 @@ QR Compare, Bitki Koruma Ürünleri (BKST) stok takibi, karekod eşitleme ve raf
     "launcher.py",
     "requirements.txt",
     "static/app.js",
+    "static/chart.umd.min.js",
     "static/favicon.ico",
     "static/favicon.png",
     "static/favicon.svg",
@@ -109,6 +118,7 @@ QR Compare, Bitki Koruma Ürünleri (BKST) stok takibi, karekod eşitleme ve raf
     "templates/depo_kabul.html",
     "templates/depo_stoklari.html",
     "templates/index.html",
+    "templates/istatistikler.html",
     "templates/kullaniciya_satis.html",
     "templates/login.html",
     "version.json"
@@ -236,6 +246,811 @@ Paketler daha önce kurulduysa internet olmadan da çalışır. İlk kurulum iç
 
 ---
 
+### 📁 `build_exe.ps1`
+
+```powershell
+$code = @"
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Net.Sockets;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+
+public class AppLauncher {
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    private static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    private static extern int GetWindowTextLength(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc enumProc, IntPtr lParam);
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern void SwitchToThisWindow(IntPtr hWnd, bool fAltTab);
+
+    private const int SW_RESTORE = 9;
+    private const int SW_SHOW = 5;
+    private const int SW_MAXIMIZE = 3;
+
+    private static IntPtr _foundWindow = IntPtr.Zero;
+
+    private static bool EnumTheWindows(IntPtr hWnd, IntPtr lParam) {
+        if (!IsWindowVisible(hWnd)) return true;
+        int length = GetWindowTextLength(hWnd);
+        if (length == 0) return true;
+
+        StringBuilder builder = new StringBuilder(length + 1);
+        GetWindowText(hWnd, builder, builder.Capacity);
+        string title = builder.ToString();
+
+        if (title.IndexOf("QR Compare", StringComparison.OrdinalIgnoreCase) >= 0) {
+            _foundWindow = hWnd;
+            return false;
+        }
+        return true;
+    }
+
+    private static IntPtr FindQrCompareWindow() {
+        _foundWindow = IntPtr.Zero;
+        EnumWindows(new EnumWindowsProc(EnumTheWindows), IntPtr.Zero);
+        return _foundWindow;
+    }
+
+    private static void BringWindowToFront(IntPtr hWnd) {
+        if (hWnd != IntPtr.Zero) {
+            try {
+                ShowWindow(hWnd, SW_RESTORE);
+                ShowWindow(hWnd, SW_MAXIMIZE);
+                SetForegroundWindow(hWnd);
+                SwitchToThisWindow(hWnd, true);
+            } catch {}
+        }
+    }
+
+    public static void Main() {
+        string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+        Directory.SetCurrentDirectory(baseDir);
+
+        // 1. Eğer sunucu (port 5000) zaten açıksa:
+        if (IsPortOpen("127.0.0.1", 5000)) {
+            IntPtr existingWnd = FindQrCompareWindow();
+            if (existingWnd != IntPtr.Zero) {
+                // Açık pencereyi öne getir ve yeni tarayıcı açmadan sonlan
+                BringWindowToFront(existingWnd);
+                return;
+            }
+
+            // Port açık ama pencere bulunamadıysa tarayıcıyı aç
+            OpenBrowser();
+            for (int j = 0; j < 15; j++) {
+                Thread.Sleep(200);
+                IntPtr w = FindQrCompareWindow();
+                if (w != IntPtr.Zero) {
+                    BringWindowToFront(w);
+                    break;
+                }
+            }
+            return;
+        }
+
+        // 2. Sunucu henüz açık değilse: Mutex ile çift tıklama yarışını engelle
+        bool createdNew = false;
+        using (Mutex mutex = new Mutex(true, "Global\\QRCompare_SingleInstance_Mutex", out createdNew)) {
+            if (!createdNew) {
+                for (int i = 0; i < 20; i++) {
+                    Thread.Sleep(300);
+                    if (IsPortOpen("127.0.0.1", 5000)) {
+                        IntPtr w = FindQrCompareWindow();
+                        if (w != IntPtr.Zero) BringWindowToFront(w);
+                        return;
+                    }
+                }
+            }
+
+            string pythonwPath = FindPythonwPath();
+            if (!string.IsNullOrEmpty(pythonwPath)) {
+                ProcessStartInfo psi = new ProcessStartInfo();
+                psi.FileName = pythonwPath;
+                psi.Arguments = "app.py";
+                psi.WorkingDirectory = baseDir;
+                psi.UseShellExecute = false;
+                psi.CreateNoWindow = true;
+                psi.WindowStyle = ProcessWindowStyle.Hidden;
+                try {
+                    Process.Start(psi);
+                } catch {}
+            }
+
+            for (int i = 0; i < 32; i++) {
+                Thread.Sleep(250);
+                if (IsPortOpen("127.0.0.1", 5000)) break;
+            }
+
+            if (!IsPortOpen("127.0.0.1", 5000)) {
+                try {
+                    ProcessStartInfo diagPsi = new ProcessStartInfo();
+                    diagPsi.FileName = "cmd.exe";
+                    diagPsi.Arguments = "/k echo [HATA] Lokal sunucu acilamadi, Python hata ciktisi calistiriliyor... && python app.py";
+                    diagPsi.WorkingDirectory = baseDir;
+                    diagPsi.UseShellExecute = true;
+                    Process.Start(diagPsi);
+                    return;
+                } catch {}
+            }
+
+            OpenBrowser();
+
+            for (int j = 0; j < 15; j++) {
+                Thread.Sleep(200);
+                IntPtr w = FindQrCompareWindow();
+                if (w != IntPtr.Zero) {
+                    BringWindowToFront(w);
+                    break;
+                }
+            }
+        }
+    }
+
+    private static void OpenBrowser() {
+        string browserExe = FindBrowserPath();
+        if (!string.IsNullOrEmpty(browserExe)) {
+            ProcessStartInfo bpsi = new ProcessStartInfo();
+            bpsi.FileName = browserExe;
+            bpsi.Arguments = "--app=http://127.0.0.1:5000 --start-maximized --window-position=0,0";
+            bpsi.UseShellExecute = false;
+            bpsi.CreateNoWindow = true;
+            try {
+                Process.Start(bpsi);
+                return;
+            } catch {}
+        }
+        try {
+            Process.Start("http://127.0.0.1:5000");
+        } catch {}
+    }
+
+    private static bool IsPortOpen(string host, int port) {
+        try {
+            using (TcpClient client = new TcpClient()) {
+                IAsyncResult result = client.BeginConnect(host, port, null, null);
+                bool success = result.AsyncWaitHandle.WaitOne(400, false);
+                if (success) {
+                    client.EndConnect(result);
+                    return true;
+                }
+            }
+        } catch {}
+        return false;
+    }
+
+    private static string FindPythonwPath() {
+        string[] candidates = new string[] {
+            @"C:\Program Files\Python313\pythonw.exe",
+            @"C:\Program Files\Python312\pythonw.exe",
+            @"C:\Program Files\Python311\pythonw.exe",
+            @"C:\Program Files\Python310\pythonw.exe",
+            @"C:\Program Files\Python39\pythonw.exe",
+            @"C:\Program Files (x86)\Python313\pythonw.exe",
+            @"C:\Program Files (x86)\Python312\pythonw.exe",
+            @"C:\Program Files (x86)\Python311\pythonw.exe",
+            @"C:\Python313\pythonw.exe",
+            @"C:\Python312\pythonw.exe",
+            @"C:\Python311\pythonw.exe",
+            @"C:\Python310\pythonw.exe",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Python\Python313\pythonw.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Python\Python312\pythonw.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Python\Python311\pythonw.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Python\Python310\pythonw.exe")
+        };
+
+        foreach (string path in candidates) {
+            if (File.Exists(path)) return path;
+        }
+
+        string pathEnv = Environment.GetEnvironmentVariable("PATH");
+        if (!string.IsNullOrEmpty(pathEnv)) {
+            foreach (string p in pathEnv.Split(';')) {
+                string w = Path.Combine(p.Trim(), "pythonw.exe");
+                if (File.Exists(w)) return w;
+                string py = Path.Combine(p.Trim(), "python.exe");
+                if (File.Exists(py)) return py;
+            }
+        }
+
+        return "pythonw.exe";
+    }
+
+    private static string FindBrowserPath() {
+        string[] candidates = new string[] {
+            @"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            @"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Google\Chrome\Application\chrome.exe"),
+            @"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+            @"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Microsoft\Edge\Application\msedge.exe")
+        };
+
+        foreach (string path in candidates) {
+            if (File.Exists(path)) return path;
+        }
+
+        return null;
+    }
+}
+"@
+
+Add-Type -TypeDefinition $code -OutputAssembly "Calistir.exe" -OutputType WindowsApplication
+Write-Host "Native Calistir.exe built successfully with Single-Instance & Bring-To-Front support!"
+
+```
+
+---
+
+### 📁 `Calistir.bat`
+
+```batch
+@echo off
+cd /d "%~dp0"
+chcp 65001 > nul
+title QR Stok Yonetim Sistemi
+
+:: 1. Python kontrolu
+python --version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo ============================================================
+    echo [HATA] Python bu bilgisayarda bulunamadi!
+    echo.
+    echo Lutfen https://www.python.org adresinden Python'u indirin.
+    echo KURULUM SIRASINDA EN ALTTAKI "Add Python to PATH" KUTUCUGUNU
+    echo MUTLAKA ISARETLEYIN!
+    echo ============================================================
+    echo.
+    pause
+    exit /b 1
+)
+
+:: 2. Gerekli kutuphaneler kontrolu
+python -c "import flask, waitress, pandas, openpyxl, requests" >nul 2>&1
+if %errorlevel% neq 0 (
+    echo ============================================================
+    echo [BILGI] Ilk calisma icin gerekli paketler kuruluyor...
+    echo (waitress, flask, pandas, openpyxl, requests vb.)
+    echo Lutfen bekleyin, bu islem sadece bir kez yapilacaktir...
+    echo ============================================================
+    echo.
+    python -m pip install --upgrade pip >nul 2>&1
+    python -m pip install -r requirements.txt
+    if %errorlevel% neq 0 (
+        echo.
+        echo [BILGI] requirements.txt tam yuklenemedi, temel kutuphaneler kuruluyor...
+        python -m pip install flask waitress pandas openpyxl requests xlrd
+    )
+    echo.
+    echo [BASARILI] Tum paketler kuruldu, program baslatiliyor...
+    timeout /t 2 >nul
+)
+
+:: 3. Calistir
+if exist "%~dp0Calistir.exe" (
+    start "" "%~dp0Calistir.exe"
+) else (
+    start "" pythonw launcher.py
+)
+exit
+
+```
+
+---
+
+### 📁 `Calistir.vbs`
+
+```vbscript
+Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run "Calistir.exe", 0, False
+
+```
+
+---
+
+### 📁 `Guncelle.bat`
+
+```batch
+@echo off
+cd /d "%~dp0"
+set PYTHONIOENCODING=utf-8
+chcp 65001 > nul
+title QR Stok Yonetim Sistemi - Guncelleyici
+
+echo.
+echo ============================================================
+echo      QR STOK YONETIM SISTEMI - GUNCELLEME SERVISI
+echo ============================================================
+echo.
+
+python guncelleme_kontrol.py
+
+echo.
+echo ============================================================
+echo [TAMAMLANDI] Islem sona erdi.
+echo ============================================================
+echo.
+echo Pencereyi kapatmak icin herhangi bir tusa basin...
+pause >nul
+exit
+
+```
+
+---
+
+### 📁 `Kapat.bat`
+
+```batch
+@echo off
+cd /d "%~dp0"
+chcp 65001 > nul
+title QR Stok Yonetim Sistemi - Kapatici
+
+echo.
+echo ============================================================
+echo   QR STOK YÖNETİM SİSTEMİ ARKA PLAN SUNUCUSU KAPATILIYOR...
+echo ============================================================
+echo.
+
+powershell -Command "Get-Process python,pythonw,py -ErrorAction SilentlyContinue | Stop-Process -Force" > nul 2>&1
+taskkill /F /IM python.exe > nul 2>&1
+taskkill /F /IM pythonw.exe > nul 2>&1
+taskkill /F /IM py.exe > nul 2>&1
+
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr :5000 ^| findstr LISTENING') do (
+    taskkill /F /PID %%a > nul 2>&1
+)
+
+echo.
+echo 🟢 Arka plandaki tüm sunucu süreçleri başarıyla kapatıldı.
+echo.
+timeout /t 2 > nul
+exit
+
+```
+
+---
+
+### 📁 `Hosts_Duzelt.bat`
+
+```batch
+@echo off
+chcp 65001 >nul
+title GitHub & Hosts Onarici
+
+:: Yonetici haklari kontrolu
+net session >nul 2>&1
+if %errorLevel% neq 0 (
+    echo Yonetici yetkisi isteniyor, lutfen ekranda cikan uyariya EVET deyiniz...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process cmd.exe -ArgumentList '/c \"\"%~f0\"\"' -Verb RunAs"
+    exit /b
+)
+
+echo ========================================================
+echo     GITHUB ZIP & BAGLANTI ONARIM ARACI
+echo ========================================================
+echo.
+echo [1/3] Hosts dosyasi yedekleniyor (hosts.bak)...
+copy /y "C:\Windows\System32\drivers\etc\hosts" "C:\Windows\System32\drivers\etc\hosts.bak" >nul
+
+echo [2/3] Hosts dosyasindaki hatali GitHub ve 8.8.4.4 yonlendirmeleri temizleniyor...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$path = 'C:\Windows\System32\drivers\etc\hosts'; (Get-Content $path) | Where-Object { $_ -notmatch '8\.8\.4\.4' -and $_ -notmatch 'github\.com' } | Set-Content $path -Force"
+
+echo [3/3] Windows DNS onbellegi sifirlaniyor...
+ipconfig /flushdns >nul
+
+echo.
+echo ========================================================
+echo  [BASARILI] Hosts dosyasi basariyla temizlendi!
+echo  Artik GitHub'dan ZIP indirebilir ve sayfalara girebilirsiniz.
+echo ========================================================
+echo.
+pause
+
+```
+
+---
+
+### 📁 `launcher.py`
+
+```python
+import os
+import sys
+import subprocess
+import time
+import socket
+import webbrowser
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+os.chdir(BASE_DIR)
+
+NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
+
+def is_port_in_use(port=5000):
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.5)
+            return s.connect_ex(('127.0.0.1', port)) == 0
+    except Exception:
+        return False
+
+def find_and_bring_window_to_front():
+    if os.name != 'nt':
+        return False
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        found_hwnd = None
+
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+        def enum_windows_callback(hwnd, extra):
+            nonlocal found_hwnd
+            if user32.IsWindowVisible(hwnd):
+                length = user32.GetWindowTextLengthW(hwnd)
+                if length > 0:
+                    buff = ctypes.create_unicode_buffer(length + 1)
+                    user32.GetWindowTextW(hwnd, buff, length + 1)
+                    if "QR Compare" in buff.value:
+                        found_hwnd = hwnd
+                        return False
+            return True
+
+        user32.EnumWindows(WNDENUMPROC(enum_windows_callback), 0)
+        if found_hwnd:
+            user32.ShowWindow(found_hwnd, 9)  # SW_RESTORE
+            user32.ShowWindow(found_hwnd, 3)  # SW_MAXIMIZE
+            user32.SetForegroundWindow(found_hwnd)
+            return True
+    except Exception:
+        pass
+    return False
+
+def open_as_desktop_app(url="http://127.0.0.1:5000"):
+    chrome_paths = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe")
+    ]
+    edge_paths = [
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"
+    ]
+
+    for browser_path in chrome_paths + edge_paths:
+        if os.path.exists(browser_path):
+            try:
+                subprocess.Popen([browser_path, f"--app={url}", "--start-maximized", "--window-position=0,0"], creationflags=NO_WINDOW)
+                return True
+            except Exception:
+                pass
+
+    webbrowser.open(url)
+    return False
+
+def ensure_dependencies():
+    packages = ["flask", "waitress", "pandas", "openpyxl", "requests"]
+    missing = []
+    for pkg in packages:
+        try:
+            __import__(pkg)
+        except ImportError:
+            missing.append(pkg)
+    if missing:
+        try:
+            subprocess.run([sys.executable, "-m", "pip", "install", *missing], check=True, creationflags=NO_WINDOW)
+        except Exception:
+            pass
+
+def launch():
+    if is_port_in_use(5000):
+        # Uygulama zaten çalışıyorsa var olan pencereyi öne getir
+        if find_and_bring_window_to_front():
+            return
+        # Pencere bulunamadıysa yeni tarayıcı penceresi aç
+        open_as_desktop_app("http://127.0.0.1:5000")
+        return
+
+    ensure_dependencies()
+    py_dir = os.path.dirname(sys.executable)
+    pythonw_cand = os.path.join(py_dir, "pythonw.exe")
+    target_py = pythonw_cand if os.path.exists(pythonw_cand) else sys.executable
+    flags = NO_WINDOW
+    if os.name == 'nt':
+        flags |= 0x00000008  # DETACHED_PROCESS
+    subprocess.Popen([target_py, "app.py"], cwd=BASE_DIR, creationflags=flags)
+
+    for _ in range(32):
+        time.sleep(0.25)
+        if is_port_in_use(5000):
+            break
+
+    open_as_desktop_app("http://127.0.0.1:5000")
+
+if __name__ == "__main__":
+    launch()
+
+```
+
+---
+
+### 📁 `guncelleme_kontrol.py`
+
+```python
+import os
+import sys
+import subprocess
+import shutil
+import json
+import time
+import re
+from datetime import datetime
+
+# Çalışma dizinini script'in bulunduğu klasöre sabitle
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+os.chdir(BASE_DIR)
+
+NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
+
+# Windows Konsolu için ANSI Renk ve UTF-8 Türkçe Karakter Desteğini Aktifleştir
+if os.name == 'nt':
+    try:
+        os.system('')  # Windows VT100 / ANSI escape sequence modunu açar
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
+GREEN = '\033[92m'
+CYAN = '\033[96m'
+YELLOW = '\033[93m'
+RED = '\033[91m'
+WHITE = '\033[97m'
+BOLD = '\033[1m'
+DIM = '\033[2m'
+RESET = '\033[0m'
+
+def clear_pycache():
+    for dirpath, dirnames, filenames in os.walk(BASE_DIR):
+        if "__pycache__" in dirnames:
+            try:
+                shutil.rmtree(os.path.join(dirpath, "__pycache__"), ignore_errors=True)
+            except Exception:
+                pass
+
+def get_unified_version_info():
+    v_code = "v1.0"
+    v_commit = ""
+    v_date = datetime.now().strftime("%d.%m.%Y")
+    v_msg = "Sistem Güncel"
+
+    v_path = os.path.join(BASE_DIR, "version.json")
+    if os.path.exists(v_path):
+        try:
+            with open(v_path, "r", encoding="utf-8") as f:
+                v_data = json.load(f)
+                v_code = str(v_data.get("version", "v1.0")).strip()
+                v_commit = str(v_data.get("commit", "")).strip()
+                v_date = str(v_data.get("date", "")).strip()
+                v_msg = str(v_data.get("message", "Sistem Güncel")).strip()
+        except Exception:
+            pass
+
+    full_ver = f"{v_code} ({v_commit})" if v_commit else v_code
+    return full_ver, v_date, v_msg
+
+def install_dependencies():
+    print(f"  {CYAN}[3/3] Gerekli Python kütüphaneleri kontrol ediliyor ve kuruluyor...{RESET}")
+    req_file = os.path.join(BASE_DIR, "requirements.txt")
+    if os.path.exists(req_file):
+        try:
+            res = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"],
+                capture_output=True, text=True, cwd=BASE_DIR, creationflags=NO_WINDOW
+            )
+            if res.returncode == 0:
+                print(f"  {GREEN}  ✓ Tüm Python paketleri başarıyla doğrulandı ve yüklendi.{RESET}")
+            else:
+                print(f"  {YELLOW}  • Temel paketler (waitress, flask, pandas, openpyxl, requests) kuruluyor...{RESET}")
+                subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "waitress", "flask", "pandas", "openpyxl", "requests", "xlrd"],
+                    capture_output=True, text=True, cwd=BASE_DIR, creationflags=NO_WINDOW
+                )
+                print(f"  {GREEN}  ✓ Temel paketler başarıyla yüklendi.{RESET}")
+        except Exception as e:
+            print(f"  {YELLOW}  • Paket yükleme uyarısı: {e}{RESET}")
+
+def recompile_exe_if_possible():
+    ps1_file = os.path.join(BASE_DIR, "build_exe.ps1")
+    if os.path.exists(ps1_file) and os.name == 'nt':
+        try:
+            subprocess.run(
+                ["powershell", "-ExecutionPolicy", "Bypass", "-File", "build_exe.ps1"],
+                capture_output=True, text=True, cwd=BASE_DIR, creationflags=NO_WINDOW
+            )
+        except Exception:
+            pass
+
+def is_dev_mode():
+    if os.environ.get("DEV_MODE") == "1":
+        return True
+    if os.path.exists(os.path.join(BASE_DIR, ".dev_mode")):
+        return True
+    return False
+
+def parse_version_tuple(v_str):
+    try:
+        clean = re.sub(r'[^0-9.]', '', str(v_str))
+        parts = [int(p) for p in clean.split('.') if p.isdigit()]
+        return tuple(parts)
+    except Exception:
+        return (0, 0, 0)
+
+def http_update():
+    if is_dev_mode():
+        print(f"\n{YELLOW}{BOLD} =============================================================={RESET}")
+        print(f"{YELLOW}{BOLD}  🔧 [GELİŞTİRİCİ MODU AKTİF] (.dev_mode dosyası mevcut){RESET}")
+        print(f"{WHITE}  Yerel kodlar korunuyor, GitHub'dan indirme/ezme yapılmayacak.{RESET}")
+        print(f"{YELLOW}{BOLD} =============================================================={RESET}\n")
+        install_dependencies()
+        return False
+
+    print(f"  {CYAN}[1/3] GitHub sunucusundan en güncel sürüm bilgisi sorgulanıyor...{RESET}")
+    try:
+        import requests
+        import urllib3
+        import zipfile
+        import io
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    except ImportError:
+        print(f"  {YELLOW}  • requests kütüphanesi yükleniyor...{RESET}")
+        subprocess.run([sys.executable, "-m", "pip", "install", "requests", "urllib3"], capture_output=True, creationflags=NO_WINDOW)
+        import requests
+        import urllib3
+        import zipfile
+        import io
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache"
+    }
+
+    timestamp = time.time_ns()
+    remote_vurl = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/main/version.json?t={timestamp}"
+
+    try:
+        resp = requests.get(remote_vurl, verify=False, timeout=10, headers=headers)
+        if resp.status_code != 200:
+            print(f"  {RED}[HATA] Güncelleme sunucusuna ulaşılamadı (HTTP {resp.status_code}){RESET}")
+            return False
+
+        remote_data = resp.json()
+        remote_commit = str(remote_data.get("commit", "")).strip()
+        remote_version = str(remote_data.get("version", "")).strip()
+        remote_date = str(remote_data.get("date", "")).strip()
+        remote_msg = str(remote_data.get("message", "")).strip()
+
+        local_vpath = os.path.join(BASE_DIR, "version.json")
+        local_commit = ""
+        local_version = "v1.0"
+        if os.path.exists(local_vpath):
+            try:
+                with open(local_vpath, "r", encoding="utf-8") as f:
+                    v_raw = json.load(f)
+                    local_commit = str(v_raw.get("commit", "")).strip()
+                    local_version = str(v_raw.get("version", "v1.0")).strip()
+            except Exception:
+                pass
+
+        # Sürüm karşılaştırması: Uzak sürüm yerel sürümden büyük değilse güncelleme yapma!
+        remote_tup = parse_version_tuple(remote_version)
+        local_tup = parse_version_tuple(local_version)
+
+        if remote_tup <= local_tup or (local_commit and local_commit == remote_commit):
+            print(f"\n{GREEN}{BOLD} =============================================================={RESET}")
+            print(f"{GREEN}{BOLD}  🟢 [GÜNCEL] Sisteminiz zaten en son sürümde ({local_version}).{RESET}")
+            print(f"{WHITE}  📦 Yerel Sürüm: {local_version} | Uzak Sürüm: {remote_version}{RESET}")
+            print(f"{GREEN}{BOLD} =============================================================={RESET}\n")
+            install_dependencies()
+            return False
+
+        print(f"\n  {YELLOW}{BOLD}[2/3] [🔄 YENİ SÜRÜM TESPİT EDİLDİ: {remote_version}] Dosyalar indiriliyor...{RESET}")
+
+        zip_url = f"https://github.com/mfatih01020/stok_fatih/archive/refs/heads/main.zip?t={timestamp}"
+        zip_resp = requests.get(zip_url, verify=False, timeout=40, headers=headers)
+
+        if zip_resp.status_code != 200:
+            print(f"  {RED}[HATA] Güncelleme zip paketi indirilemedi (HTTP {zip_resp.status_code}){RESET}")
+            return False
+
+        # Asla ezilmeyecek kullanıcı dosyaları
+        ignored_extensions = ('.db', '.sqlite', '.sqlite3', '.log')
+        ignored_filenames = (
+            'cikis_kayitlari.db', 'stok.db', 'stok_takip.db', 
+            'bakanlik_giris_bilgileri.txt', 'günlük satışlar.txt',
+            '.session_token'
+        )
+
+        with zipfile.ZipFile(io.BytesIO(zip_resp.content)) as zf:
+            for member in zf.infolist():
+                if member.is_dir():
+                    continue
+                parts = member.filename.split('/', 1)
+                if len(parts) < 2:
+                    continue
+                rel_path = parts[1]
+
+                filename = os.path.basename(rel_path)
+                if filename in ignored_filenames or filename.endswith(ignored_extensions) or rel_path.startswith('.git/'):
+                    continue
+
+                dest_path = os.path.join(BASE_DIR, rel_path.replace('/', os.sep))
+                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                try:
+                    with zf.open(member) as source, open(dest_path, "wb") as target:
+                        target.write(source.read())
+                except PermissionError:
+                    # Dosya o an kullanımda ise (örneğin Calistir.exe açık ise) atla
+                    pass
+
+        with open(local_vpath, "w", encoding="utf-8") as f:
+            json.dump(remote_data, f, ensure_ascii=False, indent=2)
+
+        clear_pycache()
+        install_dependencies()
+        recompile_exe_if_possible()
+
+        print(f"\n{GREEN}{BOLD} =============================================================={RESET}")
+        print(f"{GREEN}{BOLD}  🟢 [BAŞARILI] Sistem başarıyla {remote_version} sürümüne güncellendi!{RESET}")
+        print(f"{WHITE}{BOLD}  📦 Sürüm: {remote_version} ({remote_commit}) | {remote_date}{RESET}")
+        print(f"{WHITE}  📝 Not  : {remote_msg}{RESET}")
+        print(f"{GREEN}{BOLD} =============================================================={RESET}\n")
+        return True
+
+    except Exception as e:
+        print(f"  {RED}[HATA] Güncelleme işlemi sırasında beklenmeyen hata: {e}{RESET}")
+        return False
+
+def force_update():
+    print(f"\n{CYAN}{BOLD} =============================================================={RESET}")
+    print(f"{WHITE}{BOLD}       QR STOK YÖNETİM SİSTEMİ - GÜNCELLEME KONTROLÜ{RESET}")
+    print(f"{CYAN}{BOLD} =============================================================={RESET}\n")
+
+    cur_hash, cur_date, cur_msg = get_unified_version_info()
+    print(f"  {WHITE}{BOLD}📌 MEVCUT YÜKLÜ SÜRÜM:{RESET}")
+    print(f"  {DIM}  • Sürüm Kodu: {RESET}{WHITE}{cur_hash}{RESET}")
+    print(f"  {DIM}  • Tarih     : {RESET}{WHITE}{cur_date}{RESET}")
+    print(f"  {DIM}  • Not       : {RESET}{WHITE}{cur_msg}{RESET}\n")
+
+    return http_update()
+
+if __name__ == "__main__":
+    success = force_update()
+
+```
+
+---
+
 ### 📁 `app.py`
 
 ```python
@@ -309,6 +1124,7 @@ def _get_or_create_flask_secret():
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY") or _get_or_create_flask_secret()
+app.config['TEMPLATES_AUTO_RELOAD'] = True
 
 # ── Global Thread Lock & Memory State ─────────────────────────────────────────
 _state_lock = threading.RLock()
@@ -361,7 +1177,7 @@ def add_header(response):
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'
-    if not request.cookies.get('local_session_token'):
+    if request.cookies.get('local_session_token') != LOCAL_SESSION_TOKEN:
         response.set_cookie('local_session_token', LOCAL_SESSION_TOKEN, httponly=True, samesite='Strict')
     return response
 
@@ -385,12 +1201,16 @@ def check_authentication():
         return redirect('/login')
 
     if path.startswith('/api/'):
-        client_token = request.headers.get('X-Local-Token')
-        if not client_token:
-            client_token = request.args.get('token')
-        if not client_token:
-            client_token = request.cookies.get('local_session_token')
-        if not client_token or client_token != LOCAL_SESSION_TOKEN:
+        client_tokens = [
+            request.cookies.get('local_session_token'),
+            request.headers.get('X-Local-Token'),
+            request.headers.get('X-Session-Token'),
+            request.args.get('token')
+        ]
+        # Ignore empty, None, and literal strings 'undefined', 'null'
+        valid_tokens = [t.strip() for t in client_tokens if t and str(t).strip().lower() not in ('undefined', 'null', 'none', '')]
+
+        if not any(t == LOCAL_SESSION_TOKEN for t in valid_tokens):
             return jsonify({'success': False, 'error': 'Geçersiz veya eksik oturum anahtarı', 'code': 401}), 401
 
     return None
@@ -635,6 +1455,24 @@ def ensure_db_schema(conn=None):
             except Exception as e:
                 logger.warning(f"Could not add column {col} to bkst_depo_verileri_staging: {e}")
 
+    # 4. satis_arsivi tablosu (Kalıcı Satış & İstatistik Arşivi)
+    c.execute('''CREATE TABLE IF NOT EXISTS satis_arsivi (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        tarih         TEXT NOT NULL DEFAULT '',
+        urun_adi      TEXT,
+        barkod        TEXT,
+        koli_no       TEXT,
+        seri_no       TEXT,
+        parti_no      TEXT,
+        palet_no      TEXT,
+        uretim_tarihi TEXT,
+        skt           TEXT,
+        ham_karekod   TEXT,
+        tekrar_uyari  INTEGER DEFAULT 0,
+        kullanici_adi TEXT,
+        durum         TEXT DEFAULT 'CIKIS_YAPILDI'
+    )''')
+
     # İndeksler
     try:
         c.execute("CREATE INDEX IF NOT EXISTS idx_ham_karekod ON cikis_kayitlari(ham_karekod)")
@@ -642,8 +1480,33 @@ def ensure_db_schema(conn=None):
         c.execute("CREATE INDEX IF NOT EXISTS idx_bkst_karekod ON bkst_depo_verileri(tam_karekod)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_bkst_gtin ON bkst_depo_verileri(gtin)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_bkst_kullanici ON bkst_depo_verileri(kullanici_adi)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_satis_arsivi_tarih ON satis_arsivi(tarih)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_satis_arsivi_qr ON satis_arsivi(ham_karekod)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_satis_arsivi_seri ON satis_arsivi(seri_no)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_satis_arsivi_urun ON satis_arsivi(urun_adi)")
     except Exception:
         pass
+
+    # Otomatik ilk aktarım: cikis_kayitlari'ndan satis_arsivi'ne tek seferlik ilk geçiş aktarımı
+    try:
+        c.execute("CREATE TABLE IF NOT EXISTS schema_migrations (key TEXT PRIMARY KEY, migrated_at TEXT)")
+        c.execute("SELECT 1 FROM schema_migrations WHERE key = 'v315_initial_archive_backfill'")
+        if not c.fetchone():
+            c.execute('''
+                INSERT INTO satis_arsivi (tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no, uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi, durum)
+                SELECT tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no, uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi, 'CIKIS_YAPILDI'
+                FROM cikis_kayitlari ck
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM satis_arsivi sa 
+                    WHERE sa.tarih = ck.tarih 
+                      AND sa.ham_karekod = ck.ham_karekod 
+                      AND (sa.seri_no = ck.seri_no OR (sa.seri_no IS NULL AND ck.seri_no IS NULL))
+                )
+            ''')
+            c.execute("INSERT OR REPLACE INTO schema_migrations (key, migrated_at) VALUES ('v315_initial_archive_backfill', ?)", 
+                      (datetime.now().strftime('%Y-%m-%d %H:%M:%S'),))
+    except Exception as e_backfill:
+        logger.warning(f"satis_arsivi backfill notice: {e_backfill}")
 
     conn.commit()
     if close_at_end:
@@ -809,7 +1672,8 @@ def inject_global_template_vars():
         bkst_online=bkst_online,
         is_system_active=not is_offline,
         system_status_text=system_status_text,
-        system_status_cls=system_status_cls
+        system_status_cls=system_status_cls,
+        local_session_token=LOCAL_SESSION_TOKEN
     )
 
 def normalize_qr(qr):
@@ -1002,6 +1866,47 @@ def check_is_parti_no(code, df):
 
     return False, 0, ""
 
+def check_is_gtin_no(code, df, gtin_map):
+    if not code or df is None or df.empty:
+        return False, 0, ""
+    code_str = str(code).strip()
+
+    # Tam bir GS1 karekod ise (içinde seri numarası varsa), bu saf GTIN değildir!
+    parsed = parse_gs1_qr(code_str)
+    if parsed and parsed.get('seri_no'):
+        return False, 0, ""
+
+    norm = normalize_qr(code_str)
+    candidates = [norm]
+    if norm.isdigit():
+        candidates.append(norm.lstrip('0'))
+        if len(norm) == 13:
+            candidates.append('0' + norm)
+        elif len(norm) == 14 and norm.startswith('0'):
+            candidates.append(norm[1:])
+
+    matched_name = ""
+    for cand in candidates:
+        if cand and gtin_map and cand in gtin_map:
+            matched_name = str(gtin_map[cand].get('Ürün Adı', '')).strip()
+            break
+
+    if not matched_name and norm.isdigit() and len(norm) in (8, 12, 13, 14):
+        for r in df.to_dict(orient="records"):
+            r_gtin = normalize_qr(str(r.get("Gtin Numarası") or r.get("Gtin / Barkod") or r.get("gtin") or ""))
+            if r_gtin in candidates:
+                matched_name = str(r.get("Ürün Adı", "")).strip()
+                break
+
+    if matched_name:
+        count = sum(
+            1 for r in df.to_dict(orient="records")
+            if normalize_qr(str(r.get("Gtin Numarası") or r.get("Gtin / Barkod") or r.get("gtin") or "")) in candidates
+        )
+        return True, count, matched_name
+
+    return False, 0, ""
+
 def resolve_product_from_cache(code, df, qr_map, gtin_map):
     if not code:
         return None
@@ -1011,6 +1916,11 @@ def resolve_product_from_cache(code, df, qr_map, gtin_map):
     # Parti Numarası tekil kutu olarak asla eşleşmemelidir
     is_parti, _, _ = check_is_parti_no(code_norm, df)
     if is_parti:
+        return None
+
+    # GTIN / Barkod tekil kutu olarak asla eşleşmemelidir
+    is_gtin, _, _ = check_is_gtin_no(code_norm, df, gtin_map)
+    if is_gtin:
         return None
 
     # 1. Tam karekod eşleşmesi
@@ -1036,10 +1946,6 @@ def resolve_product_from_cache(code, df, qr_map, gtin_map):
             r_seri = str(r.get("Seri Numarası", "")).strip().casefold()
             if r_seri and r_seri == code_case:
                 return r
-
-    # 4. GTIN doğrudan eşleşmesi
-    if gtin_map and code_norm in gtin_map:
-        return gtin_map[code_norm]
 
     return None
 
@@ -1220,6 +2126,11 @@ def depo_kabul_page():
 @app.route('/kullaniciya_satis')
 def kullaniciya_satis_page():
     return render_template('kullaniciya_satis.html')
+
+@app.route('/istatistikler')
+@app.route('/raporlar')
+def istatistikler_page():
+    return render_template('istatistikler.html')
 
 # ── STOK KARŞILAŞTIRMA & RAPORLAMA API ──────────────────────────────────────
 @app.route('/api/compare', methods=['POST'])
@@ -2081,6 +2992,7 @@ def cikis_okut():
 
                 tarih = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 insert_rows = []
+                inserted_records = []
                 last_inserted = None
                 has_any_tekrar = False
 
@@ -2103,17 +3015,32 @@ def cikis_okut():
                     sk_t  = str(r_item.get('Son Kullanma Tarihi', '')).strip()
 
                     insert_rows.append((tarih, u_adi, b_col, k_no, s_no, p_no, pal_no, ur_t, sk_t, item_qr, 1 if item_is_tekrar else 0, username))
-                    last_inserted = {
+                    rec = {
                         'tarih': tarih, 'urun_adi': u_adi, 'barkod': b_col, 'koli_no': k_no,
                         'seri_no': s_no, 'parti_no': p_no, 'palet_no': pal_no, 'uretim_tarihi': ur_t,
                         'skt': sk_t, 'ham_karekod': item_qr, 'tekrar_uyari': 1 if item_is_tekrar else 0
                     }
+                    inserted_records.append(rec)
+                    last_inserted = rec
 
                 if insert_rows:
                     c.executemany('''INSERT INTO cikis_kayitlari
                         (tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no,
                          uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', insert_rows)
+
+                    c.execute("SELECT max(id) FROM cikis_kayitlari")
+                    max_id = c.fetchone()[0] or len(insert_rows)
+                    first_id = max_id - len(insert_rows) + 1
+                    for idx, r_rec in enumerate(inserted_records):
+                        r_rec['id'] = first_id + idx
+
+                    # Kalıcı satış ve istatistik arşivine de ekle
+                    c.executemany('''INSERT INTO satis_arsivi
+                        (tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no,
+                         uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi, durum)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CIKIS_YAPILDI')''',
+                        insert_rows)
                     conn.commit()
                 conn.close()
 
@@ -2123,7 +3050,8 @@ def cikis_okut():
                     'tekrar_uyari': has_any_tekrar,
                     'count': len(insert_rows),
                     'message': f'{koli_key} kolisindeki {len(insert_rows)} adet ürün başarıyla çıkış yapıldı.',
-                    'kayit': last_inserted
+                    'kayit': last_inserted,
+                    'kayitlar': inserted_records
                 })
 
         # Parti Numarası kontrolü: Parti numarası tekil kutuyu değil tüm partiyi temsil eder
@@ -2133,6 +3061,15 @@ def cikis_okut():
                 'success': False,
                 'is_parti_no': True,
                 'error': f'"{barkod_raw}" bir Parti Numarasıdır ({p_urun} - Depoda bu partiye ait {p_count} adet ürün var). Parti numarası üretimdeki bir grubu temsil eder ve tekil bir kutuya ait değildir. Çıkış yapabilmek için lütfen kutu üzerindeki Karekodu veya Seri Numarasını okutunuz.'
+            })
+
+        # GTIN Barkod kontrolü: GTIN tekil kutuyu değil genel ürün tanımını temsil eder
+        is_gtin, g_count, g_urun = check_is_gtin_no(barkod_norm, df, gtin_map)
+        if is_gtin:
+            return jsonify({
+                'success': False,
+                'is_gtin_no': True,
+                'error': f'"{barkod_raw}" bir GTIN / Çizgi Barkod numarasıdır ({g_urun} - Depoda bu barkoda ait {g_count} adet ürün var). Bu numara tekil bir kutuya ait karekod değildir. Çıkış yapabilmek için lütfen kutu üzerindeki Karekodu (DataMatrix) veya Seri Numarasını okutunuz.'
             })
 
         # Tekil ürün kontrolü: Önce ürünü Bakanlık deposundan tam eşleştir
@@ -2173,7 +3110,11 @@ def cikis_okut():
         if username:
             c.execute('''
                 SELECT id, tarih, urun_adi, ham_karekod, seri_no
-                FROM cikis_kayitlari
+                FROM (
+                    SELECT id, tarih, urun_adi, ham_karekod, seri_no, kullanici_adi, barkod FROM cikis_kayitlari
+                    UNION ALL
+                    SELECT id, tarih, urun_adi, ham_karekod, seri_no, kullanici_adi, barkod FROM satis_arsivi
+                )
                 WHERE (kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = "")
                   AND (
                       LOWER(ham_karekod) = LOWER(?)
@@ -2189,7 +3130,11 @@ def cikis_okut():
         else:
             c.execute('''
                 SELECT id, tarih, urun_adi, ham_karekod, seri_no
-                FROM cikis_kayitlari
+                FROM (
+                    SELECT id, tarih, urun_adi, ham_karekod, seri_no, kullanici_adi, barkod FROM cikis_kayitlari
+                    UNION ALL
+                    SELECT id, tarih, urun_adi, ham_karekod, seri_no, kullanici_adi, barkod FROM satis_arsivi
+                )
                 WHERE (
                     LOWER(ham_karekod) = LOWER(?)
                     OR LOWER(ham_karekod) = LOWER(?)
@@ -2219,6 +3164,14 @@ def cikis_okut():
             (tarih, urun_adi, barkod_col, koli_no, seri_no, parti_no, palet_no,
              uretim_tarihi, skt, real_karekod, 1 if is_tekrar else 0, username))
         new_id = c.lastrowid
+
+        # Kalıcı satış & istatistik arşivine de ekle
+        c.execute('''INSERT INTO satis_arsivi
+            (tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no,
+             uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi, durum)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CIKIS_YAPILDI')''',
+            (tarih, urun_adi, barkod_col, koli_no, seri_no, parti_no, palet_no,
+             uretim_tarihi, skt, real_karekod, 1 if is_tekrar else 0, username))
         conn.commit()
         conn.close()
 
@@ -2288,6 +3241,12 @@ def cikis_toplu_ekle():
                 logger.warning(f"cikis_toplu_ekle: '{raw_str}' parti numarası olduğu için tekil çıkışa eklenmedi.")
                 continue
 
+            # GTIN / Barkod tekil ürün olarak listeye eklenmemelidir
+            is_gtin, _, _ = check_is_gtin_no(raw_str, df, gtin_map)
+            if is_gtin:
+                logger.warning(f"cikis_toplu_ekle: '{raw_str}' GTIN numarası olduğu için tekil çıkışa eklenmedi.")
+                continue
+
             match_row = resolve_product_from_cache(raw_str, df, qr_map, gtin_map)
             if match_row:
                 real_karekod = str(match_row.get('Karekod') or '').strip() or normalize_qr(raw_str)
@@ -2328,6 +3287,12 @@ def cikis_toplu_ekle():
                 (tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no,
                  uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', insert_rows)
+            # Kalıcı satış & istatistik arşivine de ekle
+            c.executemany('''INSERT INTO satis_arsivi
+                (tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no,
+                 uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi, durum)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CIKIS_YAPILDI')''',
+                [r + ('CIKIS_YAPILDI',) for r in insert_rows])
             conn.commit()
 
         conn.close()
@@ -2451,6 +3416,654 @@ def cikis_indir():
     fname = f'cikis_listesi_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
     return send_file(output, as_attachment=True, download_name=fname,
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+# ── İSTATİSTİKLER & SATIŞ RAPORLARI API ──────────────────────────────────────
+@app.route('/api/istatistikler/ozet', methods=['GET'])
+def api_istatistikler_ozet():
+    try:
+        yil = request.args.get('yil', 'tum').strip()
+        baslangic = request.args.get('baslangic', '').strip()
+        bitis = request.args.get('bitis', '').strip()
+        username, _, _, _ = read_bkst_credentials()
+
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+
+        # Mevcut tüm yılları topla
+        c.execute("""
+            SELECT DISTINCT substr(tarih, 1, 4) as yr
+            FROM satis_arsivi
+            WHERE tarih IS NOT NULL AND length(tarih) >= 4 AND substr(tarih, 1, 4) GLOB '[1-2][0-9][0-9][0-9]'
+            ORDER BY yr DESC
+        """)
+        db_years = [r['yr'] for r in c.fetchall() if r['yr']]
+        default_years = ['2026', '2025', '2024', '2023']
+        all_years = sorted(list(set(db_years + default_years)), reverse=True)
+
+        where_parts = []
+        params = []
+        if username:
+            where_parts.append('(kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = "")')
+            params.append(username)
+        if yil and yil != 'tum':
+            where_parts.append("substr(tarih, 1, 4) = ?")
+            params.append(yil)
+        if baslangic:
+            where_parts.append("substr(tarih, 1, 10) >= ?")
+            params.append(baslangic)
+        if bitis:
+            where_parts.append("substr(tarih, 1, 10) <= ?")
+            params.append(bitis)
+
+        where_sql = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
+
+        # KPI Özeti
+        c.execute(f"""
+            SELECT 
+                COUNT(*) as toplam_adet,
+                COUNT(DISTINCT urun_adi) as tekil_urun,
+                COUNT(CASE WHEN tekrar_uyari = 1 THEN 1 END) as tekrar_adet,
+                COUNT(CASE WHEN koli_no IS NOT NULL AND koli_no != '' THEN 1 END) as koli_adet,
+                COUNT(CASE WHEN palet_no IS NOT NULL AND palet_no != '' THEN 1 END) as palet_adet,
+                COUNT(DISTINCT substr(tarih, 1, 10)) as aktif_gun,
+                MIN(tarih) as ilk_tarih,
+                MAX(tarih) as son_tarih
+            FROM satis_arsivi
+            {where_sql}
+        """, params)
+        kpi_raw = dict(c.fetchone() or {})
+        toplam_adet = kpi_raw.get('toplam_adet') or 0
+        tekil_urun = kpi_raw.get('tekil_urun') or 0
+        tekrar_adet = kpi_raw.get('tekrar_adet') or 0
+        koli_adet = kpi_raw.get('koli_adet') or 0
+        palet_adet = kpi_raw.get('palet_adet') or 0
+        tekil_adet = max(0, toplam_adet - koli_adet - palet_adet)
+        aktif_gun = kpi_raw.get('aktif_gun') or 0
+        gunluk_ort = round(toplam_adet / max(1, aktif_gun), 1) if aktif_gun else 0
+        tekrar_orani = round((tekrar_adet / max(1, toplam_adet)) * 100, 1)
+
+        # Lider Ürün
+        c.execute(f"""
+            SELECT urun_adi, COUNT(*) as adet
+            FROM satis_arsivi
+            {where_sql}
+            GROUP BY urun_adi
+            ORDER BY adet DESC
+            LIMIT 1
+        """, params)
+        lider_row = c.fetchone()
+        lider_urun = lider_row['urun_adi'] if lider_row else "Veri Yok"
+        lider_adet = lider_row['adet'] if lider_row else 0
+
+        # Aylık Dağılım (12 Ay: Ocak - Aralık)
+        ay_isimleri = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
+        aylik_sayilar = [0] * 12
+        c.execute(f"""
+            SELECT substr(tarih, 6, 2) as ay_no, COUNT(*) as adet
+            FROM satis_arsivi
+            {where_sql}
+            GROUP BY ay_no
+            ORDER BY ay_no ASC
+        """, params)
+        for r in c.fetchall():
+            ay_str = r['ay_no']
+            if ay_str and ay_str.isdigit():
+                idx = int(ay_str) - 1
+                if 0 <= idx < 12:
+                    aylik_sayilar[idx] = r['adet']
+
+        # Yıllık Karşılaştırma (Tüm Yıllar)
+        u_filter = "WHERE (kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = '')" if username else ""
+        u_p = [username] if username else []
+        c.execute(f"""
+            SELECT substr(tarih, 1, 4) as yr, COUNT(*) as adet
+            FROM satis_arsivi
+            {u_filter}
+            GROUP BY yr
+            HAVING yr IS NOT NULL AND length(yr) = 4 AND yr GLOB '[1-2][0-9][0-9][0-9]'
+            ORDER BY yr ASC
+        """, u_p)
+        yillik_dict = {str(y): 0 for y in all_years}
+        for r in c.fetchall():
+            yillik_dict[str(r['yr'])] = r['adet']
+        yillik_labels = sorted(yillik_dict.keys())
+        yillik_values = [yillik_dict[y] for y in yillik_labels]
+
+        # En Çok Satan Ürünler (Top 30)
+        c.execute(f"""
+            SELECT 
+                urun_adi, 
+                COALESCE(barkod, '') as barkod,
+                COUNT(*) as adet,
+                COUNT(CASE WHEN koli_no != '' THEN 1 END) as koli_sayisi,
+                COUNT(CASE WHEN palet_no != '' THEN 1 END) as palet_sayisi,
+                MAX(tarih) as son_cikis
+            FROM satis_arsivi
+            {where_sql}
+            GROUP BY urun_adi, barkod
+            ORDER BY adet DESC
+            LIMIT 30
+        """, params)
+        top_urunler = []
+        for r in c.fetchall():
+            ad = r['adet']
+            pct = round((ad / max(1, toplam_adet)) * 100, 1)
+            top_urunler.append({
+                'urun_adi': r['urun_adi'] or 'İsimsiz Ürün',
+                'barkod': r['barkod'] or '-',
+                'adet': ad,
+                'koli_sayisi': r['koli_sayisi'],
+                'palet_sayisi': r['palet_sayisi'],
+                'yuzde': pct,
+                'son_cikis': r['son_cikis'] or ''
+            })
+
+        # Haftanın Günleri
+        gunluk_dagilim = [0] * 7
+        c.execute(f"""
+            SELECT strftime('%w', tarih) as gun_no, COUNT(*) as adet
+            FROM satis_arsivi
+            {where_sql}
+            GROUP BY gun_no
+        """, params)
+        for r in c.fetchall():
+            g = r['gun_no']
+            if g is not None and str(g).isdigit():
+                idx = int(g)
+                if 0 <= idx < 7:
+                    gunluk_dagilim[idx] = r['adet']
+        hafta_gunleri = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
+        hafta_degerleri = gunluk_dagilim[1:] + gunluk_dagilim[:1]
+
+        # Parti Dağılımı
+        parti_where = (where_sql + " AND parti_no IS NOT NULL AND parti_no != ''") if where_sql else "WHERE parti_no IS NOT NULL AND parti_no != ''"
+        c.execute(f"""
+            SELECT 
+                COALESCE(parti_no, 'Belirtilmemiş') as parti,
+                urun_adi,
+                COUNT(*) as adet,
+                MAX(skt) as skt
+            FROM satis_arsivi
+            {parti_where}
+            GROUP BY parti, urun_adi
+            ORDER BY adet DESC
+            LIMIT 20
+        """, params)
+        top_partiler = [dict(r) for r in c.fetchall()]
+
+        # Depo Stoğu Karşılaştırması
+        c.execute("SELECT COUNT(*) as depo_toplam, COUNT(DISTINCT urun_adi) as depo_kalem FROM bkst_depo_verileri")
+        depo_row = dict(c.fetchone() or {})
+
+        conn.close()
+
+        return jsonify({
+            'success': True,
+            'filtre': {
+                'yil': yil,
+                'baslangic': baslangic,
+                'bitis': bitis
+            },
+            'mevcut_yillar': all_years,
+            'kpi': {
+                'toplam_cikis': toplam_adet,
+                'tekil_urun_sayisi': tekil_urun,
+                'lider_urun': lider_urun,
+                'lider_adet': lider_adet,
+                'koli_adet': koli_adet,
+                'palet_adet': palet_adet,
+                'tekil_adet': tekil_adet,
+                'koli_orani': round((koli_adet / max(1, toplam_adet)) * 100, 1),
+                'tekil_orani': round((tekil_adet / max(1, toplam_adet)) * 100, 1),
+                'gunluk_ortalama': gunluk_ort,
+                'aktif_gun': aktif_gun,
+                'tekrar_adet': tekrar_adet,
+                'tekrar_orani': tekrar_orani,
+                'depo_mevcut_stok': depo_row.get('depo_toplam', 0),
+                'depo_kalem_sayisi': depo_row.get('depo_kalem', 0)
+            },
+            'aylik_grafik': {
+                'etiketler': ay_isimleri,
+                'veriler': aylik_sayilar
+            },
+            'yillik_grafik': {
+                'etiketler': yillik_labels,
+                'veriler': yillik_values
+            },
+            'haftalik_grafik': {
+                'etiketler': hafta_gunleri,
+                'veriler': hafta_degerleri
+            },
+            'en_cok_satanlar': top_urunler,
+            'parti_dagilimi': top_partiler
+        })
+    except Exception as e:
+        logger.error(f"api_istatistikler_ozet error: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/istatistikler/excel_indir', methods=['GET'])
+def api_istatistikler_excel_indir():
+    try:
+        yil = request.args.get('yil', 'tum').strip()
+        baslangic = request.args.get('baslangic', '').strip()
+        bitis = request.args.get('bitis', '').strip()
+        username, _, _, _ = read_bkst_credentials()
+
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+
+        where_parts = []
+        params = []
+        if username:
+            where_parts.append('(kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = "")')
+            params.append(username)
+        if yil and yil != 'tum':
+            where_parts.append("substr(tarih, 1, 4) = ?")
+            params.append(yil)
+        if baslangic:
+            where_parts.append("substr(tarih, 1, 10) >= ?")
+            params.append(baslangic)
+        if bitis:
+            where_parts.append("substr(tarih, 1, 10) <= ?")
+            params.append(bitis)
+
+        where_sql = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
+
+        # Fetch detail rows
+        c.execute(f"""
+            SELECT id, tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no, uretim_tarihi, skt, ham_karekod, tekrar_uyari
+            FROM satis_arsivi
+            {where_sql}
+            ORDER BY id DESC
+        """, params)
+        detail_rows = [dict(r) for r in c.fetchall()]
+
+        # Fetch top products
+        c.execute(f"""
+            SELECT urun_adi, COALESCE(barkod, '') as barkod, COUNT(*) as adet,
+                   COUNT(CASE WHEN koli_no != '' THEN 1 END) as koli_adet,
+                   COUNT(CASE WHEN koli_no = '' AND palet_no = '' THEN 1 END) as tekil_adet,
+                   MAX(tarih) as son_cikis
+            FROM satis_arsivi
+            {where_sql}
+            GROUP BY urun_adi, barkod
+            ORDER BY adet DESC
+        """, params)
+        top_products = [dict(r) for r in c.fetchall()]
+
+        # Monthly counts
+        c.execute(f"""
+            SELECT substr(tarih, 6, 2) as ay_no, COUNT(*) as adet
+            FROM satis_arsivi
+            {where_sql}
+            GROUP BY ay_no
+            ORDER BY ay_no ASC
+        """, params)
+        monthly_map = {r['ay_no']: r['adet'] for r in c.fetchall()}
+
+        conn.close()
+
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+        wb = openpyxl.Workbook()
+        
+        # Style helpers
+        font_title = Font(name='Segoe UI', size=14, bold=True, color='0F172A')
+        font_sub = Font(name='Segoe UI', size=10, italic=True, color='64748B')
+        font_hdr = Font(name='Segoe UI', size=10, bold=True, color='FFFFFF')
+        font_bold = Font(name='Segoe UI', size=10, bold=True, color='0F172A')
+        font_norm = Font(name='Segoe UI', size=10, color='1E293B')
+        fill_hdr = PatternFill(start_color='1E293B', end_color='1E293B', fill_type='solid')
+        fill_zebra = PatternFill(start_color='F8FAFC', end_color='F8FAFC', fill_type='solid')
+        border_thin = Side(border_style='thin', color='CBD5E1')
+        cell_border = Border(left=border_thin, right=border_thin, top=border_thin, bottom=border_thin)
+
+        # SHEET 1: ÖZET RAPOR
+        ws1 = wb.active
+        ws1.title = "Genel Özet"
+        ws1.views.sheetView[0].showGridLines = True
+        ws1['A1'] = "QR COMPARE - SATIŞ VE ÇIKIŞ İSTATİSTİK RAPORU"
+        ws1['A1'].font = font_title
+        period_str = f"Filtre Dönemi: Yıl: {yil if yil != 'tum' else 'Tüm Yıllar'}"
+        if baslangic or bitis:
+            period_str += f" | {baslangic or 'İlk'} - {bitis or 'Son'}"
+        ws1['A2'] = f"{period_str} | Rapor Tarihi: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+        ws1['A2'].font = font_sub
+
+        total_cnt = len(detail_rows)
+        kpi_data = [
+            ("Toplam Çıkış Adedi (Kutu)", total_cnt),
+            ("Çıkış Yapılan Kalem Sayısı", len(top_products)),
+            ("Koli İle Çıkış Yapılan Adet", sum(r.get('koli_adet', 0) for r in top_products)),
+            ("Tekil Kutu Çıkış Adedi", sum(r.get('tekil_adet', 0) for r in top_products)),
+            ("En Çok Satan Ürün", top_products[0]['urun_adi'] if top_products else "-"),
+            ("En Çok Satan Ürün Satış Adedi", top_products[0]['adet'] if top_products else 0),
+        ]
+        ws1.cell(row=4, column=1, value="METRİK").fill = fill_hdr
+        ws1.cell(row=4, column=1).font = font_hdr
+        ws1.cell(row=4, column=2, value="DEĞER").fill = fill_hdr
+        ws1.cell(row=4, column=2).font = font_hdr
+
+        for idx, (m_label, m_val) in enumerate(kpi_data, start=5):
+            c1 = ws1.cell(row=idx, column=1, value=m_label)
+            c2 = ws1.cell(row=idx, column=2, value=m_val)
+            c1.font = font_bold
+            c2.font = font_norm
+            c1.border = cell_border
+            c2.border = cell_border
+            if idx % 2 == 1:
+                c1.fill = fill_zebra
+                c2.fill = fill_zebra
+
+        ws1.column_dimensions['A'].width = 35
+        ws1.column_dimensions['B'].width = 25
+
+        # SHEET 2: ÜRÜN BAZLI SATIŞLAR
+        ws2 = wb.create_sheet(title="Ürün Bazlı Satışlar")
+        ws2.views.sheetView[0].showGridLines = True
+        hdrs2 = ["Sıra", "Ürün Adı", "GTIN / Barkod", "Toplam Adet", "Pazar Payı (%)", "Koli Çıkışı", "Tekil Çıkış", "Son Çıkış Tarihi"]
+        for c_idx, h_text in enumerate(hdrs2, start=1):
+            cell = ws2.cell(row=1, column=c_idx, value=h_text)
+            cell.font = font_hdr
+            cell.fill = fill_hdr
+            cell.alignment = Alignment(horizontal='center' if c_idx in [1, 4, 5, 6, 7] else 'left')
+
+        for r_idx, p in enumerate(top_products, start=2):
+            pct = round((p['adet'] / max(1, total_cnt)) * 100, 1)
+            vals = [
+                r_idx - 1,
+                p['urun_adi'],
+                p['barkod'],
+                p['adet'],
+                f"%{pct}",
+                p.get('koli_adet', 0),
+                p.get('tekil_adet', 0),
+                p.get('son_cikis', '')
+            ]
+            for col_idx, val in enumerate(vals, start=1):
+                cell = ws2.cell(row=r_idx, column=col_idx, value=val)
+                cell.font = font_norm
+                cell.border = cell_border
+                if r_idx % 2 == 1:
+                    cell.fill = fill_zebra
+
+        ws2.column_dimensions['A'].width = 8
+        ws2.column_dimensions['B'].width = 35
+        ws2.column_dimensions['C'].width = 20
+        ws2.column_dimensions['D'].width = 15
+        ws2.column_dimensions['E'].width = 15
+        ws2.column_dimensions['F'].width = 15
+        ws2.column_dimensions['G'].width = 15
+        ws2.column_dimensions['H'].width = 22
+
+        # SHEET 3: AYLIK SATIŞ DAĞILIMI
+        ws3 = wb.create_sheet(title="Aylık Dağılım")
+        ws3.views.sheetView[0].showGridLines = True
+        ws3.cell(row=1, column=1, value="Ay Numarası").fill = fill_hdr
+        ws3.cell(row=1, column=1).font = font_hdr
+        ws3.cell(row=1, column=2, value="Ay Adı").fill = fill_hdr
+        ws3.cell(row=1, column=2).font = font_hdr
+        ws3.cell(row=1, column=3, value="Satış Adedi (Kutu)").fill = fill_hdr
+        ws3.cell(row=1, column=3).font = font_hdr
+        ws3.cell(row=1, column=4, value="Yüzde Pay (%)").fill = fill_hdr
+        ws3.cell(row=1, column=4).font = font_hdr
+
+        ay_adlari = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
+        for m_idx in range(1, 13):
+            m_str = f"{m_idx:02d}"
+            cnt = monthly_map.get(m_str, 0)
+            pct = round((cnt / max(1, total_cnt)) * 100, 1)
+            row_num = m_idx + 1
+            ws3.cell(row=row_num, column=1, value=m_idx).border = cell_border
+            ws3.cell(row=row_num, column=2, value=ay_adlari[m_idx - 1]).border = cell_border
+            ws3.cell(row=row_num, column=3, value=cnt).border = cell_border
+            ws3.cell(row=row_num, column=4, value=f"%{pct}").border = cell_border
+            if row_num % 2 == 1:
+                for c_i in range(1, 5):
+                    ws3.cell(row=row_num, column=c_i).fill = fill_zebra
+
+        ws3.column_dimensions['A'].width = 14
+        ws3.column_dimensions['B'].width = 18
+        ws3.column_dimensions['C'].width = 22
+        ws3.column_dimensions['D'].width = 16
+
+        # SHEET 4: TÜM ÇIKIŞ KAYITLARI
+        ws4 = wb.create_sheet(title="Ham Çıkış Kayıtları")
+        ws4.views.sheetView[0].showGridLines = True
+        hdrs4 = ["ID", "Tarih/Saat", "Ürün Adı", "GTIN/Barkod", "Seri No", "Parti No", "Koli No", "Palet No", "Üretim Tarihi", "SKT", "Tam Karekod", "Tekrar"]
+        for c_idx, h_text in enumerate(hdrs4, start=1):
+            cell = ws4.cell(row=1, column=c_idx, value=h_text)
+            cell.font = font_hdr
+            cell.fill = fill_hdr
+
+        for r_idx, row in enumerate(detail_rows, start=2):
+            vals = [
+                row.get('id', ''),
+                row.get('tarih', ''),
+                row.get('urun_adi', ''),
+                row.get('barkod', ''),
+                row.get('seri_no', ''),
+                row.get('parti_no', ''),
+                row.get('koli_no', ''),
+                row.get('palet_no', ''),
+                row.get('uretim_tarihi', ''),
+                row.get('skt', ''),
+                row.get('ham_karekod', ''),
+                'EVET' if row.get('tekrar_uyari') == 1 else 'HAYIR'
+            ]
+            for col_idx, val in enumerate(vals, start=1):
+                cell = ws4.cell(row=r_idx, column=col_idx, value=val)
+                cell.font = font_norm
+                cell.border = cell_border
+
+        for col_l in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L']:
+            ws4.column_dimensions[col_l].width = 18
+        ws4.column_dimensions['C'].width = 30
+        ws4.column_dimensions['K'].width = 40
+
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        filename = f"satis_istatistik_raporu_{yil}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        return send_file(output, as_attachment=True, download_name=filename,
+                         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    except Exception as e:
+        logger.error(f"api_istatistikler_excel_indir error: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/istatistikler/ornek_gecmis_ekle', methods=['POST'])
+def api_istatistikler_ornek_gecmis_ekle():
+    try:
+        username, _, _, _ = read_bkst_credentials()
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        c = conn.cursor()
+
+        # Depodaki gerçek ürünlerden örnek al
+        c.execute("SELECT DISTINCT gtin, urun_adi, parti_no, uretim_tarihi, skt FROM bkst_depo_verileri LIMIT 15")
+        warehouse_prods = c.fetchall()
+
+        if not warehouse_prods:
+            warehouse_prods = [
+                ("08699258170119", "Agnoround 20x1 LT", "A6868148", "05.08.2024", "05.08.2028"),
+                ("08693814003187", "KORTAC 100 EC 1 LT", "K992011", "12.02.2024", "12.02.2027"),
+                ("08681128520308", "EMALDA 1000 ML.", "EM88291", "10.04.2024", "10.04.2028"),
+                ("08699514012014", "DORADO 500 SC 1 LT", "D77124", "01.06.2024", "01.06.2028"),
+                ("08680123456789", "TEBUCONAZOLE 250 EW", "TB5521", "15.01.2024", "15.01.2027")
+            ]
+
+        import random
+        demo_rows = []
+        serial_counter = 500000
+
+        for year in [2024, 2025]:
+            for month in range(1, 13):
+                monthly_count = random.randint(12, 32)
+                for _ in range(monthly_count):
+                    serial_counter += 1
+                    prod = random.choice(warehouse_prods)
+                    gtin, u_name, p_no, ur_t, sk_t = prod[0], prod[1], prod[2], prod[3], prod[4]
+                    day = random.randint(1, 28)
+                    hour = random.randint(8, 18)
+                    minute = random.randint(0, 59)
+                    second = random.randint(0, 59)
+                    tarih = f"{year}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}"
+
+                    is_koli = random.random() < 0.65
+                    koli_no = f"004869{random.randint(1000000000, 9999999999)}" if is_koli else ""
+                    seri_no = f"{serial_counter}"
+                    tam_qr = f"DEMO_HISTORICAL_{gtin}_{seri_no}_{p_no}"
+
+                    demo_rows.append((
+                        tarih, u_name, gtin, koli_no, seri_no, p_no, "",
+                        ur_t, sk_t, tam_qr, 0, username or "demo_gecmis"
+                    ))
+
+        c.executemany("""
+            INSERT INTO satis_arsivi 
+            (tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no, uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, demo_rows)
+        conn.commit()
+        conn.close()
+
+        return jsonify({
+            'success': True,
+            'message': f'2024 ve 2025 yıllarına ait toplam {len(demo_rows)} adet gerçekçi geçmiş satış kaydı başarıyla eklendi.',
+            'eklenen_adet': len(demo_rows)
+        })
+    except Exception as e:
+        logger.error(f"api_istatistikler_ornek_gecmis_ekle error: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/istatistikler/ornek_gecmis_temizle', methods=['POST'])
+def api_istatistikler_ornek_gecmis_temizle():
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        c = conn.cursor()
+        c.execute("DELETE FROM satis_arsivi WHERE ham_karekod LIKE 'DEMO_HISTORICAL_%'")
+        deleted_cnt = c.rowcount
+        conn.commit()
+        conn.close()
+        return jsonify({
+            'success': True,
+            'message': f'Örnek geçmiş satış verileri temizlendi ({deleted_cnt} kayıt silindi).',
+            'silinen_adet': deleted_cnt
+        })
+    except Exception as e:
+        logger.error(f"api_istatistikler_ornek_gecmis_temizle error: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/istatistikler/sifirla', methods=['POST'])
+def api_istatistikler_sifirla():
+    try:
+        data = request.get_json(silent=True) or {}
+        yil = str(data.get('yil', 'tum')).strip()
+        username, _, _, _ = read_bkst_credentials()
+
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        c = conn.cursor()
+
+        if yil and yil != 'tum':
+            c.execute("DELETE FROM satis_arsivi WHERE substr(tarih, 1, 4) = ?", (yil,))
+            msg = f"{yil} yılına ait tüm satış ve istatistik kayıtları başarıyla sıfırlandı."
+        else:
+            c.execute("DELETE FROM satis_arsivi")
+            msg = "Kalıcı satış arşivi ve tüm geçmiş istatistik verileri başarıyla sıfırlandı."
+
+        deleted_cnt = c.rowcount
+        conn.commit()
+        conn.close()
+
+        logger.info(f"api_istatistikler_sifirla: {deleted_cnt} kayıt silindi (yil={yil})")
+        return jsonify({
+            'success': True,
+            'message': msg,
+            'silinen_adet': deleted_cnt
+        })
+    except Exception as e:
+        logger.error(f"api_istatistikler_sifirla error: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/istatistikler/excel_yukle', methods=['POST'])
+def api_istatistikler_excel_yukle():
+    try:
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': 'Lütfen bir Excel dosyası seçin.'})
+        f = request.files['file']
+        if not f.filename:
+            return jsonify({'success': False, 'error': 'Dosya adı boş olamaz.'})
+
+        username, _, _, _ = read_bkst_credentials()
+        df = pd.read_excel(f)
+        if df.empty:
+            return jsonify({'success': False, 'error': 'Yüklenen dosya boş.'})
+
+        col_map = {}
+        for c in df.columns:
+            c_str = str(c).strip().lower()
+            if 'tarih' in c_str or 'date' in c_str: col_map['tarih'] = c
+            elif 'ürün' in c_str or 'urun' in c_str or 'name' in c_str: col_map['urun_adi'] = c
+            elif 'barkod' in c_str or 'gtin' in c_str or 'barcode' in c_str: col_map['barkod'] = c
+            elif 'seri' in c_str or 'serial' in c_str: col_map['seri_no'] = c
+            elif 'parti' in c_str or 'lot' in c_str: col_map['parti_no'] = c
+            elif 'koli' in c_str: col_map['koli_no'] = c
+            elif 'palet' in c_str: col_map['palet_no'] = c
+            elif 'karekod' in c_str or 'qr' in c_str: col_map['ham_karekod'] = c
+
+        if 'urun_adi' not in col_map:
+            return jsonify({'success': False, 'error': "Excel dosyasında 'Ürün Adı' sütunu bulunamadı."})
+
+        insert_rows = []
+        for _, r in df.iterrows():
+            t_val = str(r.get(col_map.get('tarih', ''), '')).strip() if 'tarih' in col_map else ''
+            if not t_val or t_val in ('NaT', 'nan', 'None'):
+                t_val = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            u_val = str(r.get(col_map['urun_adi'], '')).strip()
+            if not u_val or u_val in ('nan', 'None'): continue
+
+            b_val = str(r.get(col_map.get('barkod', ''), '')).strip() if 'barkod' in col_map else ''
+            s_val = str(r.get(col_map.get('seri_no', ''), '')).strip() if 'seri_no' in col_map else ''
+            p_val = str(r.get(col_map.get('parti_no', ''), '')).strip() if 'parti_no' in col_map else ''
+            k_val = str(r.get(col_map.get('koli_no', ''), '')).strip() if 'koli_no' in col_map else ''
+            pal_val = str(r.get(col_map.get('palet_no', ''), '')).strip() if 'palet_no' in col_map else ''
+            qr_val = str(r.get(col_map.get('ham_karekod', ''), '')).strip() if 'ham_karekod' in col_map else f"IMPORT_{b_val}_{s_val}"
+
+            insert_rows.append((
+                t_val, u_val, b_val, k_val, s_val, p_val, pal_val,
+                "", "", qr_val, 0, username or ""
+            ))
+
+        if not insert_rows:
+            return jsonify({'success': False, 'error': 'Excel dosyasında geçerli kayıt bulunamadı.'})
+
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        c = conn.cursor()
+        c.executemany("""
+            INSERT INTO satis_arsivi
+            (tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no, uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, insert_rows)
+        conn.commit()
+        conn.close()
+
+        return jsonify({
+            'success': True,
+            'message': f'Excel dosyasından toplam {len(insert_rows)} adet geçmiş satış kaydı başarıyla sisteme aktarıldı.',
+            'eklenen_adet': len(insert_rows)
+        })
+    except Exception as e:
+        logger.error(f"api_istatistikler_excel_yukle error: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 # ── BKST AUTHENTICATED SESSION HELPER ────────────────────────────────────────
 def get_bkst_authenticated_session():
@@ -2765,18 +4378,65 @@ def api_depo_kabul_gelen_listesi():
                     "WAYBILLDATE": format_date_val(item.get("WAYBILLDATE") or item.get("WaybillDate") or item.get("TARIH")),
                     "SENDER": item.get("CompanyTitle") or item.get("SENDER") or item.get("GonderenFirma") or item.get("FIRMA") or "Tedarikçi / Üretici",
                     "PRODUCTCOUNT": item.get("PRODUCTCOUNT") or item.get("ProductCount") or item.get("ADET") or 0,
-                    "HEADERSTATE": item.get("HEADERSTATE") or item.get("StateDescription") or "Bekliyor",
+                    "HEADERSTATE": "Stoğa Alınmış",
                     "OPERATION": op_display,
                     "products": []
                 })
+
+            # Her bildirimin ürün detaylarını sorgulayarak 'Kabul Bekliyor' mu yoksa 'Stoğa Alınmış' mı olduğunu belirle
+            def resolve_header_state(notif):
+                h_id = notif.get("HEADERID")
+                if not h_id:
+                    return h_id, "Stoğa Alınmış", 0
+                try:
+                    r = session.post(
+                        "https://bkst.tarbil.gov.tr/Main/GetNotificationDetailList",
+                        data={"CompanyAddressId": gln_guid, "HeaderId": h_id, "__RequestVerificationToken": token2},
+                        verify=False,
+                        timeout=(3, 8)
+                    )
+                    if r.status_code == 200:
+                        d = r.json()
+                        d_list = d if isinstance(d, list) else (d.get("Data", []) if isinstance(d, dict) else [])
+                        waiting_cnt = sum(1 for x in d_list if "ALIMA UYGUN" in str(x.get("DETAILSTATE", "")).upper() and "DEĞİL" not in str(x.get("DETAILSTATE", "")).upper() and "DEGIL" not in str(x.get("DETAILSTATE", "")).upper())
+                        if waiting_cnt > 0:
+                            return h_id, "Kabul Bekliyor", waiting_cnt
+                        return h_id, "Stoğa Alınmış", 0
+                except Exception:
+                    pass
+                return h_id, "Stoğa Alınmış", 0
+
+            # Bildirimleri hızlıca eşzamanlı sorgula (tüm liste)
+            state_map = {}
+            with concurrent.futures.ThreadPoolExecutor(max_workers=25) as executor:
+                for h_id, state_str, w_cnt in executor.map(resolve_header_state, notifications):
+                    state_map[h_id] = (state_str, w_cnt)
+
+            for n in notifications:
+                h_id = n.get("HEADERID")
+                if h_id in state_map:
+                    st, w_cnt = state_map[h_id]
+                    n["HEADERSTATE"] = st
+                    n["WAITINGCOUNT"] = w_cnt
+                else:
+                    n["HEADERSTATE"] = "Stoğa Alınmış"
+                    n["WAITINGCOUNT"] = 0
+
+            # Kabul Bekleyen bildirimleri en başa getir (kullanıcı hemen görsün)
+            notifications.sort(key=lambda x: 0 if x.get("HEADERSTATE") == "Kabul Bekliyor" else 1)
+
     except Exception as e:
         logger.error(f"BKST gelen bildirim hatası: {e}", exc_info=True)
         return jsonify({"success": False, "error": f"BKST sunucusundan bildirimler çekilirken hata oluştu: {str(e)}"})
 
+    kabul_bekleyen_sayisi = sum(1 for n in notifications if n.get("HEADERSTATE") == "Kabul Bekliyor")
+    msg = f"Toplam {len(notifications)} bildirim incelendi. ({kabul_bekleyen_sayisi} adet Kabul Bekliyor, {len(notifications)-kabul_bekleyen_sayisi} adet Stoğa Alınmış)" if notifications else "Gelen/bekleyen bildirim bulunamadı."
+
     return jsonify({
         "success": True,
         "notifications": notifications,
-        "message": f"Tedarikçilerden gelen {len(notifications)} adet bildirim listelendi." if notifications else "Gelen/bekleyen bildirim bulunamadı."
+        "kabul_bekleyen_sayisi": kabul_bekleyen_sayisi,
+        "message": msg
     })
 
 @app.route('/api/depo_kabul/detay/<header_id>', methods=['GET'])
@@ -2794,6 +4454,8 @@ def api_depo_kabul_detay(header_id):
         pass
 
     products = []
+    waiting_count = 0
+    in_stock_count = 0
     try:
         res = session.post(
             "https://bkst.tarbil.gov.tr/Main/GetNotificationDetailList",
@@ -2815,6 +4477,14 @@ def api_depo_kabul_detay(header_id):
                 ur_tarih = format_date_val(item.get("PRODUCTIONDATE") or item.get("URETIMTARIHI") or item.get("ProductionDate"))
                 skt_val = format_date_val(item.get("SKT") or item.get("ExpirationDate"))
 
+                d_state = str(item.get("DETAILSTATE") or "").upper()
+                if "ALIMA UYGUN" in d_state and "DEĞİL" not in d_state and "DEGIL" not in d_state:
+                    product_durum = "Kabul Bekliyor"
+                    waiting_count += 1
+                else:
+                    product_durum = "Stoğa Alınmış"
+                    in_stock_count += 1
+
                 products.append({
                     "Koli Numarası": koli,
                     "Ürün Adı": urun_adi,
@@ -2825,15 +4495,21 @@ def api_depo_kabul_detay(header_id):
                     "Parti Numarası": parti,
                     "Palet Numarası": palet,
                     "Üretim Tarihi": ur_tarih,
-                    "Son Kullanma Tarihi": skt_val
+                    "Son Kullanma Tarihi": skt_val,
+                    "durum": product_durum
                 })
     except Exception as e:
         logger.error(f"Detail fetch error: {e}", exc_info=True)
         return jsonify({"success": False, "error": f"Detay çekilirken hata oluştu: {str(e)}", "products": []})
 
+    overall_status = "Kabul Bekliyor" if waiting_count > 0 else "Stoğa Alınmış"
+
     return jsonify({
         "success": True,
-        "products": products
+        "products": products,
+        "overall_status": overall_status,
+        "bekleyen_adet": waiting_count,
+        "stoktaki_adet": in_stock_count
     })
 
 @app.route('/api/depo_kabul/onayla', methods=['POST'])
@@ -3030,7 +4706,7 @@ def api_system_login():
         with open(cred_file, 'w', encoding='utf-8') as f:
             f.write("\n".join(lines))
 
-        return jsonify({'success': True, 'message': 'Giriş başarılı ve kaydedildi.', 'user_name': user_name})
+        return jsonify({'success': True, 'message': 'Giriş başarılı ve kaydedildi.', 'user_name': user_name, 'token': LOCAL_SESSION_TOKEN})
 
     except Exception as e:
         logger.warning(f"api_system_login offline fallback check: {e}")
@@ -3046,7 +4722,8 @@ def api_system_login():
                 'success': True,
                 'offline_mode': True,
                 'message': 'İnternet bağlantısı yok. Kayıtlı bilgilerle çevrimdışı (offline) modda giriş yapıldı.',
-                'user_name': clean_user_name(saved_name or username)
+                'user_name': clean_user_name(saved_name or username),
+                'token': LOCAL_SESSION_TOKEN
             })
         return jsonify({'success': False, 'error': 'Bakanlık sunucusuna bağlanılamadı ve girilen bilgiler kayıtlı çevrimdışı bilgilerle eşleşmiyor.'})
 
@@ -3241,381 +4918,1269 @@ if __name__ == '__main__':
 
 ---
 
-### 📁 `guncelleme_kontrol.py`
+### 📁 `static/style.css`
 
-```python
-import os
-import sys
-import subprocess
-import shutil
-import json
-import time
-import re
-from datetime import datetime
+```css
+/* CSS Design Tokens & Reset */
+:root {
+    --bg-dark: #0a0b10;
+    --card-bg: rgba(20, 22, 33, 0.65);
+    --card-border: rgba(255, 255, 255, 0.08);
+    --primary: #5865f2;
+    --primary-glow: rgba(88, 101, 242, 0.35);
+    --success: #10b981;
+    --success-glow: rgba(16, 185, 129, 0.25);
+    --warning: #f59e0b;
+    --danger: #ef4444;
+    --text-main: #f3f4f6;
+    --text-muted: #9ca3af;
+    
+    --font-outfit: 'Outfit', sans-serif;
+    --font-inter: 'Inter', sans-serif;
+}
 
-# Çalışma dizinini script'in bulunduğu klasöre sabitle
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-os.chdir(BASE_DIR)
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
 
-NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
+body {
+    background-color: var(--bg-dark);
+    color: var(--text-main);
+    font-family: var(--font-inter);
+    min-height: 100vh;
+    overflow-x: hidden;
+    position: relative;
+    font-size: 0.92rem;
+    line-height: 1.5;
+}
 
-# Windows Konsolu için ANSI Renk ve UTF-8 Türkçe Karakter Desteğini Aktifleştir
-if os.name == 'nt':
-    try:
-        os.system('')  # Windows VT100 / ANSI escape sequence modunu açar
-        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
-    except Exception:
-        pass
+/* Background Glowing Decorators */
+.glass-bg-decor1 {
+    position: absolute;
+    width: 500px;
+    height: 500px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(88, 101, 242, 0.14) 0%, rgba(0, 0, 0, 0) 70%);
+    top: -100px;
+    right: -50px;
+    z-index: -1;
+    pointer-events: none;
+}
 
-GREEN = '\033[92m'
-CYAN = '\033[96m'
-YELLOW = '\033[93m'
-RED = '\033[91m'
-WHITE = '\033[97m'
-BOLD = '\033[1m'
-DIM = '\033[2m'
-RESET = '\033[0m'
+.glass-bg-decor2 {
+    position: absolute;
+    width: 650px;
+    height: 650px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(16, 185, 129, 0.08) 0%, rgba(0, 0, 0, 0) 70%);
+    bottom: -150px;
+    left: -150px;
+    z-index: -1;
+    pointer-events: none;
+}
 
-def clear_pycache():
-    for dirpath, dirnames, filenames in os.walk(BASE_DIR):
-        if "__pycache__" in dirnames:
-            try:
-                shutil.rmtree(os.path.join(dirpath, "__pycache__"), ignore_errors=True)
-            except Exception:
-                pass
+/* Main Container Layout */
+.container {
+    width: 100%;
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.8rem;
+}
 
-def get_unified_version_info():
-    v_code = "v1.0"
-    v_commit = ""
-    v_date = datetime.now().strftime("%d.%m.%Y")
-    v_msg = "Sistem Güncel"
+/* Header */
+.app-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 1.2rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    flex-wrap: wrap;
+    gap: 1rem;
+}
 
-    v_path = os.path.join(BASE_DIR, "version.json")
-    if os.path.exists(v_path):
-        try:
-            with open(v_path, "r", encoding="utf-8") as f:
-                v_data = json.load(f)
-                v_code = str(v_data.get("version", "v1.0")).strip()
-                v_commit = str(v_data.get("commit", "")).strip()
-                v_date = str(v_data.get("date", "")).strip()
-                v_msg = str(v_data.get("message", "Sistem Güncel")).strip()
-        except Exception:
-            pass
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+}
 
-    full_ver = f"{v_code} ({v_commit})" if v_commit else v_code
-    return full_ver, v_date, v_msg
+.logo-icon {
+    font-size: 2.5rem;
+    background: linear-gradient(135deg, #818cf8, #3b82f6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
 
-def install_dependencies():
-    print(f"  {CYAN}[3/3] Gerekli Python kütüphaneleri kontrol ediliyor ve kuruluyor...{RESET}")
-    req_file = os.path.join(BASE_DIR, "requirements.txt")
-    if os.path.exists(req_file):
-        try:
-            res = subprocess.run(
-                [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"],
-                capture_output=True, text=True, cwd=BASE_DIR, creationflags=NO_WINDOW
-            )
-            if res.returncode == 0:
-                print(f"  {GREEN}  ✓ Tüm Python paketleri başarıyla doğrulandı ve yüklendi.{RESET}")
-            else:
-                print(f"  {YELLOW}  • Temel paketler (waitress, flask, pandas, openpyxl, requests) kuruluyor...{RESET}")
-                subprocess.run(
-                    [sys.executable, "-m", "pip", "install", "waitress", "flask", "pandas", "openpyxl", "requests", "xlrd"],
-                    capture_output=True, text=True, cwd=BASE_DIR, creationflags=NO_WINDOW
-                )
-                print(f"  {GREEN}  ✓ Temel paketler başarıyla yüklendi.{RESET}")
-        except Exception as e:
-            print(f"  {YELLOW}  • Paket yükleme uyarısı: {e}{RESET}")
+.logo h1 {
+    font-family: var(--font-outfit);
+    font-size: 1.75rem;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    background: linear-gradient(135deg, #ffffff 60%, #a5b4fc);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
 
-def recompile_exe_if_possible():
-    ps1_file = os.path.join(BASE_DIR, "build_exe.ps1")
-    if os.path.exists(ps1_file) and os.name == 'nt':
-        try:
-            subprocess.run(
-                ["powershell", "-ExecutionPolicy", "Bypass", "-File", "build_exe.ps1"],
-                capture_output=True, text=True, cwd=BASE_DIR, creationflags=NO_WINDOW
-            )
-        except Exception:
-            pass
+.logo p {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
 
-def is_dev_mode():
-    if os.environ.get("DEV_MODE") == "1":
-        return True
-    if os.path.exists(os.path.join(BASE_DIR, ".dev_mode")):
-        return True
-    return False
+/* Application Top Navigation Bar */
+.app-nav {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: rgba(15, 23, 42, 0.65);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 0.35rem;
+    border-radius: 14px;
+    backdrop-filter: blur(12px);
+}
 
-def parse_version_tuple(v_str):
-    try:
-        clean = re.sub(r'[^0-9.]', '', str(v_str))
-        parts = [int(p) for p in clean.split('.') if p.isdigit()]
-        return tuple(parts)
-    except Exception:
-        return (0, 0, 0)
+.nav-btn {
+    color: #94a3b8;
+    text-decoration: none;
+    font-size: 0.85rem;
+    font-weight: 600;
+    padding: 0.55rem 1.1rem;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    border: 1px solid transparent;
+    white-space: nowrap;
+}
 
-def http_update():
-    if is_dev_mode():
-        print(f"\n{YELLOW}{BOLD} =============================================================={RESET}")
-        print(f"{YELLOW}{BOLD}  🔧 [GELİŞTİRİCİ MODU AKTİF] (.dev_mode dosyası mevcut){RESET}")
-        print(f"{WHITE}  Yerel kodlar korunuyor, GitHub'dan indirme/ezme yapılmayacak.{RESET}")
-        print(f"{YELLOW}{BOLD} =============================================================={RESET}\n")
-        install_dependencies()
-        return False
+.nav-btn:hover {
+    color: #f8fafc;
+    background: rgba(255, 255, 255, 0.06);
+    transform: translateY(-1px);
+}
 
-    print(f"  {CYAN}[1/3] GitHub sunucusundan en güncel sürüm bilgisi sorgulanıyor...{RESET}")
-    try:
-        import requests
-        import urllib3
-        import zipfile
-        import io
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-    except ImportError:
-        print(f"  {YELLOW}  • requests kütüphanesi yükleniyor...{RESET}")
-        subprocess.run([sys.executable, "-m", "pip", "install", "requests", "urllib3"], capture_output=True, creationflags=NO_WINDOW)
-        import requests
-        import urllib3
-        import zipfile
-        import io
+.nav-btn.active {
+    color: #ffffff;
+    background: linear-gradient(135deg, rgba(88, 101, 242, 0.9), rgba(59, 130, 246, 0.9));
+    border-color: rgba(99, 102, 241, 0.4);
+    box-shadow: 0 4px 14px rgba(88, 101, 242, 0.35);
+}
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        "Pragma": "no-cache"
+.nav-btn.active-green {
+    color: #ffffff;
+    background: linear-gradient(135deg, #059669, #10b981);
+    border-color: rgba(16, 185, 129, 0.4);
+    box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);
+}
+
+.nav-btn.active-purple {
+    color: #ffffff;
+    background: linear-gradient(135deg, #7c3aed, #9333ea);
+    border-color: rgba(147, 51, 234, 0.4);
+    box-shadow: 0 4px 14px rgba(147, 51, 234, 0.35);
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+}
+
+.system-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    padding: 0.45rem 0.9rem;
+    border-radius: 50px;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.status-indicator {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+}
+
+.status-indicator.online {
+    background-color: var(--success);
+    box-shadow: 0 0 10px var(--success-glow);
+}
+
+.status-indicator.offline {
+    background-color: #ef4444;
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.7);
+}
+
+.status-indicator.fetching {
+    background-color: #f59e0b;
+    box-shadow: 0 0 10px rgba(245, 158, 11, 0.7);
+}
+
+/* Quick Guide Bar (Sade Üst Rehber Barı) */
+.quick-guide-bar {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 1rem;
+    background: rgba(88, 101, 242, 0.09);
+    border: 1px solid rgba(88, 101, 242, 0.25);
+    border-radius: 16px;
+    padding: 1rem 1.2rem;
+}
+
+.guide-item {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    background: rgba(0, 0, 0, 0.25);
+    padding: 0.75rem 1rem;
+    border-radius: 12px;
+}
+
+.guide-num {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(88, 101, 242, 0.28);
+    color: #a5b4fc;
+    font-weight: 800;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.guide-item strong {
+    display: block;
+    font-size: 0.88rem;
+    color: #fff;
+    font-weight: 700;
+}
+
+.guide-item span {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+/* Glass Cards & Panels */
+.glass-card {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-radius: 18px;
+    padding: 1.6rem;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+    min-width: 0;
+}
+
+/* Grid Layout Fixes */
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: 1fr 1.25fr;
+    gap: 1.8rem;
+    min-width: 0;
+}
+
+.dashboard-grid > section {
+    min-width: 0;
+}
+
+@media (max-width: 1024px) {
+    .dashboard-grid {
+        grid-template-columns: 1fr;
     }
+}
 
-    timestamp = time.time_ns()
-    remote_vurl = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/main/version.json?t={timestamp}"
+.panel-head-flex {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
 
-    try:
-        resp = requests.get(remote_vurl, verify=False, timeout=10, headers=headers)
-        if resp.status_code != 200:
-            print(f"  {RED}[HATA] Güncelleme sunucusuna ulaşılamadı (HTTP {resp.status_code}){RESET}")
-            return False
+.panel-title-group {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+}
 
-        remote_data = resp.json()
-        remote_commit = str(remote_data.get("commit", "")).strip()
-        remote_version = str(remote_data.get("version", "")).strip()
-        remote_date = str(remote_data.get("date", "")).strip()
-        remote_msg = str(remote_data.get("message", "")).strip()
+.panel-title-group h2, .panel h2 {
+    font-family: var(--font-outfit);
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: var(--text-main);
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin: 0;
+}
 
-        local_vpath = os.path.join(BASE_DIR, "version.json")
-        local_commit = ""
-        local_version = "v1.0"
-        if os.path.exists(local_vpath):
-            try:
-                with open(local_vpath, "r", encoding="utf-8") as f:
-                    v_raw = json.load(f)
-                    local_commit = str(v_raw.get("commit", "")).strip()
-                    local_version = str(v_raw.get("version", "v1.0")).strip()
-            except Exception:
-                pass
+.panel-subtitle {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin: 3px 0 0 0;
+}
 
-        # Sürüm karşılaştırması: Uzak sürüm yerel sürümden büyük değilse güncelleme yapma!
-        remote_tup = parse_version_tuple(remote_version)
-        local_tup = parse_version_tuple(local_version)
+.icon-primary { color: var(--primary); font-size: 1.5rem; }
+.icon-blue { color: #60a5fa; font-size: 1.5rem; }
+.icon-purple { color: #a855f7; font-size: 1.5rem; }
+.icon-green { color: var(--success); font-size: 1.5rem; }
 
-        if remote_tup <= local_tup or (local_commit and local_commit == remote_commit):
-            print(f"\n{GREEN}{BOLD} =============================================================={RESET}")
-            print(f"{GREEN}{BOLD}  🟢 [GÜNCEL] Sisteminiz zaten en son sürümde ({local_version}).{RESET}")
-            print(f"{WHITE}  📦 Yerel Sürüm: {local_version} | Uzak Sürüm: {remote_version}{RESET}")
-            print(f"{GREEN}{BOLD} =============================================================={RESET}\n")
-            install_dependencies()
-            return False
+/* Buttons */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+    font-family: var(--font-inter);
+    font-size: 0.93rem;
+    font-weight: 600;
+    padding: 0.75rem 1.4rem;
+    border-radius: 12px;
+    border: none;
+    cursor: pointer;
+    transition: all 0.22s ease;
+}
 
-        print(f"\n  {YELLOW}{BOLD}[2/3] [🔄 YENİ SÜRÜM TESPİT EDİLDİ: {remote_version}] Dosyalar indiriliyor...{RESET}")
+.btn-sm {
+    padding: 0.55rem 1.1rem;
+    font-size: 0.85rem;
+}
 
-        zip_url = f"https://github.com/mfatih01020/stok_fatih/archive/refs/heads/main.zip?t={timestamp}"
-        zip_resp = requests.get(zip_url, verify=False, timeout=40, headers=headers)
+.btn-primary {
+    background: linear-gradient(135deg, #5865f2, #4752c4);
+    color: white;
+    box-shadow: 0 4px 14px var(--primary-glow);
+}
 
-        if zip_resp.status_code != 200:
-            print(f"  {RED}[HATA] Güncelleme zip paketi indirilemedi (HTTP {zip_resp.status_code}){RESET}")
-            return False
+.btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(88, 101, 242, 0.45);
+}
 
-        # Asla ezilmeyecek kullanıcı dosyaları
-        ignored_extensions = ('.db', '.sqlite', '.sqlite3', '.log')
-        ignored_filenames = (
-            'cikis_kayitlari.db', 'stok.db', 'stok_takip.db', 
-            'bakanlik_giris_bilgileri.txt', 'günlük satışlar.txt',
-            '.session_token'
-        )
+.btn-success {
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white;
+    box-shadow: 0 4px 14px var(--success-glow);
+}
 
-        with zipfile.ZipFile(io.BytesIO(zip_resp.content)) as zf:
-            for member in zf.infolist():
-                if member.is_dir():
-                    continue
-                parts = member.filename.split('/', 1)
-                if len(parts) < 2:
-                    continue
-                rel_path = parts[1]
+.btn-success:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(16, 185, 129, 0.4);
+}
 
-                filename = os.path.basename(rel_path)
-                if filename in ignored_filenames or filename.endswith(ignored_extensions) or rel_path.startswith('.git/'):
-                    continue
+.btn-purple {
+    background: linear-gradient(135deg, #a855f7, #7e22ce);
+    color: white;
+    box-shadow: 0 4px 14px rgba(168, 85, 247, 0.3);
+    border: 1px solid rgba(168, 85, 247, 0.4);
+}
 
-                dest_path = os.path.join(BASE_DIR, rel_path.replace('/', os.sep))
-                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-                try:
-                    with zf.open(member) as source, open(dest_path, "wb") as target:
-                        target.write(source.read())
-                except PermissionError:
-                    # Dosya o an kullanımda ise (örneğin Calistir.exe açık ise) atla
-                    pass
+.btn-purple:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(168, 85, 247, 0.45);
+}
 
-        with open(local_vpath, "w", encoding="utf-8") as f:
-            json.dump(remote_data, f, ensure_ascii=False, indent=2)
+.btn-success:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
 
-        clear_pycache()
-        install_dependencies()
-        recompile_exe_if_possible()
+.btn-outline {
+    background: transparent;
+    color: var(--text-main);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+}
 
-        print(f"\n{GREEN}{BOLD} =============================================================={RESET}")
-        print(f"{GREEN}{BOLD}  🟢 [BAŞARILI] Sistem başarıyla {remote_version} sürümüne güncellendi!{RESET}")
-        print(f"{WHITE}{BOLD}  📦 Sürüm: {remote_version} ({remote_commit}) | {remote_date}{RESET}")
-        print(f"{WHITE}  📝 Not  : {remote_msg}{RESET}")
-        print(f"{GREEN}{BOLD} =============================================================={RESET}\n")
-        return True
+.btn-outline:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.35);
+}
 
-    except Exception as e:
-        print(f"  {RED}[HATA] Güncelleme işlemi sırasında beklenmeyen hata: {e}{RESET}")
-        return False
+.btn-block {
+    width: 100%;
+}
 
-def force_update():
-    print(f"\n{CYAN}{BOLD} =============================================================={RESET}")
-    print(f"{WHITE}{BOLD}       QR STOK YÖNETİM SİSTEMİ - GÜNCELLEME KONTROLÜ{RESET}")
-    print(f"{CYAN}{BOLD} =============================================================={RESET}\n")
+.margin-top-sm { margin-top: 1rem; }
+.margin-top-md { margin-top: 1.4rem; }
 
-    cur_hash, cur_date, cur_msg = get_unified_version_info()
-    print(f"  {WHITE}{BOLD}📌 MEVCUT YÜKLÜ SÜRÜM:{RESET}")
-    print(f"  {DIM}  • Sürüm Kodu: {RESET}{WHITE}{cur_hash}{RESET}")
-    print(f"  {DIM}  • Tarih     : {RESET}{WHITE}{cur_date}{RESET}")
-    print(f"  {DIM}  • Not       : {RESET}{WHITE}{cur_msg}{RESET}\n")
+/* BKST Controls */
+.bkst-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.85rem;
+    align-items: center;
+    margin-top: 1rem;
+}
 
-    return http_update()
+/* Upload Area */
+.upload-zone-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
 
-if __name__ == "__main__":
-    success = force_update()
+.zone-label {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--text-main);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
 
-```
+.upload-area {
+    border: 2px dashed rgba(255, 255, 255, 0.14);
+    border-radius: 14px;
+    padding: 1.4rem 1.2rem;
+    text-align: center;
+    transition: all 0.25s ease;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.015);
+}
 
----
+.upload-area:hover {
+    border-color: var(--primary);
+    background: rgba(88, 101, 242, 0.04);
+}
 
-### 📁 `launcher.py`
+.upload-icon {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+}
 
-```python
-import os
-import sys
-import subprocess
-import time
-import socket
-import webbrowser
+.upload-area h3 {
+    font-family: var(--font-outfit);
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 0.6rem;
+}
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-os.chdir(BASE_DIR)
+/* File Info Box */
+.file-info {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    padding: 0.75rem 1rem;
+    border-radius: 12px;
+}
 
-NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
+.file-icon-selected { font-size: 1.7rem; }
 
-def is_port_in_use(port=5000):
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(0.5)
-            return s.connect_ex(('127.0.0.1', port)) == 0
-    except Exception:
-        return False
+.file-details {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+    overflow: hidden;
+}
 
-def find_and_bring_window_to_front():
-    if os.name != 'nt':
-        return False
-    try:
-        import ctypes
-        user32 = ctypes.windll.user32
-        found_hwnd = None
+.file-name {
+    font-size: 0.88rem;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow: hidden;
+}
 
-        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
-        def enum_windows_callback(hwnd, extra):
-            nonlocal found_hwnd
-            if user32.IsWindowVisible(hwnd):
-                length = user32.GetWindowTextLengthW(hwnd)
-                if length > 0:
-                    buff = ctypes.create_unicode_buffer(length + 1)
-                    user32.GetWindowTextW(hwnd, buff, length + 1)
-                    if "QR Compare" in buff.value:
-                        found_hwnd = hwnd
-                        return False
-            return True
+.file-size { font-size: 0.75rem; color: var(--text-muted); }
 
-        user32.EnumWindows(WNDENUMPROC(enum_windows_callback), 0)
-        if found_hwnd:
-            user32.ShowWindow(found_hwnd, 9)  # SW_RESTORE
-            user32.ShowWindow(found_hwnd, 3)  # SW_MAXIMIZE
-            user32.SetForegroundWindow(found_hwnd)
-            return True
-    except Exception:
-        pass
-    return False
+.btn-clear {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0.3rem;
+    font-size: 1.1rem;
+}
 
-def open_as_desktop_app(url="http://127.0.0.1:5000"):
-    chrome_paths = [
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-        os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe")
-    ]
-    edge_paths = [
-        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"
-    ]
+.btn-clear:hover { color: var(--danger); }
 
-    for browser_path in chrome_paths + edge_paths:
-        if os.path.exists(browser_path):
-            try:
-                subprocess.Popen([browser_path, f"--app={url}", "--start-maximized", "--window-position=0,0"], creationflags=NO_WINDOW)
-                return True
-            except Exception:
-                pass
+/* Stats Grid (Section 2 metrics) */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+    margin-bottom: 1.2rem;
+}
 
-    webbrowser.open(url)
-    return False
+@media (max-width: 540px) {
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+}
 
-def ensure_dependencies():
-    packages = ["flask", "waitress", "pandas", "openpyxl", "requests"]
-    missing = []
-    for pkg in packages:
-        try:
-            __import__(pkg)
-        except ImportError:
-            missing.append(pkg)
-    if missing:
-        try:
-            subprocess.run([sys.executable, "-m", "pip", "install", *missing], check=True, creationflags=NO_WINDOW)
-        except Exception:
-            pass
+.stat-card {
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid var(--card-border);
+    border-radius: 14px;
+    padding: 1rem 1.2rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
 
-def launch():
-    if is_port_in_use(5000):
-        # Uygulama zaten çalışıyorsa var olan pencereyi öne getir
-        if find_and_bring_window_to_front():
-            return
-        # Pencere bulunamadıysa yeni tarayıcı penceresi aç
-        open_as_desktop_app("http://127.0.0.1:5000")
-        return
+.stat-card.stat-success {
+    background: rgba(16, 185, 129, 0.09);
+    border-color: rgba(16, 185, 129, 0.28);
+}
 
-    ensure_dependencies()
-    py_dir = os.path.dirname(sys.executable)
-    pythonw_cand = os.path.join(py_dir, "pythonw.exe")
-    target_py = pythonw_cand if os.path.exists(pythonw_cand) else sys.executable
-    flags = NO_WINDOW
-    if os.name == 'nt':
-        flags |= 0x00000008  # DETACHED_PROCESS
-    subprocess.Popen([target_py, "app.py"], cwd=BASE_DIR, creationflags=flags)
+.stat-card.stat-amber {
+    background: rgba(245, 158, 11, 0.09);
+    border-color: rgba(245, 158, 11, 0.28);
+}
 
-    for _ in range(32):
-        time.sleep(0.25)
-        if is_port_in_use(5000):
-            break
+.stat-icon {
+    font-size: 1.6rem;
+    flex-shrink: 0;
+}
 
-    open_as_desktop_app("http://127.0.0.1:5000")
+.stat-data {
+    display: flex;
+    flex-direction: column;
+}
 
-if __name__ == "__main__":
-    launch()
+.stat-value {
+    font-family: var(--font-outfit);
+    font-size: 1.45rem;
+    font-weight: 800;
+    line-height: 1.1;
+}
+
+.stat-label {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 3px;
+}
+
+.color-blue { color: #60a5fa; }
+.color-purple { color: #c084fc; }
+.color-green { color: #6ee7b7; }
+.color-amber { color: #fcd34d; }
+
+/* Action Download Buttons Group */
+.action-buttons-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+/* Compare Results Table Box */
+.compare-results-box {
+    border-top: 1px solid var(--card-border);
+    padding-top: 1.2rem;
+    margin-top: 1.2rem;
+    min-width: 0;
+}
+
+.compare-table-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+    gap: 0.6rem;
+}
+
+.compare-table-header h3 {
+    font-family: var(--font-outfit);
+    font-size: 1.05rem;
+    font-weight: 700;
+    margin: 0;
+}
+
+/* Tables Layout & Horizontal Scroll Container */
+.table-scroll-container {
+    max-height: 420px;
+    overflow-y: auto;
+    overflow-x: auto;
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    background: rgba(10, 11, 16, 0.55);
+    width: 100%;
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.data-table th {
+    background: rgba(88, 101, 242, 0.18);
+    color: #a5b4fc;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 0.75rem 0.95rem;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}
+
+.data-table td {
+    padding: 0.7rem 0.95rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Badges */
+.badge {
+    background: rgba(88, 101, 242, 0.12);
+    color: #a5b4fc;
+    padding: 0.35rem 0.8rem;
+    border-radius: 50px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    border: 1px solid rgba(88, 101, 242, 0.25);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.badge.badge-open    { background: rgba(16,185,129,0.15); color: #10b981; border-color: rgba(16,185,129,0.3); }
+.badge.badge-fetching{ background: rgba(245,158,11,0.15); color: #f59e0b; border-color: rgba(245,158,11,0.3); }
+.badge.badge-done    { background: rgba(88,101,242,0.15); color: #818cf8; border-color: rgba(88,101,242,0.3); }
+.badge.badge-error   { background: rgba(239,68,68,0.15);  color: #ef4444; border-color: rgba(239,68,68,0.3); }
+.badge.badge-closed  { background: rgba(88,101,242,0.12); color: #818cf8; border-color: rgba(88,101,242,0.2); }
+
+/* Status message */
+.status-msg {
+    margin-top: 0.85rem;
+    font-size: 0.88rem;
+    color: var(--text-main);
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.85rem 1.1rem;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.status-msg.status-error  { border-color: rgba(239,68,68,0.35); color: #fca5a5; background: rgba(239,68,68,0.12); }
+.status-msg.status-done   { border-color: rgba(16,185,129,0.35); color: #6ee7b7; background: rgba(16,185,129,0.12); }
+.status-msg.status-fetch  { border-color: rgba(245,158,11,0.35); color: #fde68a; background: rgba(245,158,11,0.12); }
+
+/* ── 3. Bölüm (Terek Sayımı) Styling ──────────────────────────────── */
+.audit-panel {
+    border: 1px solid rgba(16, 185, 129, 0.35) !important;
+    background: rgba(20, 22, 33, 0.8) !important;
+}
+
+.scan-input-wrapper {
+    position: relative;
+    display: flex;
+    gap: 0.85rem;
+    margin-top: 1.2rem;
+}
+
+.scan-icon {
+    position: absolute;
+    left: 1.1rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--success);
+    font-size: 1.3rem;
+}
+
+#audit-input-main {
+    flex: 1;
+    padding: 0.9rem 1.1rem 0.9rem 3rem;
+    font-size: 1.1rem;
+    font-weight: 600;
+    border-radius: 12px;
+    border: 2px solid var(--success);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-main);
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+#audit-input-main:focus {
+    box-shadow: 0 0 14px rgba(16, 185, 129, 0.35);
+}
+
+.btn-scan {
+    white-space: nowrap;
+    padding: 0 1.6rem;
+}
+
+.audit-msg {
+    padding: 0.85rem 1.1rem;
+    border-radius: 12px;
+    margin-top: 1rem;
+    font-size: 0.92rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+}
+
+.sync-alert-box {
+    background: rgba(239, 68, 68, 0.14);
+    border: 1px solid rgba(239, 68, 68, 0.45);
+    border-radius: 12px;
+    padding: 1rem 1.25rem;
+    margin-top: 1.2rem;
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+}
+
+.alert-icon { font-size: 1.6rem; color: #ef4444; flex-shrink: 0; }
+.alert-text { font-size: 0.93rem; font-weight: 700; color: #fca5a5; }
+
+.koli-badges-container {
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 0.85rem 1.1rem;
+    margin-top: 1rem;
+}
+
+.koli-badges-label {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-weight: 700;
+    display: block;
+    margin-bottom: 0.5rem;
+}
+
+.koli-badges-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+}
+
+.audit-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.audit-stat-card {
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 0.85rem 1.1rem;
+}
+
+.audit-stat-card.card-ok {
+    background: rgba(16, 185, 129, 0.12);
+    border-color: rgba(16, 185, 129, 0.35);
+}
+
+.audit-stat-card.card-missing {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.35);
+}
+
+.audit-stat-lbl {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    display: block;
+}
+
+.audit-stat-val {
+    font-family: var(--font-outfit);
+    font-size: 1.35rem;
+    font-weight: 800;
+    margin-top: 3px;
+    display: block;
+}
+
+.text-ok { color: var(--success); }
+.text-missing { color: var(--danger); }
+
+.audit-actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+}
+
+/* Utilities */
+.hidden { display: none !important; }
+
+/* Footer Bottom */
+.app-footer-bottom {
+    text-align: center;
+    padding: 1.8rem 0;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* ── SOL DİKİNE SIDEBAR TASARIMI (DESKTOP LAYOUT) ───────────────────────── */
+body.sidebar-layout {
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+    background-color: var(--bg-dark);
+}
+
+.app-wrapper {
+    display: flex;
+    min-height: 100vh;
+    width: 100%;
+}
+
+.sidebar {
+    width: 270px;
+    background: linear-gradient(180deg, #0f172a 0%, #090d16 100%);
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 1.6rem 1.2rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    flex-shrink: 0;
+    backdrop-filter: blur(20px);
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    height: 100vh;
+    z-index: 100;
+    overflow-y: auto;
+    box-shadow: 4px 0 25px rgba(0, 0, 0, 0.4);
+}
+
+.sidebar-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    padding-bottom: 1.4rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    margin-bottom: 1.5rem;
+}
+
+.sidebar-brand .logo-icon {
+    font-size: 2.2rem;
+    background: linear-gradient(135deg, #38bdf8, #818cf8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 0 10px rgba(56, 189, 248, 0.4));
+    animation: pulseLogo 3s ease-in-out infinite;
+}
+
+@keyframes pulseLogo {
+    0%, 100% { transform: scale(1); filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.4)); }
+    50% { transform: scale(1.06); filter: drop-shadow(0 0 16px rgba(56, 189, 248, 0.8)); }
+}
+
+.sidebar-brand h2 {
+    font-family: var(--font-outfit);
+    font-size: 1.35rem;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    color: #ffffff;
+    margin: 0;
+    line-height: 1.2;
+}
+
+.sidebar-brand p {
+    font-size: 0.78rem;
+    color: #38bdf8;
+    margin: 2px 0 0 0;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.sidebar-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    flex: 1;
+}
+
+.sidebar-link {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.85rem 1.1rem;
+    color: #94a3b8;
+    text-decoration: none;
+    font-size: 0.92rem;
+    font-weight: 600;
+    border-radius: 12px;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    border: 1px solid transparent;
+    position: relative;
+    overflow: hidden;
+}
+
+.sidebar-link i {
+    font-size: 1.15rem;
+    width: 24px;
+    text-align: center;
+    transition: transform 0.25s ease, color 0.25s ease;
+    color: #64748b;
+}
+
+.sidebar-link:hover {
+    color: #f8fafc;
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.1);
+    transform: translateX(4px);
+}
+
+.sidebar-link:hover i {
+    color: #38bdf8;
+    transform: scale(1.15);
+}
+
+.sidebar-link.active {
+    color: #ffffff;
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.18), rgba(99, 102, 241, 0.22));
+    border-color: rgba(56, 189, 248, 0.4);
+    box-shadow: 0 4px 18px rgba(56, 189, 248, 0.2);
+}
+
+.sidebar-link.active i {
+    color: #38bdf8;
+    filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.6));
+}
+
+.sidebar-link.active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 15%;
+    height: 70%;
+    width: 4px;
+    background: linear-gradient(180deg, #38bdf8, #818cf8);
+    border-radius: 0 4px 4px 0;
+    box-shadow: 0 0 10px #38bdf8;
+}
+
+.sidebar-footer {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+    padding-top: 1.2rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    margin-top: 1rem;
+}
+
+.system-status-pill {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.25);
+    padding: 0.5rem 0.9rem;
+    border-radius: 10px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #34d399;
+    transition: all 0.3s ease;
+}
+
+.system-status-pill.offline {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.35);
+    color: #f87171;
+}
+
+.system-status-pill.fetching {
+    background: rgba(245, 158, 11, 0.12);
+    border-color: rgba(245, 158, 11, 0.35);
+    color: #fbbf24;
+}
+
+.version-pill {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 0.5rem 0.9rem;
+    border-radius: 10px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #94a3b8;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.version-pill:hover {
+    background: rgba(56, 189, 248, 0.12);
+    border-color: rgba(56, 189, 248, 0.3);
+    color: #38bdf8;
+}
+
+.user-profile-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(56, 189, 248, 0.08);
+    border: 1px solid rgba(56, 189, 248, 0.2);
+    padding: 0.5rem 0.8rem;
+    border-radius: 10px;
+    font-size: 0.82rem;
+    color: #e2e8f0;
+}
+
+.user-profile-info {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    overflow: hidden;
+    flex: 1;
+    min-width: 0;
+}
+
+.user-avatar-icon {
+    color: #38bdf8;
+    font-size: 1.1rem;
+    flex-shrink: 0;
+}
+
+.user-name-title {
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 150px;
+    display: block;
+    cursor: default;
+}
+
+.btn-logout-icon {
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #f87171;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+
+.btn-logout-icon:hover {
+    background: rgba(239, 68, 68, 0.35);
+    color: #ffffff;
+    transform: scale(1.05);
+}
+
+.main-content {
+    flex: 1;
+    margin-left: 270px;
+    min-width: 0;
+    padding: 2rem 2.2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.8rem;
+    min-height: 100vh;
+}
+
+/* Premium Tech Stat Cards for Depo Stokları */
+.depo-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1.4rem;
+    margin-bottom: 0.5rem;
+}
+
+.stat-card-tech {
+    background: rgba(15, 23, 42, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    padding: 1.25rem 1.4rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 1rem;
+    cursor: pointer;
+    backdrop-filter: blur(14px);
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+}
+
+.stat-card-tech:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+}
+
+.card-blue-glow:hover {
+    border-color: rgba(56, 189, 248, 0.4);
+    box-shadow: 0 8px 24px rgba(56, 189, 248, 0.2);
+}
+
+.card-purple-glow:hover {
+    border-color: rgba(167, 139, 250, 0.4);
+    box-shadow: 0 8px 24px rgba(167, 139, 250, 0.2);
+}
+
+.card-amber-glow {
+    border-color: rgba(245, 158, 11, 0.25);
+    background: rgba(245, 158, 11, 0.04);
+}
+
+.card-amber-glow:hover {
+    border-color: rgba(245, 158, 11, 0.5);
+    box-shadow: 0 8px 24px rgba(245, 158, 11, 0.25);
+}
+
+.stat-tech-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.stat-tech-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.3rem;
+}
+
+.icon-blue-bg {
+    background: rgba(56, 189, 248, 0.15);
+    color: #38bdf8;
+    border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.icon-purple-bg {
+    background: rgba(167, 139, 250, 0.15);
+    color: #a78bfa;
+    border: 1px solid rgba(167, 139, 250, 0.3);
+}
+
+.icon-amber-bg {
+    background: rgba(245, 158, 11, 0.15);
+    color: #f59e0b;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.stat-tech-badge {
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.badge-blue { background: rgba(56, 189, 248, 0.12); color: #38bdf8; }
+.badge-purple { background: rgba(167, 139, 250, 0.12); color: #a78bfa; }
+.badge-amber { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+
+.stat-tech-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+
+.stat-tech-val {
+    font-family: var(--font-outfit);
+    font-size: 2.2rem;
+    font-weight: 800;
+    line-height: 1;
+    margin: 0;
+}
+
+.val-blue { color: #38bdf8; }
+.val-purple { color: #c084fc; }
+.val-amber { color: #f59e0b; }
+
+.stat-tech-lbl {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    font-weight: 500;
+    margin: 0;
+}
+
+.stat-tech-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: 0.75rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    font-weight: 600;
+    transition: color 0.2s;
+}
+
+.stat-card-tech:hover .stat-tech-footer {
+    color: #fff;
+}
+
+.stat-card-tech:hover .arrow-icon {
+    transform: translateX(3px);
+    color: var(--primary);
+}
+
+.content-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.page-title {
+    font-family: var(--font-outfit);
+    font-size: 1.6rem;
+    font-weight: 800;
+    color: #fff;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+}
+
+.page-subtitle {
+    font-size: 0.88rem;
+    color: var(--text-muted);
+    margin-top: 3px;
+}
+
+@media (max-width: 900px) {
+    .app-wrapper {
+        flex-direction: column;
+    }
+    .sidebar {
+        width: 100%;
+        height: auto;
+        position: relative;
+    }
+    .main-content {
+        margin-left: 0;
+    }
+}
 
 ```
 
@@ -4997,1269 +7562,662 @@ if (document.readyState === "loading") {
 
 ---
 
-### 📁 `static/style.css`
+### 📁 `static/favicon.svg`
 
-```css
-/* CSS Design Tokens & Reset */
-:root {
-    --bg-dark: #0a0b10;
-    --card-bg: rgba(20, 22, 33, 0.65);
-    --card-border: rgba(255, 255, 255, 0.08);
-    --primary: #5865f2;
-    --primary-glow: rgba(88, 101, 242, 0.35);
-    --success: #10b981;
-    --success-glow: rgba(16, 185, 129, 0.25);
-    --warning: #f59e0b;
-    --danger: #ef4444;
-    --text-main: #f3f4f6;
-    --text-muted: #9ca3af;
+```xml
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+    <linearGradient id="indigoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#818cf8"/>
+      <stop offset="100%" stop-color="#4f46e5"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="110" fill="url(#bgGrad)"/>
+  <rect x="70" y="70" width="130" height="130" rx="28" fill="none" stroke="url(#cyanGrad)" stroke-width="24"/>
+  <rect x="108" y="108" width="54" height="54" rx="14" fill="url(#cyanGrad)"/>
+  <rect x="312" y="70" width="130" height="130" rx="28" fill="none" stroke="url(#cyanGrad)" stroke-width="24"/>
+  <rect x="350" y="108" width="54" height="54" rx="14" fill="url(#cyanGrad)"/>
+  <rect x="70" y="312" width="130" height="130" rx="28" fill="none" stroke="url(#cyanGrad)" stroke-width="24"/>
+  <rect x="108" y="350" width="54" height="54" rx="14" fill="url(#cyanGrad)"/>
+  <rect x="312" y="312" width="44" height="44" rx="12" fill="url(#cyanGrad)"/>
+  <rect x="398" y="312" width="44" height="44" rx="12" fill="url(#cyanGrad)"/>
+  <rect x="312" y="398" width="44" height="44" rx="12" fill="url(#cyanGrad)"/>
+  <rect x="398" y="398" width="44" height="44" rx="12" fill="url(#cyanGrad)"/>
+  <rect x="355" y="355" width="44" height="44" rx="12" fill="url(#indigoGrad)"/>
+  <rect x="236" y="70" width="40" height="130" rx="14" fill="url(#cyanGrad)"/>
+  <rect x="70" y="236" width="130" height="40" rx="14" fill="url(#cyanGrad)"/>
+  <rect x="236" y="312" width="40" height="130" rx="14" fill="url(#indigoGrad)"/>
+  <rect x="312" y="236" width="130" height="40" rx="14" fill="url(#cyanGrad)"/>
+</svg>
+```
+
+---
+
+### 📁 `templates/index.html`
+
+```html
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Compare</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
+    <link rel="shortcut icon" href="/static/favicon.ico">
+    <!-- Google Fonts Outfit & Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="sidebar-layout">
+    <div class="glass-bg-decor1"></div>
+    <div class="glass-bg-decor2"></div>
     
-    --font-outfit: 'Outfit', sans-serif;
-    --font-inter: 'Inter', sans-serif;
-}
-
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
-}
-
-body {
-    background-color: var(--bg-dark);
-    color: var(--text-main);
-    font-family: var(--font-inter);
-    min-height: 100vh;
-    overflow-x: hidden;
-    position: relative;
-    font-size: 0.92rem;
-    line-height: 1.5;
-}
-
-/* Background Glowing Decorators */
-.glass-bg-decor1 {
-    position: absolute;
-    width: 500px;
-    height: 500px;
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(88, 101, 242, 0.14) 0%, rgba(0, 0, 0, 0) 70%);
-    top: -100px;
-    right: -50px;
-    z-index: -1;
-    pointer-events: none;
-}
-
-.glass-bg-decor2 {
-    position: absolute;
-    width: 650px;
-    height: 650px;
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(16, 185, 129, 0.08) 0%, rgba(0, 0, 0, 0) 70%);
-    bottom: -150px;
-    left: -150px;
-    z-index: -1;
-    pointer-events: none;
-}
-
-/* Main Container Layout */
-.container {
-    width: 100%;
-    max-width: 1440px;
-    margin: 0 auto;
-    padding: 2rem 1.5rem;
-    display: flex;
-    flex-direction: column;
-    gap: 1.8rem;
-}
-
-/* Header */
-.app-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-bottom: 1.2rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    flex-wrap: wrap;
-    gap: 1rem;
-}
-
-.logo {
-    display: flex;
-    align-items: center;
-    gap: 0.9rem;
-}
-
-.logo-icon {
-    font-size: 2.5rem;
-    background: linear-gradient(135deg, #818cf8, #3b82f6);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-}
-
-.logo h1 {
-    font-family: var(--font-outfit);
-    font-size: 1.75rem;
-    font-weight: 800;
-    letter-spacing: -0.5px;
-    background: linear-gradient(135deg, #ffffff 60%, #a5b4fc);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-}
-
-.logo p {
-    font-size: 0.85rem;
-    color: var(--text-muted);
-    margin-top: 2px;
-}
-
-/* Application Top Navigation Bar */
-.app-nav {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-    background: rgba(15, 23, 42, 0.65);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    padding: 0.35rem;
-    border-radius: 14px;
-    backdrop-filter: blur(12px);
-}
-
-.nav-btn {
-    color: #94a3b8;
-    text-decoration: none;
-    font-size: 0.85rem;
-    font-weight: 600;
-    padding: 0.55rem 1.1rem;
-    border-radius: 10px;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.55rem;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    border: 1px solid transparent;
-    white-space: nowrap;
-}
-
-.nav-btn:hover {
-    color: #f8fafc;
-    background: rgba(255, 255, 255, 0.06);
-    transform: translateY(-1px);
-}
-
-.nav-btn.active {
-    color: #ffffff;
-    background: linear-gradient(135deg, rgba(88, 101, 242, 0.9), rgba(59, 130, 246, 0.9));
-    border-color: rgba(99, 102, 241, 0.4);
-    box-shadow: 0 4px 14px rgba(88, 101, 242, 0.35);
-}
-
-.nav-btn.active-green {
-    color: #ffffff;
-    background: linear-gradient(135deg, #059669, #10b981);
-    border-color: rgba(16, 185, 129, 0.4);
-    box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);
-}
-
-.nav-btn.active-purple {
-    color: #ffffff;
-    background: linear-gradient(135deg, #7c3aed, #9333ea);
-    border-color: rgba(147, 51, 234, 0.4);
-    box-shadow: 0 4px 14px rgba(147, 51, 234, 0.35);
-}
-
-.header-right {
-    display: flex;
-    align-items: center;
-    gap: 0.8rem;
-}
-
-.system-status {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    padding: 0.45rem 0.9rem;
-    border-radius: 50px;
-    font-size: 0.85rem;
-    font-weight: 500;
-}
-
-.status-indicator {
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-}
-
-.status-indicator.online {
-    background-color: var(--success);
-    box-shadow: 0 0 10px var(--success-glow);
-}
-
-.status-indicator.offline {
-    background-color: #ef4444;
-    box-shadow: 0 0 10px rgba(239, 68, 68, 0.7);
-}
-
-.status-indicator.fetching {
-    background-color: #f59e0b;
-    box-shadow: 0 0 10px rgba(245, 158, 11, 0.7);
-}
-
-/* Quick Guide Bar (Sade Üst Rehber Barı) */
-.quick-guide-bar {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-    gap: 1rem;
-    background: rgba(88, 101, 242, 0.09);
-    border: 1px solid rgba(88, 101, 242, 0.25);
-    border-radius: 16px;
-    padding: 1rem 1.2rem;
-}
-
-.guide-item {
-    display: flex;
-    align-items: center;
-    gap: 0.85rem;
-    background: rgba(0, 0, 0, 0.25);
-    padding: 0.75rem 1rem;
-    border-radius: 12px;
-}
-
-.guide-num {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    background: rgba(88, 101, 242, 0.28);
-    color: #a5b4fc;
-    font-weight: 800;
-    font-size: 0.9rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-}
-
-.guide-item strong {
-    display: block;
-    font-size: 0.88rem;
-    color: #fff;
-    font-weight: 700;
-}
-
-.guide-item span {
-    font-size: 0.78rem;
-    color: var(--text-muted);
-}
-
-/* Glass Cards & Panels */
-.glass-card {
-    background: var(--card-bg);
-    border: 1px solid var(--card-border);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border-radius: 18px;
-    padding: 1.6rem;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
-    min-width: 0;
-}
-
-/* Grid Layout Fixes */
-.dashboard-grid {
-    display: grid;
-    grid-template-columns: 1fr 1.25fr;
-    gap: 1.8rem;
-    min-width: 0;
-}
-
-.dashboard-grid > section {
-    min-width: 0;
-}
-
-@media (max-width: 1024px) {
-    .dashboard-grid {
-        grid-template-columns: 1fr;
-    }
-}
-
-.panel-head-flex {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 1rem;
-    margin-bottom: 1rem;
-}
-
-.panel-title-group {
-    display: flex;
-    align-items: center;
-    gap: 0.85rem;
-}
-
-.panel-title-group h2, .panel h2 {
-    font-family: var(--font-outfit);
-    font-size: 1.35rem;
-    font-weight: 700;
-    color: var(--text-main);
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    margin: 0;
-}
-
-.panel-subtitle {
-    font-size: 0.85rem;
-    color: var(--text-muted);
-    margin: 3px 0 0 0;
-}
-
-.icon-primary { color: var(--primary); font-size: 1.5rem; }
-.icon-blue { color: #60a5fa; font-size: 1.5rem; }
-.icon-purple { color: #a855f7; font-size: 1.5rem; }
-.icon-green { color: var(--success); font-size: 1.5rem; }
-
-/* Buttons */
-.btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.6rem;
-    font-family: var(--font-inter);
-    font-size: 0.93rem;
-    font-weight: 600;
-    padding: 0.75rem 1.4rem;
-    border-radius: 12px;
-    border: none;
-    cursor: pointer;
-    transition: all 0.22s ease;
-}
-
-.btn-sm {
-    padding: 0.55rem 1.1rem;
-    font-size: 0.85rem;
-}
-
-.btn-primary {
-    background: linear-gradient(135deg, #5865f2, #4752c4);
-    color: white;
-    box-shadow: 0 4px 14px var(--primary-glow);
-}
-
-.btn-primary:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 18px rgba(88, 101, 242, 0.45);
-}
-
-.btn-success {
-    background: linear-gradient(135deg, #10b981, #059669);
-    color: white;
-    box-shadow: 0 4px 14px var(--success-glow);
-}
-
-.btn-success:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 18px rgba(16, 185, 129, 0.4);
-}
-
-.btn-purple {
-    background: linear-gradient(135deg, #a855f7, #7e22ce);
-    color: white;
-    box-shadow: 0 4px 14px rgba(168, 85, 247, 0.3);
-    border: 1px solid rgba(168, 85, 247, 0.4);
-}
-
-.btn-purple:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 18px rgba(168, 85, 247, 0.45);
-}
-
-.btn-success:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.btn-outline {
-    background: transparent;
-    color: var(--text-main);
-    border: 1px solid rgba(255, 255, 255, 0.18);
-}
-
-.btn-outline:hover {
-    background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(255, 255, 255, 0.35);
-}
-
-.btn-block {
-    width: 100%;
-}
-
-.margin-top-sm { margin-top: 1rem; }
-.margin-top-md { margin-top: 1.4rem; }
-
-/* BKST Controls */
-.bkst-controls {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.85rem;
-    align-items: center;
-    margin-top: 1rem;
-}
-
-/* Upload Area */
-.upload-zone-wrapper {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-}
-
-.zone-label {
-    font-size: 0.88rem;
-    font-weight: 600;
-    color: var(--text-main);
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-}
-
-.upload-area {
-    border: 2px dashed rgba(255, 255, 255, 0.14);
-    border-radius: 14px;
-    padding: 1.4rem 1.2rem;
-    text-align: center;
-    transition: all 0.25s ease;
-    cursor: pointer;
-    background: rgba(255, 255, 255, 0.015);
-}
-
-.upload-area:hover {
-    border-color: var(--primary);
-    background: rgba(88, 101, 242, 0.04);
-}
-
-.upload-icon {
-    font-size: 2rem;
-    margin-bottom: 0.5rem;
-}
-
-.upload-area h3 {
-    font-family: var(--font-outfit);
-    font-size: 1rem;
-    font-weight: 600;
-    margin-bottom: 0.6rem;
-}
-
-/* File Info Box */
-.file-info {
-    display: flex;
-    align-items: center;
-    gap: 0.9rem;
-    background: rgba(255, 255, 255, 0.035);
-    border: 1px solid rgba(255, 255, 255, 0.09);
-    padding: 0.75rem 1rem;
-    border-radius: 12px;
-}
-
-.file-icon-selected { font-size: 1.7rem; }
-
-.file-details {
-    display: flex;
-    flex-direction: column;
-    flex-grow: 1;
-    overflow: hidden;
-}
-
-.file-name {
-    font-size: 0.88rem;
-    font-weight: 600;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    overflow: hidden;
-}
-
-.file-size { font-size: 0.75rem; color: var(--text-muted); }
-
-.btn-clear {
-    background: transparent;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    padding: 0.3rem;
-    font-size: 1.1rem;
-}
-
-.btn-clear:hover { color: var(--danger); }
-
-/* Stats Grid (Section 2 metrics) */
-.stats-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 1rem;
-    margin-bottom: 1.2rem;
-}
-
-@media (max-width: 540px) {
-    .stats-grid {
-        grid-template-columns: 1fr;
-    }
-}
-
-.stat-card {
-    background: rgba(255, 255, 255, 0.025);
-    border: 1px solid var(--card-border);
-    border-radius: 14px;
-    padding: 1rem 1.2rem;
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-}
-
-.stat-card.stat-success {
-    background: rgba(16, 185, 129, 0.09);
-    border-color: rgba(16, 185, 129, 0.28);
-}
-
-.stat-card.stat-amber {
-    background: rgba(245, 158, 11, 0.09);
-    border-color: rgba(245, 158, 11, 0.28);
-}
-
-.stat-icon {
-    font-size: 1.6rem;
-    flex-shrink: 0;
-}
-
-.stat-data {
-    display: flex;
-    flex-direction: column;
-}
-
-.stat-value {
-    font-family: var(--font-outfit);
-    font-size: 1.45rem;
-    font-weight: 800;
-    line-height: 1.1;
-}
-
-.stat-label {
-    font-size: 0.78rem;
-    color: var(--text-muted);
-    margin-top: 3px;
-}
-
-.color-blue { color: #60a5fa; }
-.color-purple { color: #c084fc; }
-.color-green { color: #6ee7b7; }
-.color-amber { color: #fcd34d; }
-
-/* Action Download Buttons Group */
-.action-buttons-group {
-    display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
-}
-
-/* Compare Results Table Box */
-.compare-results-box {
-    border-top: 1px solid var(--card-border);
-    padding-top: 1.2rem;
-    margin-top: 1.2rem;
-    min-width: 0;
-}
-
-.compare-table-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 0.75rem;
-    gap: 0.6rem;
-}
-
-.compare-table-header h3 {
-    font-family: var(--font-outfit);
-    font-size: 1.05rem;
-    font-weight: 700;
-    margin: 0;
-}
-
-/* Tables Layout & Horizontal Scroll Container */
-.table-scroll-container {
-    max-height: 420px;
-    overflow-y: auto;
-    overflow-x: auto;
-    border: 1px solid var(--card-border);
-    border-radius: 12px;
-    background: rgba(10, 11, 16, 0.55);
-    width: 100%;
-}
-
-.data-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.85rem;
-    text-align: left;
-    white-space: nowrap;
-}
-
-.data-table th {
-    background: rgba(88, 101, 242, 0.18);
-    color: #a5b4fc;
-    font-size: 0.75rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    padding: 0.75rem 0.95rem;
-    position: sticky;
-    top: 0;
-    z-index: 2;
-}
-
-.data-table td {
-    padding: 0.7rem 0.95rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-/* Badges */
-.badge {
-    background: rgba(88, 101, 242, 0.12);
-    color: #a5b4fc;
-    padding: 0.35rem 0.8rem;
-    border-radius: 50px;
-    font-size: 0.8rem;
-    font-weight: 600;
-    border: 1px solid rgba(88, 101, 242, 0.25);
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-}
-
-.badge.badge-open    { background: rgba(16,185,129,0.15); color: #10b981; border-color: rgba(16,185,129,0.3); }
-.badge.badge-fetching{ background: rgba(245,158,11,0.15); color: #f59e0b; border-color: rgba(245,158,11,0.3); }
-.badge.badge-done    { background: rgba(88,101,242,0.15); color: #818cf8; border-color: rgba(88,101,242,0.3); }
-.badge.badge-error   { background: rgba(239,68,68,0.15);  color: #ef4444; border-color: rgba(239,68,68,0.3); }
-.badge.badge-closed  { background: rgba(88,101,242,0.12); color: #818cf8; border-color: rgba(88,101,242,0.2); }
-
-/* Status message */
-.status-msg {
-    margin-top: 0.85rem;
-    font-size: 0.88rem;
-    color: var(--text-main);
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    padding: 0.85rem 1.1rem;
-    border-radius: 12px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.status-msg.status-error  { border-color: rgba(239,68,68,0.35); color: #fca5a5; background: rgba(239,68,68,0.12); }
-.status-msg.status-done   { border-color: rgba(16,185,129,0.35); color: #6ee7b7; background: rgba(16,185,129,0.12); }
-.status-msg.status-fetch  { border-color: rgba(245,158,11,0.35); color: #fde68a; background: rgba(245,158,11,0.12); }
-
-/* ── 3. Bölüm (Terek Sayımı) Styling ──────────────────────────────── */
-.audit-panel {
-    border: 1px solid rgba(16, 185, 129, 0.35) !important;
-    background: rgba(20, 22, 33, 0.8) !important;
-}
-
-.scan-input-wrapper {
-    position: relative;
-    display: flex;
-    gap: 0.85rem;
-    margin-top: 1.2rem;
-}
-
-.scan-icon {
-    position: absolute;
-    left: 1.1rem;
-    top: 50%;
-    transform: translateY(-50%);
-    color: var(--success);
-    font-size: 1.3rem;
-}
-
-#audit-input-main {
-    flex: 1;
-    padding: 0.9rem 1.1rem 0.9rem 3rem;
-    font-size: 1.1rem;
-    font-weight: 600;
-    border-radius: 12px;
-    border: 2px solid var(--success);
-    background: rgba(255, 255, 255, 0.06);
-    color: var(--text-main);
-    outline: none;
-    transition: border-color 0.2s, box-shadow 0.2s;
-}
-
-#audit-input-main:focus {
-    box-shadow: 0 0 14px rgba(16, 185, 129, 0.35);
-}
-
-.btn-scan {
-    white-space: nowrap;
-    padding: 0 1.6rem;
-}
-
-.audit-msg {
-    padding: 0.85rem 1.1rem;
-    border-radius: 12px;
-    margin-top: 1rem;
-    font-size: 0.92rem;
-    font-weight: 600;
-    display: flex;
-    align-items: center;
-    gap: 0.7rem;
-}
-
-.sync-alert-box {
-    background: rgba(239, 68, 68, 0.14);
-    border: 1px solid rgba(239, 68, 68, 0.45);
-    border-radius: 12px;
-    padding: 1rem 1.25rem;
-    margin-top: 1.2rem;
-    display: flex;
-    align-items: center;
-    gap: 0.9rem;
-}
-
-.alert-icon { font-size: 1.6rem; color: #ef4444; flex-shrink: 0; }
-.alert-text { font-size: 0.93rem; font-weight: 700; color: #fca5a5; }
-
-.koli-badges-container {
-    background: rgba(255, 255, 255, 0.025);
-    border: 1px solid var(--card-border);
-    border-radius: 12px;
-    padding: 0.85rem 1.1rem;
-    margin-top: 1rem;
-}
-
-.koli-badges-label {
-    font-size: 0.8rem;
-    color: var(--text-muted);
-    font-weight: 700;
-    display: block;
-    margin-bottom: 0.5rem;
-}
-
-.koli-badges-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.6rem;
-}
-
-.audit-stats-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 1rem;
-    margin-top: 1rem;
-}
-
-.audit-stat-card {
-    background: rgba(255, 255, 255, 0.035);
-    border: 1px solid var(--card-border);
-    border-radius: 12px;
-    padding: 0.85rem 1.1rem;
-}
-
-.audit-stat-card.card-ok {
-    background: rgba(16, 185, 129, 0.12);
-    border-color: rgba(16, 185, 129, 0.35);
-}
-
-.audit-stat-card.card-missing {
-    background: rgba(239, 68, 68, 0.12);
-    border-color: rgba(239, 68, 68, 0.35);
-}
-
-.audit-stat-lbl {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    display: block;
-}
-
-.audit-stat-val {
-    font-family: var(--font-outfit);
-    font-size: 1.35rem;
-    font-weight: 800;
-    margin-top: 3px;
-    display: block;
-}
-
-.text-ok { color: var(--success); }
-.text-missing { color: var(--danger); }
-
-.audit-actions {
-    display: flex;
-    gap: 0.75rem;
-    margin-top: 1rem;
-    margin-bottom: 1rem;
-    flex-wrap: wrap;
-}
-
-/* Utilities */
-.hidden { display: none !important; }
-
-/* Footer Bottom */
-.app-footer-bottom {
-    text-align: center;
-    padding: 1.8rem 0;
-    color: var(--text-muted);
-    font-size: 0.82rem;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-/* ── SOL DİKİNE SIDEBAR TASARIMI (DESKTOP LAYOUT) ───────────────────────── */
-body.sidebar-layout {
-    margin: 0;
-    padding: 0;
-    overflow-x: hidden;
-    background-color: var(--bg-dark);
-}
-
-.app-wrapper {
-    display: flex;
-    min-height: 100vh;
-    width: 100%;
-}
-
-.sidebar {
-    width: 270px;
-    background: linear-gradient(180deg, #0f172a 0%, #090d16 100%);
-    border-right: 1px solid rgba(255, 255, 255, 0.08);
-    padding: 1.6rem 1.2rem;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    flex-shrink: 0;
-    backdrop-filter: blur(20px);
-    position: fixed;
-    top: 0;
-    left: 0;
-    bottom: 0;
-    height: 100vh;
-    z-index: 100;
-    overflow-y: auto;
-    box-shadow: 4px 0 25px rgba(0, 0, 0, 0.4);
-}
-
-.sidebar-brand {
-    display: flex;
-    align-items: center;
-    gap: 0.9rem;
-    padding-bottom: 1.4rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    margin-bottom: 1.5rem;
-}
-
-.sidebar-brand .logo-icon {
-    font-size: 2.2rem;
-    background: linear-gradient(135deg, #38bdf8, #818cf8);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    filter: drop-shadow(0 0 10px rgba(56, 189, 248, 0.4));
-    animation: pulseLogo 3s ease-in-out infinite;
-}
-
-@keyframes pulseLogo {
-    0%, 100% { transform: scale(1); filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.4)); }
-    50% { transform: scale(1.06); filter: drop-shadow(0 0 16px rgba(56, 189, 248, 0.8)); }
-}
-
-.sidebar-brand h2 {
-    font-family: var(--font-outfit);
-    font-size: 1.35rem;
-    font-weight: 800;
-    letter-spacing: -0.5px;
-    color: #ffffff;
-    margin: 0;
-    line-height: 1.2;
-}
-
-.sidebar-brand p {
-    font-size: 0.78rem;
-    color: #38bdf8;
-    margin: 2px 0 0 0;
-    font-weight: 600;
-    letter-spacing: 0.5px;
-    text-transform: uppercase;
-}
-
-.sidebar-menu {
-    display: flex;
-    flex-direction: column;
-    gap: 0.55rem;
-    flex: 1;
-}
-
-.sidebar-link {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    padding: 0.85rem 1.1rem;
-    color: #94a3b8;
-    text-decoration: none;
-    font-size: 0.92rem;
-    font-weight: 600;
-    border-radius: 12px;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    border: 1px solid transparent;
-    position: relative;
-    overflow: hidden;
-}
-
-.sidebar-link i {
-    font-size: 1.15rem;
-    width: 24px;
-    text-align: center;
-    transition: transform 0.25s ease, color 0.25s ease;
-    color: #64748b;
-}
-
-.sidebar-link:hover {
-    color: #f8fafc;
-    background: rgba(255, 255, 255, 0.05);
-    border-color: rgba(255, 255, 255, 0.1);
-    transform: translateX(4px);
-}
-
-.sidebar-link:hover i {
-    color: #38bdf8;
-    transform: scale(1.15);
-}
-
-.sidebar-link.active {
-    color: #ffffff;
-    background: linear-gradient(135deg, rgba(56, 189, 248, 0.18), rgba(99, 102, 241, 0.22));
-    border-color: rgba(56, 189, 248, 0.4);
-    box-shadow: 0 4px 18px rgba(56, 189, 248, 0.2);
-}
-
-.sidebar-link.active i {
-    color: #38bdf8;
-    filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.6));
-}
-
-.sidebar-link.active::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 15%;
-    height: 70%;
-    width: 4px;
-    background: linear-gradient(180deg, #38bdf8, #818cf8);
-    border-radius: 0 4px 4px 0;
-    box-shadow: 0 0 10px #38bdf8;
-}
-
-.sidebar-footer {
-    display: flex;
-    flex-direction: column;
-    gap: 0.7rem;
-    padding-top: 1.2rem;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    margin-top: 1rem;
-}
-
-.system-status-pill {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    background: rgba(16, 185, 129, 0.1);
-    border: 1px solid rgba(16, 185, 129, 0.25);
-    padding: 0.5rem 0.9rem;
-    border-radius: 10px;
-    font-size: 0.82rem;
-    font-weight: 600;
-    color: #34d399;
-    transition: all 0.3s ease;
-}
-
-.system-status-pill.offline {
-    background: rgba(239, 68, 68, 0.12);
-    border-color: rgba(239, 68, 68, 0.35);
-    color: #f87171;
-}
-
-.system-status-pill.fetching {
-    background: rgba(245, 158, 11, 0.12);
-    border-color: rgba(245, 158, 11, 0.35);
-    color: #fbbf24;
-}
-
-.version-pill {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    padding: 0.5rem 0.9rem;
-    border-radius: 10px;
-    font-size: 0.82rem;
-    font-weight: 600;
-    color: #94a3b8;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-.version-pill:hover {
-    background: rgba(56, 189, 248, 0.12);
-    border-color: rgba(56, 189, 248, 0.3);
-    color: #38bdf8;
-}
-
-.user-profile-card {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    background: rgba(56, 189, 248, 0.08);
-    border: 1px solid rgba(56, 189, 248, 0.2);
-    padding: 0.5rem 0.8rem;
-    border-radius: 10px;
-    font-size: 0.82rem;
-    color: #e2e8f0;
-}
-
-.user-profile-info {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    overflow: hidden;
-    flex: 1;
-    min-width: 0;
-}
-
-.user-avatar-icon {
-    color: #38bdf8;
-    font-size: 1.1rem;
-    flex-shrink: 0;
-}
-
-.user-name-title {
-    font-weight: 600;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 150px;
-    display: block;
-    cursor: default;
-}
-
-.btn-logout-icon {
-    background: rgba(239, 68, 68, 0.15);
-    border: 1px solid rgba(239, 68, 68, 0.3);
-    color: #f87171;
-    width: 28px;
-    height: 28px;
-    border-radius: 6px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    flex-shrink: 0;
-}
-
-.btn-logout-icon:hover {
-    background: rgba(239, 68, 68, 0.35);
-    color: #ffffff;
-    transform: scale(1.05);
-}
-
-.main-content {
-    flex: 1;
-    margin-left: 270px;
-    min-width: 0;
-    padding: 2rem 2.2rem;
-    display: flex;
-    flex-direction: column;
-    gap: 1.8rem;
-    min-height: 100vh;
-}
-
-/* Premium Tech Stat Cards for Depo Stokları */
-.depo-stats-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: 1.4rem;
-    margin-bottom: 0.5rem;
-}
-
-.stat-card-tech {
-    background: rgba(15, 23, 42, 0.7);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 16px;
-    padding: 1.25rem 1.4rem;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    gap: 1rem;
-    cursor: pointer;
-    backdrop-filter: blur(14px);
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    position: relative;
-    overflow: hidden;
-}
-
-.stat-card-tech:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
-}
-
-.card-blue-glow:hover {
-    border-color: rgba(56, 189, 248, 0.4);
-    box-shadow: 0 8px 24px rgba(56, 189, 248, 0.2);
-}
-
-.card-purple-glow:hover {
-    border-color: rgba(167, 139, 250, 0.4);
-    box-shadow: 0 8px 24px rgba(167, 139, 250, 0.2);
-}
-
-.card-amber-glow {
-    border-color: rgba(245, 158, 11, 0.25);
-    background: rgba(245, 158, 11, 0.04);
-}
-
-.card-amber-glow:hover {
-    border-color: rgba(245, 158, 11, 0.5);
-    box-shadow: 0 8px 24px rgba(245, 158, 11, 0.25);
-}
-
-.stat-tech-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-.stat-tech-icon {
-    width: 44px;
-    height: 44px;
-    border-radius: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.3rem;
-}
-
-.icon-blue-bg {
-    background: rgba(56, 189, 248, 0.15);
-    color: #38bdf8;
-    border: 1px solid rgba(56, 189, 248, 0.3);
-}
-
-.icon-purple-bg {
-    background: rgba(167, 139, 250, 0.15);
-    color: #a78bfa;
-    border: 1px solid rgba(167, 139, 250, 0.3);
-}
-
-.icon-amber-bg {
-    background: rgba(245, 158, 11, 0.15);
-    color: #f59e0b;
-    border: 1px solid rgba(245, 158, 11, 0.3);
-}
-
-.stat-tech-badge {
-    font-size: 0.75rem;
-    font-weight: 700;
-    padding: 3px 9px;
-    border-radius: 8px;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-}
-
-.badge-blue { background: rgba(56, 189, 248, 0.12); color: #38bdf8; }
-.badge-purple { background: rgba(167, 139, 250, 0.12); color: #a78bfa; }
-.badge-amber { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
-
-.stat-tech-body {
-    display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
-}
-
-.stat-tech-val {
-    font-family: var(--font-outfit);
-    font-size: 2.2rem;
-    font-weight: 800;
-    line-height: 1;
-    margin: 0;
-}
-
-.val-blue { color: #38bdf8; }
-.val-purple { color: #c084fc; }
-.val-amber { color: #f59e0b; }
-
-.stat-tech-lbl {
-    font-size: 0.85rem;
-    color: var(--text-muted);
-    font-weight: 500;
-    margin: 0;
-}
-
-.stat-tech-footer {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding-top: 0.75rem;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
-    font-size: 0.78rem;
-    color: var(--text-muted);
-    font-weight: 600;
-    transition: color 0.2s;
-}
-
-.stat-card-tech:hover .stat-tech-footer {
-    color: #fff;
-}
-
-.stat-card-tech:hover .arrow-icon {
-    transform: translateX(3px);
-    color: var(--primary);
-}
-
-.content-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 1rem;
-    padding-bottom: 1rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.page-title {
-    font-family: var(--font-outfit);
-    font-size: 1.6rem;
-    font-weight: 800;
-    color: #fff;
-    margin: 0;
-    display: flex;
-    align-items: center;
-    gap: 0.7rem;
-}
-
-.page-subtitle {
-    font-size: 0.88rem;
-    color: var(--text-muted);
-    margin-top: 3px;
-}
-
-@media (max-width: 900px) {
-    .app-wrapper {
-        flex-direction: column;
-    }
-    .sidebar {
-        width: 100%;
-        height: auto;
-        position: relative;
-    }
-    .main-content {
-        margin-left: 0;
-    }
-}
+    <div class="app-wrapper">
+        <!-- SOL DİKİNE SIDEBAR NAVİGASYON -->
+        <aside class="sidebar">
+            <div class="sidebar-brand">
+                <i class="fa-solid fa-qrcode logo-icon"></i>
+                <div>
+                    <h2>QR Compare</h2>
+                    <p>Akıllı Stok Sistemi</p>
+                </div>
+            </div>
+
+            <nav class="sidebar-menu">
+                <a href="/cikis" class="sidebar-link">
+                    <i class="fa-solid fa-box-open"></i>
+                    <span>Barkod Okut & Çıkış</span>
+                </a>
+                <a href="/cikis-listesi" class="sidebar-link">
+                    <i class="fa-solid fa-list-check"></i>
+                    <span>Çıkış Listesi</span>
+                </a>
+                <a href="/stok-esitleme" class="sidebar-link active">
+                    <i class="fa-solid fa-chart-line"></i>
+                    <span>Stok & Eşitleme</span>
+                </a>
+                <a href="/depo_stoklari" class="sidebar-link">
+                    <i class="fa-solid fa-warehouse"></i>
+                    <span>Depomdaki Stoklar</span>
+                </a>
+                <a href="/depo_kabul" class="sidebar-link">
+                    <i class="fa-solid fa-boxes-packing"></i>
+                    <span>Depoya Kabul Et</span>
+                </a>
+                <a href="/istatistikler" class="sidebar-link">
+                    <i class="fa-solid fa-chart-pie"></i>
+                    <span>İstatistikler & Raporlar</span>
+                </a>
+                <a href="/kullaniciya-satis" class="sidebar-link">
+                    <i class="fa-solid fa-user-tag"></i>
+                    <span>Kullanıcıya Satış (Demo)</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="system-status-pill {{ 'offline' if not is_system_active else '' }}">
+                    <span class="status-indicator {{ system_status_cls | default('online') }}"></span>
+                    <span>{{ system_status_text | default('Sistem Aktif') }}</span>
+                </div>
+                <div class="user-profile-card">
+                    <div class="user-profile-info">
+                        <i class="fa-solid fa-user-circle user-avatar-icon"></i>
+                        <span id="sidebar-user-name" class="user-name-title">{{ current_user_name }}</span>
+                    </div>
+                    <button type="button" class="btn-logout-icon" onclick="logoutUser()" title="Oturumdan Çıkış Yap">
+                        <i class="fa-solid fa-power-off"></i>
+                    </button>
+                </div>
+                <div class="version-pill" id="versionBadge" onclick="showVersionModal()" title="Sürüm Bilgisi">
+                    <i class="fa-solid fa-code-branch" style="color: #38bdf8;"></i>
+                    <span id="versionText">{{ current_app_version }}</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- SAĞ ANA İÇERİK ALANI -->
+        <main class="main-content">
+
+        <!-- SÜRÜM & GÜNCELLEME MODALI -->
+        <div id="versionModal" class="modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px);">
+            <div style="background:#1e293b; color:#fff; max-width:450px; margin:10% auto; padding:24px; border-radius:16px; border:1px solid rgba(255,255,255,0.1); box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
+                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:12px; margin-bottom:16px;">
+                    <h3 style="margin:0; font-size:1.15rem; color:#38bdf8; display:flex; align-items:center; gap:8px;">
+                        <i class="fa-solid fa-circle-info"></i> Uygulama Sürüm Bilgisi
+                    </h3>
+                    <span onclick="closeVersionModal()" style="cursor:pointer; font-size:1.4rem; color:#94a3b8;">&times;</span>
+                </div>
+                <div style="font-size:0.95rem; line-height:1.8;">
+                    <p style="margin:6px 0;"><strong>📦 Sürüm Kodu:</strong> <span id="modalCommitHash" style="color:#38bdf8; font-family:monospace; font-weight:bold;">{{ current_app_commit }}</span></p>
+                    <p style="margin:6px 0;"><strong>📅 Son Güncelleme:</strong> <span id="modalCommitDate" style="color:#f1f5f9;">{{ current_app_date }}</span></p>
+                    <p style="margin:6px 0;"><strong>📝 Son Değişiklik Notu:</strong></p>
+                    <div id="modalCommitMsg" style="background:#0f172a; padding:10px 14px; border-radius:8px; font-size:0.85rem; color:#cbd5e1; border:1px solid rgba(255,255,255,0.05); margin-top:4px;">{{ current_app_msg }}</div>
+                    <div style="margin-top:16px; background:rgba(34, 197, 94, 0.15); border:1px solid rgba(34, 197, 94, 0.3); color:#4ade80; padding:8px 12px; border-radius:8px; text-align:center; font-size:0.85rem; font-weight:600;">
+                        🟢 GitHub Sunucusu ile Eşitlendi & Güncel
+                    </div>
+                </div>
+                <div style="text-align:right; margin-top:20px;">
+                    <button onclick="closeVersionModal()" style="background:#3b82f6; color:#fff; border:none; padding:8px 18px; border-radius:8px; font-weight:600; cursor:pointer;">Kapat</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- HIZLI REHBER BAR -->
+        <div class="quick-guide-bar">
+            <div class="guide-item">
+                <span class="guide-num">1</span>
+                <div>
+                    <strong>Bakanlık Verisi</strong>
+                    <span>Sunucudan otomatik çekilir</span>
+                </div>
+            </div>
+            <div class="guide-item">
+                <span class="guide-num">2</span>
+                <div>
+                    <strong>Terek (Raf) Sayımı Yap</strong>
+                    <span>Koli / Ürün QR okutarak eksikleri bulun</span>
+                </div>
+            </div>
+            <div class="guide-item">
+                <span class="guide-num">3</span>
+                <div>
+                    <strong>Çıkış Listesine Aktar</strong>
+                    <span>Tereğinizde olmayan ürünleri tek tıkla düşüş yapın</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- OTOMATİK YÜKLEME EKRANI (APPLICATION START LOADING OVERLAY) -->
+        <div id="auto-sync-loader" style="display:none; position:fixed; z-index:99999; left:0; top:0; width:100%; height:100%; background:rgba(10, 11, 16, 0.94); backdrop-filter:blur(14px); flex-direction:column; align-items:center; justify-content:center; text-align:center;">
+            <div style="background:rgba(15, 23, 42, 0.96); border:1px solid rgba(56, 189, 248, 0.35); border-radius:24px; padding:2.8rem 3rem; max-width:520px; width:90%; box-shadow:0 25px 50px rgba(0,0,0,0.8); transition: all 0.3s ease;">
+                <div id="loader-icon-box" style="width:80px; height:80px; border-radius:50%; background:rgba(56,189,248,0.15); border:2px solid rgba(56,189,248,0.4); margin:0 auto 1.5rem auto; display:flex; align-items:center; justify-content:center; transition: all 0.3s ease;">
+                    <i id="loader-icon" class="fa-solid fa-cloud-arrow-down fa-bounce" style="font-size:2.4rem; color:#38bdf8;"></i>
+                </div>
+                <h2 id="loader-title" style="font-family:var(--font-outfit); font-size:1.45rem; font-weight:800; color:#fff; margin:0 0 0.6rem 0;">
+                    Bakanlıktan Güncel Veriler Çekiliyor...
+                </h2>
+                <p id="loader-status" style="font-size:0.95rem; color:var(--text-muted); margin:0 0 1.6rem 0; line-height:1.6; transition: all 0.3s ease;">
+                    Lütfen bekleyin, BKST sunucusundan güncel stok ve karekod verileriniz otomatik çekiliyor.
+                </p>
+                <div style="background:rgba(255,255,255,0.06); height:6px; border-radius:10px; overflow:hidden; width:100%;">
+                    <div id="loader-progress-bar" style="background:linear-gradient(90deg, #38bdf8, #818cf8); height:100%; width:100%; transition: background 0.4s ease, width 0.4s ease;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Terek (Raf) QR Sayım & Stok Eşitleme Paneli -->
+        <section class="panel glass-card audit-panel">
+            <div class="panel-head-flex">
+                <div class="panel-title-group">
+                    <i class="fa-solid fa-box-archive icon-green"></i>
+                    <div>
+                        <h2>Terek (Raf) QR Sayım & Stok Eşitleme</h2>
+                        <p class="panel-subtitle">Koli veya ürün QR okutun. Bakanlık stoğundaki eksik ürünler otomatik tespit edilir.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Barkod Okutma Kutusu -->
+            <div class="scan-input-wrapper">
+                <i class="fa-solid fa-barcode scan-icon"></i>
+                <input type="text" id="audit-input-main" onkeydown="window.handleAuditKeypress(event)" placeholder="Barkod veya İlaç QR okutun (Enter'a basın)..." autocomplete="off">
+                <button type="button" id="btn-audit-submit-trigger" class="btn btn-success btn-scan">
+                    <i class="fa-solid fa-magnifying-glass"></i> Oku / Ekle
+                </button>
+            </div>
+
+            <!-- Bildirim Kutusu -->
+            <div id="audit-msg-box" class="hidden audit-msg"></div>
+
+            <!-- Sayım Sonuçları Paneli -->
+            <div id="audit-results-wrapper" class="hidden">
+
+                <!-- Stok Eşitleme Bildirimi -->
+                <div id="audit-sync-alert-box" class="sync-alert-box">
+                    <i class="fa-solid fa-triangle-exclamation alert-icon"></i>
+                    <div id="audit-sync-alert-text" class="alert-text">
+                        Tereğinizde fiziken bulunmayan 🔴 0 adet ürünü Bakanlık sitesinden ÇIKIŞ yapmalısınız!
+                    </div>
+                </div>
+
+                <!-- İncelenen Koliler -->
+                <div class="koli-badges-container">
+                    <span class="koli-badges-label"><i class="fa-solid fa-boxes-packing color-blue"></i> İncelenen Koliler:</span>
+                    <div id="audit-kolis-list" class="koli-badges-list">
+                        <span class="badge">Henüz koli yüklenmedi</span>
+                    </div>
+                </div>
+
+                <!-- İstatistik Özeti -->
+                <div class="audit-stats-grid">
+                    <div class="audit-stat-card">
+                        <span class="audit-stat-lbl">Bakanlık Koli Stoğu</span>
+                        <span id="audit-cnt-total" class="audit-stat-val">0 Adet</span>
+                    </div>
+                    <div class="audit-stat-card card-ok">
+                        <span class="audit-stat-lbl">🟢 Tereğimde VAR</span>
+                        <span id="audit-cnt-ok" class="audit-stat-val text-ok">0 Adet</span>
+                    </div>
+                    <div class="audit-stat-card card-missing">
+                        <span class="audit-stat-lbl">🔴 Tereğimde YOK</span>
+                        <span id="audit-cnt-missing" class="audit-stat-val text-missing">0 Adet</span>
+                    </div>
+                </div>
+
+                <!-- Butonlar -->
+                <div class="audit-actions">
+                    <button class="btn btn-purple btn-sm" id="btn-audit-toggle-mode" type="button">
+                        <i class="fa-solid fa-layer-group"></i> 📊 Okutulan Kalemleri Tüm Depoyla Karşılaştır
+                    </button>
+                    <button class="btn btn-danger btn-sm" id="btn-audit-send-cikis" type="button" onclick="transferMissingToCikis()">
+                        <i class="fa-solid fa-box-open"></i> 🔴 Tereğimde Olmayanları Çıkış Listesine Aktar
+                    </button>
+                    <button class="btn btn-success btn-sm" id="btn-dl-audit-excel" type="button">
+                        <i class="fa-solid fa-file-excel"></i> 📥 Tereğümde Olmayan Ürünleri İndir (Excel)
+                    </button>
+                    <button id="btn-audit-reset-koli" class="btn btn-outline btn-sm" type="button">
+                        <i class="fa-solid fa-rotate-left"></i> Sayımı Temizle
+                    </button>
+                </div>
+
+                <!-- Tablo -->
+                <div class="table-scroll-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Ürün Adı</th>
+                                <th>Koli No</th>
+                                <th>Karekod</th>
+                                <th>Seri No</th>
+                                <th>Parti No</th>
+                                <th>Palet No</th>
+                                <th style="text-align: center;">Terek Durumu</th>
+                                <th>Açıklama</th>
+                            </tr>
+                        </thead>
+                        <tbody id="audit-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <footer class="app-footer-bottom">
+            <p>&copy; 2026 QR Compare - Akıllı Stok & Karekod Eşitleme</p>
+        </footer>
+        </main>
+    </div>
+
+    <script src="/static/app.js?v=20261005_v3000"></script>
+</body>
+</html>
+
+```
+
+---
+
+### 📁 `templates/login.html`
+
+```html
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Compare</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
+    <link rel="shortcut icon" href="/static/favicon.ico">
+    <!-- Google Fonts Outfit & Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        body {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: var(--bg-dark);
+            overflow: hidden;
+        }
+
+        .login-card-wrapper {
+            width: 100%;
+            max-width: 440px;
+            padding: 2.5rem;
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid rgba(56, 189, 248, 0.25);
+            border-radius: 24px;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(20px);
+            position: relative;
+            z-index: 10;
+        }
+
+        .login-brand {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .login-brand i {
+            font-size: 3rem;
+            background: linear-gradient(135deg, #38bdf8, #818cf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.5rem;
+            filter: drop-shadow(0 0 12px rgba(56, 189, 248, 0.4));
+        }
+
+        .login-brand h1 {
+            font-family: var(--font-outfit);
+            font-size: 1.8rem;
+            font-weight: 800;
+            color: #ffffff;
+            margin: 0;
+        }
+
+        .login-brand p {
+            font-size: 0.88rem;
+            color: var(--text-muted);
+            margin-top: 6px;
+        }
+
+        .form-group {
+            margin-bottom: 1.3rem;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: #cbd5e1;
+            margin-bottom: 8px;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 0.85rem 1.1rem;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 12px;
+            color: #ffffff;
+            font-family: var(--font-inter);
+            font-size: 0.95rem;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        .form-input:focus {
+            border-color: #38bdf8;
+            box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.25);
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .btn-login {
+            width: 100%;
+            padding: 0.95rem;
+            background: linear-gradient(135deg, #2563eb, #3b82f6);
+            color: #ffffff;
+            font-family: var(--font-outfit);
+            font-size: 1rem;
+            font-weight: 700;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            box-shadow: 0 6px 20px rgba(37, 99, 235, 0.35);
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.6rem;
+            margin-top: 1.8rem;
+        }
+
+        .btn-login:hover {
+            background: linear-gradient(135deg, #1d4ed8, #2563eb);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(37, 99, 235, 0.45);
+        }
+
+        .login-alert {
+            display: none;
+            padding: 10px 14px;
+            border-radius: 10px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-bottom: 1.2rem;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="glass-bg-decor1"></div>
+    <div class="glass-bg-decor2"></div>
+
+    <div class="login-card-wrapper">
+        <div class="login-brand">
+            <i class="fa-solid fa-qrcode"></i>
+            <h1>QR Compare</h1>
+            <p>Bakanlık BKST Giriş Paneli</p>
+        </div>
+
+        <div id="loginAlert" class="login-alert"></div>
+
+        <form id="loginForm" onsubmit="handleLoginSubmit(event)">
+            <div class="form-group">
+                <label class="form-label" for="username">
+                    <i class="fa-solid fa-user" style="color:#38bdf8;"></i> Bakanlık T.C. / Kullanıcı Adı
+                </label>
+                <input type="text" id="username" class="form-input" placeholder="T.C. Kimlik Numaranızı girin..." required autocomplete="off">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="password">
+                    <i class="fa-solid fa-lock" style="color:#34d399;"></i> Bakanlık Şifresi
+                </label>
+                <input type="password" id="password" class="form-input" placeholder="BKST şifrenizi girin..." required autocomplete="off">
+            </div>
+
+            <button type="submit" id="btnLoginSubmit" class="btn-login">
+                <i class="fa-solid fa-right-to-bracket"></i> Giriş Yap ve Kaydet
+            </button>
+        </form>
+    </div>
+
+    <script>
+        async function handleLoginSubmit(e) {
+            e.preventDefault();
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value.trim();
+            const btn = document.getElementById('btnLoginSubmit');
+            const alertBox = document.getElementById('loginAlert');
+
+            if (!username || !password) {
+                showAlert('Lütfen Kullanıcı Adı ve Şifre alanlarını doldurun.', true);
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Doğrulanıyor...';
+            alertBox.style.display = 'none';
+
+            try {
+                const res = await fetch('/api/system/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    if (data.token) {
+                        localStorage.setItem('local_session_token', data.token);
+                    }
+                    sessionStorage.removeItem('app_launch_synced');
+                    sessionStorage.setItem('startup_update_checked', 'true');
+                    showAlert('🟢 Giriş başarılı! Yönlendiriliyorsunuz...', false);
+                    setTimeout(() => {
+                        window.location.href = '/cikis?force_sync=1';
+                    }, 800);
+                } else {
+                    showAlert('❌ ' + (data.error || 'Giriş yapılamadı. Bilgilerinizi kontrol edin.'), true);
+                }
+            } catch (err) {
+                showAlert('❌ Bağlantı hatası: ' + err.message, true);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Giriş Yap ve Kaydet';
+            }
+        }
+
+        function showAlert(msg, isError) {
+            const alertBox = document.getElementById('loginAlert');
+            alertBox.style.display = 'block';
+            if (isError) {
+                alertBox.style.background = 'rgba(239, 68, 68, 0.15)';
+                alertBox.style.border = '1px solid rgba(239, 68, 68, 0.35)';
+                alertBox.style.color = '#f87171';
+            } else {
+                alertBox.style.background = 'rgba(34, 197, 94, 0.15)';
+                alertBox.style.border = '1px solid rgba(34, 197, 94, 0.35)';
+                alertBox.style.color = '#4ade80';
+            }
+            alertBox.innerHTML = msg;
+        }
+
+        // Heartbeat (Sunucunun login ekranındayken kapanmasını önler)
+        (function startHeartbeat() {
+            function sendPing() {
+                fetch('/api/system/heartbeat', { method: 'POST' }).catch(() => {});
+            }
+            sendPing();
+            setInterval(sendPing, 10000);
+        })();
+
+        // İlk Açılışta Arka Plan Güncelleme Kontrolü (Login Formu Öncesi)
+        (async function checkLoginStartupUpdate() {
+            if (sessionStorage.getItem('startup_update_checked')) {
+                return;
+            }
+            sessionStorage.setItem('startup_update_checked', 'true');
+
+            try {
+                const res = await fetch('/api/system/check_update');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data && data.has_update) {
+                        showLoginUpdateOverlay(data);
+                    }
+                }
+            } catch (e) {
+                console.warn("Login update check error:", e);
+            }
+        })();
+
+        function showLoginUpdateOverlay(updateInfo) {
+            let overlay = document.getElementById('loginUpdateOverlay');
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'loginUpdateOverlay';
+                overlay.style.cssText = `
+                    position: fixed;
+                    top: 0; left: 0; width: 100vw; height: 100vh;
+                    background: #0f172a;
+                    color: #ffffff;
+                    z-index: 9999999;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    font-family: 'Outfit', 'Inter', sans-serif;
+                    text-align: center;
+                    padding: 20px;
+                `;
+                overlay.innerHTML = `
+                    <div style="background: rgba(30, 41, 59, 0.95); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 24px; padding: 40px 32px; max-width: 480px; width: 90%; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.8); backdrop-filter: blur(12px);">
+                        <div style="width: 80px; height: 80px; margin: 0 auto 20px; background: rgba(56, 189, 248, 0.12); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                            <i class="fa-solid fa-cloud-arrow-down fa-bounce" style="font-size: 38px; color: #38bdf8;"></i>
+                        </div>
+                        <h2 style="font-size: 1.55rem; font-weight: 800; margin-bottom: 10px; color: #f8fafc;">Uygulama Güncelleniyor</h2>
+                        <p id="loginUpdateMsg" style="font-size: 0.95rem; color: #94a3b8; line-height: 1.6; margin-bottom: 24px;">
+                            Yeni sürüm (${updateInfo.remote_version || 'v3.1.x'}) tespit edildi. Güncelleme paketleri indiriliyor ve sisteme entegre ediliyor...
+                        </p>
+                        <div style="width: 100%; height: 8px; background: #334155; border-radius: 999px; overflow: hidden; position: relative;">
+                            <div id="loginUpdateBar" style="width: 45%; height: 100%; background: linear-gradient(90deg, #38bdf8, #3b82f6); border-radius: 999px; transition: width 0.4s ease; animation: updateProgressAnim 1.8s infinite linear;"></div>
+                        </div>
+                        <p id="loginUpdateSub" style="font-size: 0.82rem; color: #64748b; margin-top: 18px; font-weight: 500;">
+                            <i class="fa-solid fa-circle-info" style="color: #38bdf8; margin-right: 4px;"></i> İşlem tamamlandığında program sıfırdan otomatik başlatılacaktır.
+                        </p>
+                    </div>
+                    <style>
+                        @keyframes updateProgressAnim {
+                            0% { transform: translateX(-100%); width: 30%; }
+                            50% { width: 60%; }
+                            100% { transform: translateX(350%); width: 30%; }
+                        }
+                    </style>
+                `;
+                document.body.appendChild(overlay);
+            }
+
+            fetch('/api/system/apply_update', { method: 'POST' })
+                .then(res => res.json())
+                .then(async data => {
+                    const msgEl = document.getElementById('loginUpdateMsg');
+                    const barEl = document.getElementById('loginUpdateBar');
+                    const subEl = document.getElementById('loginUpdateSub');
+
+                    if (data.success && data.updated) {
+                        if (barEl) {
+                            barEl.style.animation = 'none';
+                            barEl.style.width = '100%';
+                        }
+                        if (msgEl) {
+                            msgEl.style.color = '#4ade80';
+                            msgEl.innerHTML = '<strong>✅ Güncelleme Başarıyla Tamamlandı!</strong><br>Program sıfırdan yeniden başlatılıyor...';
+                        }
+                        if (subEl) subEl.textContent = 'Yeni sistem yükleniyor, lütfen bekleyin...';
+
+                        await new Promise(r => setTimeout(r, 2200));
+                        for (let i = 0; i < 30; i++) {
+                            await new Promise(r => setTimeout(r, 800));
+                            try {
+                                const ping = await fetch('/api/system/heartbeat', { method: 'POST' });
+                                if (ping.ok) break;
+                            } catch (_) {}
+                        }
+                        window.location.reload(true);
+                    } else {
+                        if (msgEl) msgEl.textContent = data.message || "Sistem zaten güncel.";
+                        setTimeout(() => { if (overlay) overlay.remove(); }, 1200);
+                    }
+                })
+                .catch(err => {
+                    console.error("Login apply update error:", err);
+                    setTimeout(() => { if (overlay) overlay.remove(); }, 2000);
+                });
+        }
+    </script>
+</body>
+</html>
 
 ```
 
@@ -6516,6 +8474,10 @@ body.sidebar-layout {
                     <i class="fa-solid fa-boxes-packing"></i>
                     <span>Depoya Kabul Et</span>
                 </a>
+                <a href="/istatistikler" class="sidebar-link">
+                    <i class="fa-solid fa-chart-pie"></i>
+                    <span>İstatistikler & Raporlar</span>
+                </a>
                 <a href="/kullaniciya-satis" class="sidebar-link">
                     <i class="fa-solid fa-user-tag"></i>
                     <span>Kullanıcıya Satış (Demo)</span>
@@ -6706,9 +8668,17 @@ async function okutBarkod(barkod) {
 
         if (data.success) {
             barkodInput.classList.add('input-success');
-            showResultCard(data.kayit, data.tekrar_uyari);
-            prependRow(data.kayit, data.tekrar_uyari);
-            cntToplam.textContent = parseInt(cntToplam.textContent || '0') + 1;
+            if (data.is_bulk && data.kayitlar && data.kayitlar.length) {
+                showBulkResultCard(data);
+                data.kayitlar.forEach(item => {
+                    prependRow(item, item.tekrar_uyari);
+                });
+                cntToplam.textContent = parseInt(cntToplam.textContent || '0') + data.kayitlar.length;
+            } else {
+                showResultCard(data.kayit, data.tekrar_uyari);
+                prependRow(data.kayit, data.tekrar_uyari);
+                cntToplam.textContent = parseInt(cntToplam.textContent || '0') + 1;
+            }
         } else {
             barkodInput.classList.add('input-error');
             showErrorCard(data.error);
@@ -6722,6 +8692,26 @@ async function okutBarkod(barkod) {
         barkodInput.focus();
         setTimeout(() => barkodInput.classList.remove('input-success','input-error'), 1500);
     }
+}
+
+function showBulkResultCard(data) {
+    const k = data.kayit || {};
+    const warnHtml = data.tekrar_uyari
+        ? `<span class="uyari-badge"><i class="fa-solid fa-triangle-exclamation"></i> Kolide daha önce okutulmuş mükerrer ürünler var!</span>`
+        : '';
+    resultCard.className = 'result-card ' + (data.tekrar_uyari ? 'warn-card' : 'success-card');
+    resultCard.innerHTML = `
+        <p class="result-card-title"><i class="fa-solid fa-boxes-stacked" style="color:var(--success)"></i> Toplu Koli Çıkışı Başarılı (${data.count} Adet)</p>
+        ${warnHtml}
+        <div class="result-urun-adi">${esc(k.urun_adi || 'Koli')} <span style="font-size:0.88rem; color:#38bdf8; font-weight:600;">(${data.count} Kutu Eklendi)</span></div>
+        <div class="result-grid">
+            <div class="result-field"><span class="label">Koli Numarası</span><span class="val">${esc(k.koli_no || '—')}</span></div>
+            <div class="result-field"><span class="label">Eklenen Kutu</span><span class="val" style="color:#10b981; font-weight:700;">${data.count} Adet</span></div>
+            <div class="result-field"><span class="label">Gtin/Barkod</span><span class="val">${esc(k.barkod || '—')}</span></div>
+            <div class="result-field"><span class="label">Parti Numarası</span><span class="val">${esc(k.parti_no || '—')}</span></div>
+            <div class="result-field"><span class="label">SKT</span><span class="val">${esc(k.skt || '—')}</span></div>
+            <div class="result-field"><span class="label">Kayıt Zamanı</span><span class="val">${esc(k.tarih || '—')}</span></div>
+        </div>`;
 }
 
 function showResultCard(k, tekrar) {
@@ -7069,6 +9059,10 @@ function esc(str) {
                     <i class="fa-solid fa-boxes-packing"></i>
                     <span>Depoya Kabul Et</span>
                 </a>
+                <a href="/istatistikler" class="sidebar-link">
+                    <i class="fa-solid fa-chart-pie"></i>
+                    <span>İstatistikler & Raporlar</span>
+                </a>
                 <a href="/kullaniciya-satis" class="sidebar-link">
                     <i class="fa-solid fa-user-tag"></i>
                     <span>Kullanıcıya Satış (Demo)</span>
@@ -7116,7 +9110,8 @@ function esc(str) {
             <div style="font-size: 0.88rem; color: var(--text-muted); line-height: 1.6;">
                 • <b>Arama:</b> Arama kutusuna ürün adı veya koli no yazın.<br>
                 • <b>Excel İndir:</b> Sağ üstteki <b>"Excel İndir"</b> butonundan tüm çıkışları bilgisayara aktarın.<br>
-                • <b>Silme (Geri Alma):</b> İlgili satırın yanındaki 🔴 <b>Çöp Kovası</b> butonuna basarak kaydı silin.
+                • <b>Silme (Geri Alma):</b> İlgili satırın yanındaki 🔴 <b>Çöp Kovası</b> butonuna basarak kaydı silin.<br>
+                • <b style="color: #60a5fa;">💡 Kalıcı İstatistik Güvencesi:</b> Bu çalışma listesinden satır silseniz veya <b>"Tümünü Sil"</b> yapsanız dahi, tüm çıkışlar <b>"İstatistikler & Raporlar"</b> bölümündeki kalıcı satış veri tabanında korunur; yıllık satış istatistikleriniz asla kaybolmaz.
             </div>
         </div>
 
@@ -7396,7 +9391,7 @@ if (mainTbody) {
 }
 
 document.getElementById('btn-tumunu-sil').addEventListener('click', async () => {
-    if (!confirm(`Toplam ${allData.length} kaydın TAMAMI silinecek. Emin misiniz?`)) return;
+    if (!confirm(`Çıkış yapılacaklar listesindeki ${allData.length} kayıt temizlenecek.\n\n💡 Not: Bu işlem genel satış ve rapor istatistiklerinizi etkilemez; istatistikleriniz kalıcı arşivde saklanmaya devam eder.\n\nOnaylıyor musunuz?`)) return;
     try {
         const fetchFn = window.apiFetch || fetch;
         const res  = await fetchFn('/api/cikis/temizle', {method: 'POST'});
@@ -7451,546 +9446,6 @@ function esc(str) {
         </div>
     </div>
 
-    <script src="/static/app.js?v=20261005_v3000"></script>
-</body>
-</html>
-
-```
-
----
-
-### 📁 `templates/depo_kabul.html`
-
-```html
-<!DOCTYPE html>
-<html lang="tr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>QR Compare</title>
-    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
-    <link rel="shortcut icon" href="/static/favicon.ico">
-    <!-- Google Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <!-- FontAwesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="/static/style.css">
-    <style>
-        .page-container {
-            max-width: 1440px;
-            margin: 0 auto;
-            padding: 1.5rem;
-            display: flex;
-            flex-direction: column;
-            gap: 1.5rem;
-        }
-        .nav-strip {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-            margin-bottom: .2rem;
-            flex-wrap: wrap;
-        }
-        .nav-strip a {
-            color: var(--text-muted);
-            text-decoration: none;
-            font-size: .85rem;
-            display: flex;
-            align-items: center;
-            gap: .4rem;
-            padding: .4rem .8rem;
-            border-radius: 8px;
-            background: rgba(255,255,255,.03);
-            border: 1px solid rgba(255,255,255,.07);
-            transition: all .2s;
-        }
-        .nav-strip a:hover, .nav-strip a.active {
-            color: var(--text-main);
-            background: rgba(88,101,242,.2);
-            border-color: rgba(88,101,242,.4);
-        }
-        .nav-strip a.active-green {
-            color: #6ee7b7;
-            background: rgba(16,185,129,.2);
-            border-color: rgba(16,185,129,.4);
-        }
-
-        .kabul-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 1.5rem;
-        }
-        @media (max-width: 1024px) {
-            .kabul-grid { grid-template-columns: 1fr; }
-        }
-
-        .data-table-wrapper {
-            overflow-x: auto;
-            max-height: 420px;
-            border-radius: 12px;
-            border: 1px solid rgba(255,255,255,0.08);
-            background: rgba(15, 23, 42, 0.6);
-        }
-        .kabul-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: .85rem;
-        }
-        .kabul-table th {
-            background: rgba(30, 41, 59, 0.9);
-            color: var(--text-muted);
-            font-weight: 600;
-            text-align: left;
-            padding: .75rem .9rem;
-            border-bottom: 1px solid rgba(255,255,255,0.08);
-            position: sticky;
-            top: 0;
-            z-index: 2;
-        }
-        .kabul-table td {
-            padding: .7rem .9rem;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-            color: var(--text-main);
-        }
-        .kabul-table tbody tr {
-            cursor: pointer;
-            transition: background .15s;
-        }
-        .kabul-table tbody tr:hover {
-            background: rgba(88,101,242,0.12);
-        }
-        .kabul-table tbody tr.selected-row {
-            background: rgba(16, 185, 129, 0.18) !important;
-            border-left: 3px solid #10b981;
-        }
-
-        .btn-kabul-big {
-            background: linear-gradient(135deg, #10b981, #059669);
-            color: #fff;
-            font-size: 1.1rem;
-            font-weight: 700;
-            padding: 0.95rem 1.6rem;
-            border-radius: 14px;
-            border: none;
-            cursor: pointer;
-            width: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 0.7rem;
-            box-shadow: 0 6px 20px rgba(16,185,129,0.35);
-            transition: all .2s ease;
-        }
-        .btn-kabul-big:hover:not(:disabled) {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(16,185,129,0.5);
-        }
-        .btn-kabul-big:disabled {
-            opacity: 0.4;
-            cursor: not-allowed;
-            box-shadow: none;
-            transform: none;
-        }
-
-        .badge-type {
-            background: rgba(139, 92, 246, 0.2);
-            color: #c084fc;
-            padding: 2px 8px;
-            border-radius: 6px;
-            font-size: 0.75rem;
-            font-weight: 600;
-        }
-    </style>
-</head>
-<body class="sidebar-layout">
-    <div class="glass-bg-decor1"></div>
-    <div class="glass-bg-decor2"></div>
-
-    <div class="app-wrapper">
-        <!-- SOL DİKİNE SIDEBAR NAVİGASYON -->
-        <aside class="sidebar">
-            <div class="sidebar-brand">
-                <i class="fa-solid fa-qrcode logo-icon"></i>
-                <div>
-                    <h2>QR Compare</h2>
-                    <p>Akıllı Stok Sistemi</p>
-                </div>
-            </div>
-
-            <nav class="sidebar-menu">
-                <a href="/cikis" class="sidebar-link">
-                    <i class="fa-solid fa-box-open"></i>
-                    <span>Barkod Okut & Çıkış</span>
-                </a>
-                <a href="/cikis-listesi" class="sidebar-link">
-                    <i class="fa-solid fa-list-check"></i>
-                    <span>Çıkış Listesi</span>
-                </a>
-                <a href="/stok-esitleme" class="sidebar-link">
-                    <i class="fa-solid fa-chart-line"></i>
-                    <span>Stok & Eşitleme</span>
-                </a>
-                <a href="/depo_stoklari" class="sidebar-link">
-                    <i class="fa-solid fa-warehouse"></i>
-                    <span>Depomdaki Stoklar</span>
-                </a>
-                <a href="/depo_kabul" class="sidebar-link active">
-                    <i class="fa-solid fa-boxes-packing"></i>
-                    <span>Depoya Kabul Et</span>
-                </a>
-                <a href="/kullaniciya-satis" class="sidebar-link">
-                    <i class="fa-solid fa-user-tag"></i>
-                    <span>Kullanıcıya Satış (Demo)</span>
-                </a>
-            </nav>
-
-            <div class="sidebar-footer">
-                <div class="system-status-pill {{ 'offline' if not is_system_active else '' }}">
-                    <span class="status-indicator {{ system_status_cls | default('online') }}"></span>
-                    <span>{{ system_status_text | default('Sistem Aktif') }}</span>
-                </div>
-                <div class="user-profile-card">
-                    <div class="user-profile-info">
-                        <i class="fa-solid fa-user-circle user-avatar-icon"></i>
-                        <span id="sidebar-user-name" class="user-name-title">{{ current_user_name }}</span>
-                    </div>
-                    <button type="button" class="btn-logout-icon" onclick="logoutUser()" title="Oturumdan Çıkış Yap">
-                        <i class="fa-solid fa-power-off"></i>
-                    </button>
-                </div>
-                <div class="version-pill" onclick="showVersionModal()" title="Sürüm Bilgisi">
-                    <i class="fa-solid fa-code-branch" style="color: #38bdf8;"></i>
-                    <span id="versionText">{{ current_app_version }}</span>
-                </div>
-            </div>
-        </aside>
-
-        <!-- SAĞ ANA İÇERİK ALANI -->
-        <main class="main-content">
-            <header class="content-header">
-                <div>
-                    <h1 class="page-title"><i class="fa-solid fa-boxes-packing icon-green"></i> Depoya Kabul Et & Gelen Bildirimler</h1>
-                    <p class="page-subtitle">Toptancı ve üreticilerden size kesilen gelen faturaları görüntüleyin ve depoya kabul edin.</p>
-                </div>
-            </header>
-
-        <!-- ÜÇLÜ PANEL LAYOUT -->
-        <div class="kabul-grid">
-            
-            <!-- PANEL 1: GELEN BİLDİRİMLER (BKST) -->
-            <section class="panel glass-card">
-                <div class="panel-head-flex">
-                    <div class="panel-title-group">
-                        <i class="fa-solid fa-inbox icon-primary"></i>
-                        <div>
-                            <h2>1. Bölüm: Gelen / Bekleyen Bildirimler</h2>
-                            <p class="panel-subtitle">Toptancı veya üreticilerden size kesilen gelen irsaliye/faturalar.</p>
-                        </div>
-                    </div>
-                </div>
-
-                <div style="background:rgba(16, 185, 129, 0.1); border:1px solid rgba(16, 185, 129, 0.3); border-radius:10px; padding:0.75rem 1rem; margin-top:0.8rem; font-size:0.82rem; color:#6ee7b7; display:flex; align-items:center; gap:0.6rem;">
-                    <i class="fa-solid fa-shield-halved" style="font-size:1.2rem; color:#10b981;"></i>
-                    <div>
-                        <b>Güvenlik Filtresi Aktif:</b> Sadece tedarikçilerden size kesilen <b>"MAL ALIM" (Gelen)</b> bildirimleri listelenir. Satış veya çıkış bildirimleriniz buraya düşmez.
-                    </div>
-                </div>
-
-                <div class="bkst-controls margin-top-sm" style="display:flex; gap:0.8rem; flex-wrap:wrap;">
-                    <button type="button" id="btn-fetch-incoming" class="btn btn-primary" style="flex:1;">
-                        <i class="fa-solid fa-cloud-arrow-down"></i> 📥 1. Gelen Mal Alım Bildirimlerini Çek (BKST)
-                    </button>
-                </div>
-
-                <div id="incoming-msg-box" class="status-msg hidden margin-top-sm"></div>
-
-                <div class="data-table-wrapper margin-top-md">
-                    <table class="kabul-table" id="table-incoming">
-                        <thead>
-                            <tr>
-                                <th style="width:40px;">Seç</th>
-                                <th>Gönderici Firma / GLN</th>
-                                <th>Belge No</th>
-                                <th>Tarih</th>
-                                <th>Tip</th>
-                                <th>Adet</th>
-                                <th>Durum</th>
-                            </tr>
-                        </thead>
-                        <tbody id="tbody-incoming">
-                            <tr>
-                                <td colspan="7" style="text-align:center; color:var(--text-muted); padding:2.5rem;">
-                                    Henüz bildirim çekilmedi. <b>"Gelen Bildirimleri Çek"</b> butonuna basarak BKST üzerindeki faturaları listeleyebilirsiniz.
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </section>
-
-            <!-- PANEL 2: SEÇİLEN BİLDİRİM DETAYLARI & KABUL ET -->
-            <section class="panel glass-card">
-                <div class="panel-head-flex">
-                    <div class="panel-title-group">
-                        <i class="fa-solid fa-boxes-packing icon-green"></i>
-                        <div>
-                            <h2>2. Bölüm: Bildirim Detayı & Depoya Kabul</h2>
-                            <p class="panel-subtitle">Seçilen belgedeki karekodlar ve depoya ekleme işlemi.</p>
-                        </div>
-                    </div>
-                </div>
-
-                <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); padding:0.9rem 1.1rem; border-radius:12px; display:flex; justify-content:space-between; align-items:center;">
-                    <div>
-                        <span style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Seçilen Belge No:</span>
-                        <h3 id="lbl-selected-doc" style="margin-top:2px; font-family:var(--font-outfit); font-size:1.15rem; color:#38bdf8;">Henüz Belge Seçilmedi</h3>
-                    </div>
-                    <div style="text-align:right;">
-                        <span style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Ürün Sayısı:</span>
-                        <h3 id="lbl-selected-count" style="margin-top:2px; font-family:var(--font-outfit); font-size:1.15rem; color:#10b981;">0 Adet</h3>
-                    </div>
-                </div>
-
-                <!-- TEK TUŞLA DEPOYA KABUL ET BUTONU -->
-                <button type="button" id="btn-accept-warehouse" class="btn-kabul-big margin-top-md" disabled>
-                    <i class="fa-solid fa-circle-check"></i> 🟢 Tek Tuşla Depoya Kabul Et (MALALIM)
-                </button>
-
-                <div id="accept-msg-box" class="status-msg hidden margin-top-sm"></div>
-
-                <!-- DETAY ÜRÜN TABLOSU -->
-                <div class="data-table-wrapper margin-top-md" style="max-height: 280px;">
-                    <table class="kabul-table" id="table-details">
-                        <thead>
-                            <tr>
-                                <th>#</th>
-                                <th>Karekod</th>
-                                <th>Ürün Adı</th>
-                                <th>GTIN / Barkod</th>
-                                <th>Seri No</th>
-                                <th>SKT</th>
-                            </tr>
-                        </thead>
-                        <tbody id="tbody-details">
-                            <tr>
-                                <td colspan="6" style="text-align:center; color:var(--text-muted); padding:2rem;">
-                                    Lütfen sol taraftan detaylarını görmek istediğiniz bir bildirime tıklayın.
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </section>
-
-        </div>
-        </main>
-    </div>
-
-    <!-- SÜRÜM & GÜNCELLEME MODALI -->
-    <div id="versionModal" class="modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px);">
-        <div style="background:#1e293b; color:#fff; max-width:450px; margin:10% auto; padding:24px; border-radius:16px; border:1px solid rgba(255,255,255,0.1); box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
-            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:12px; margin-bottom:16px;">
-                <h3 style="margin:0; font-size:1.15rem; color:#38bdf8; display:flex; align-items:center; gap:8px;">
-                    <i class="fa-solid fa-circle-info"></i> Uygulama Sürüm Bilgisi
-                </h3>
-                <span onclick="closeVersionModal()" style="cursor:pointer; font-size:1.4rem; color:#94a3b8;">&times;</span>
-            </div>
-            <div style="font-size:0.95rem; line-height:1.8;">
-                <p style="margin:6px 0;"><strong>📦 Sürüm Kodu:</strong> <span id="modalCommitHash" style="color:#38bdf8; font-family:monospace; font-weight:bold;">{{ current_app_commit }}</span></p>
-                <p style="margin:6px 0;"><strong>📅 Son Güncelleme:</strong> <span id="modalCommitDate" style="color:#f1f5f9;">{{ current_app_date }}</span></p>
-                <p style="margin:6px 0;"><strong>📝 Son Değişiklik Notu:</strong></p>
-                <div id="modalCommitMsg" style="background:#0f172a; padding:10px 14px; border-radius:8px; font-size:0.85rem; color:#cbd5e1; border:1px solid rgba(255,255,255,0.05); margin-top:4px;">{{ current_app_msg }}</div>
-                <div style="margin-top:16px; background:rgba(34, 197, 94, 0.15); border:1px solid rgba(34, 197, 94, 0.3); color:#4ade80; padding:8px 12px; border-radius:8px; text-align:center; font-size:0.85rem; font-weight:600;">
-                    🟢 GitHub Sunucusu ile Eşitlendi & Güncel
-                </div>
-            </div>
-            <div style="margin-top:16px; text-align:right;">
-                <button onclick="closeVersionModal()" style="background:#3b82f6; color:#fff; border:none; padding:8px 18px; border-radius:8px; font-weight:600; cursor:pointer;">Kapat</button>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        let selectedNotificationData = null;
-
-        const btnFetchIncoming = document.getElementById('btn-fetch-incoming');
-        const btnAcceptWarehouse = document.getElementById('btn-accept-warehouse');
-        const incomingMsgBox = document.getElementById('incoming-msg-box');
-        const acceptMsgBox = document.getElementById('accept-msg-box');
-        const tbodyIncoming = document.getElementById('tbody-incoming');
-        const tbodyDetails = document.getElementById('tbody-details');
-        const lblSelectedDoc = document.getElementById('lbl-selected-doc');
-        const lblSelectedCount = document.getElementById('lbl-selected-count');
-
-        // Gelen Bildirimleri Çek
-        btnFetchIncoming.addEventListener('click', async () => {
-            btnFetchIncoming.disabled = true;
-            btnFetchIncoming.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> BKST Sunucusuna Bağlanılıyor...';
-            showMsg(incomingMsgBox, 'loading', 'Bakanlık gelen bildirim listesi sorgulanıyor, lütfen bekleyin...');
-
-            try {
-                const res = await fetch('/api/depo_kabul/gelen_listesi', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Requested-With': 'XMLHttpRequest',
-                        'X-Local-Token': localStorage.getItem('local_session_token') || ''
-                    }
-                });
-                const data = await res.json();
-
-                if (data.success) {
-                    showMsg(incomingMsgBox, 'success', data.message || 'Gelen bildirimler başarıyla çekildi.');
-                    renderIncomingTable(data.notifications || []);
-                } else {
-                    showMsg(incomingMsgBox, 'error', data.error || 'Gelen bildirimler çekilemedi.');
-                }
-            } catch (err) {
-                showMsg(incomingMsgBox, 'error', 'Bağlantı hatası: ' + err.message);
-            } finally {
-                btnFetchIncoming.disabled = false;
-                btnFetchIncoming.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> 📥 1. Gelen Mal Alım Bildirimlerini Çek (BKST)';
-            }
-        });
-
-        // Bildirim Tablosunu Bas
-        function renderIncomingTable(items) {
-            const validItems = (items || []).filter(item => {
-                const state = String(item.HEADERSTATE || '').toUpperCase();
-                return !state.includes('IPTAL') && !state.includes('İPTAL');
-            });
-
-            if (!validItems || validItems.length === 0) {
-                tbodyIncoming.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:2rem;">Gelen/bekleyen bildirim bulunamadı.</td></tr>';
-                return;
-            }
-
-            tbodyIncoming.innerHTML = validItems.map((item, index) => `
-                <tr onclick="selectNotification(${index}, this)" id="row-incoming-${index}">
-                    <td style="text-align:center;"><i class="fa-regular fa-circle radio-icon"></i></td>
-                    <td><b>${esc(item.CompanyTitle || item.SENDER || 'Bilinmiyor')}</b></td>
-                    <td><span style="font-family:monospace; color:#38bdf8;">${esc(item.WAYBILLNUMBER || '-')}</span></td>
-                    <td>${esc(item.WAYBILLDATE || item.OPERATIONDATE || '-')}</td>
-                    <td><span class="badge-type" style="background:rgba(16,185,129,0.2); color:#6ee7b7; border:1px solid rgba(16,185,129,0.4); padding:2px 8px; border-radius:6px; font-weight:700;">MAL ALIM</span></td>
-                    <td><b>${item.PRODUCTCOUNT || 0}</b></td>
-                    <td><span style="color:#10b981;">${esc(item.HEADERSTATE || 'Bekliyor')}</span></td>
-                </tr>
-            `).join('');
-
-            window.incomingItems = validItems;
-        }
-
-        // Satır Seçimi ve Detay Getirme
-        window.selectNotification = async function(index, trEl) {
-            document.querySelectorAll('#tbody-incoming tr').forEach(r => {
-                r.classList.remove('selected-row');
-                const ic = r.querySelector('.radio-icon');
-                if (ic) ic.className = 'fa-regular fa-circle radio-icon';
-            });
-
-            trEl.classList.add('selected-row');
-            const icon = trEl.querySelector('.radio-icon');
-            if (icon) icon.className = 'fa-solid fa-circle-dot radio-icon';
-
-            const item = window.incomingItems[index];
-            selectedNotificationData = item;
-
-            lblSelectedDoc.textContent = item.WAYBILLNUMBER || 'Belge #' + (index+1);
-            lblSelectedCount.textContent = (item.PRODUCTCOUNT || 0) + ' Adet';
-            btnAcceptWarehouse.disabled = false;
-
-            // Detayları Yükle
-            tbodyDetails.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:2rem;"><i class="fa-solid fa-spinner fa-spin"></i> Ürün detayları getiriliyor...</td></tr>';
-
-            try {
-                const res = await fetch('/api/depo_kabul/detay/' + encodeURIComponent(item.HEADERID || item.WAYBILLNUMBER || index), {
-                    headers: {
-                        'X-Requested-With': 'XMLHttpRequest',
-                        'X-Local-Token': localStorage.getItem('local_session_token') || ''
-                    }
-                });
-                const data = await res.json();
-                if (data.success && data.products && data.products.length > 0) {
-                    selectedNotificationData.products = data.products;
-                    lblSelectedCount.textContent = data.products.length + ' Adet';
-                    renderDetailsTable(data.products);
-                } else {
-                    renderDetailsTable(item.products || []);
-                }
-            } catch (err) {
-                renderDetailsTable(item.products || []);
-            }
-        };
-
-        function renderDetailsTable(prods) {
-            if (!prods || prods.length === 0) {
-                tbodyDetails.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:1.5rem;">Bu bildirime ait karekod detayı bulunamadı.</td></tr>';
-                return;
-            }
-
-            tbodyDetails.innerHTML = prods.map((p, i) => `
-                <tr>
-                    <td>${i+1}</td>
-                    <td style="font-family:monospace; font-size:0.78rem; color:#6ee7b7;">${esc(p.Karekod || p.KAREKOD || '-')}</td>
-                    <td><b>${esc(p['Ürün Adı'] || p.STOCKNAME || '-')}</b></td>
-                    <td>${esc(p['Gtin / Barkod'] || p.BARCODE || '-')}</td>
-                    <td>${esc(p['Seri Numarası'] || p.SERIALNUMBER || '-')}</td>
-                    <td>${esc(p['Son Kullanma Tarihi'] || p.SKT || '-')}</td>
-                </tr>
-            `).join('');
-        }
-
-        // Tek Tuşla Depoya Kabul Et
-        btnAcceptWarehouse.addEventListener('click', async () => {
-            if (!selectedNotificationData) return;
-
-            btnAcceptWarehouse.disabled = true;
-            btnAcceptWarehouse.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Depoya Kabul Ediliyor (MALALIM)...';
-            showMsg(acceptMsgBox, 'loading', 'Mal alım bildirimi yapılıyor ve ürünler deponuza ekleniyor...');
-
-            try {
-                const res = await fetch('/api/depo_kabul/onayla', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Requested-With': 'XMLHttpRequest',
-                        'X-Local-Token': localStorage.getItem('local_session_token') || ''
-                    },
-                    body: JSON.stringify({
-                        header_id: selectedNotificationData.HEADERID,
-                        waybill_number: selectedNotificationData.WAYBILLNUMBER,
-                        product_count: selectedNotificationData.PRODUCTCOUNT,
-                        products: selectedNotificationData.products || []
-                    })
-                });
-
-                const data = await res.json();
-                if (data.success) {
-                    showMsg(acceptMsgBox, 'success', data.message || '🟢 Bildirim deponuza başarıyla kabul edildi!');
-                    btnAcceptWarehouse.innerHTML = '<i class="fa-solid fa-check-double"></i> 🟢 Depoya Kabul Edildi!';
-                    btnAcceptWarehouse.style.background = '#059669';
-                } else {
-                    showMsg(acceptMsgBox, 'error', data.error || 'Depoya kabul edilemedi.');
-                    btnAcceptWarehouse.disabled = false;
-                    btnAcceptWarehouse.innerHTML = '<i class="fa-solid fa-circle-check"></i> 🟢 Tek Tuşla Depoya Kabul Et (MALALIM)';
-                }
-            } catch (err) {
-                showMsg(acceptMsgBox, 'error', 'Hata: ' + err.message);
-                btnAcceptWarehouse.disabled = false;
-                btnAcceptWarehouse.innerHTML = '<i class="fa-solid fa-circle-check"></i> 🟢 Tek Tuşla Depoya Kabul Et (MALALIM)';
-            }
-        });
-
-        function showMsg(box, type, txt) {
-            box.className = 'status-msg ' + (type === 'loading' ? 'msg-loading' : type === 'success' ? 'msg-success' : 'msg-error');
-            box.innerHTML = txt;
-            box.classList.remove('hidden');
-        }
-
-    </script>
     <script src="/static/app.js?v=20261005_v3000"></script>
 </body>
 </html>
@@ -8162,6 +9617,10 @@ function esc(str) {
                 <a href="/depo_kabul" class="sidebar-link">
                     <i class="fa-solid fa-boxes-packing"></i>
                     <span>Depoya Kabul Et</span>
+                </a>
+                <a href="/istatistikler" class="sidebar-link">
+                    <i class="fa-solid fa-chart-pie"></i>
+                    <span>İstatistikler & Raporlar</span>
                 </a>
                 <a href="/kullaniciya-satis" class="sidebar-link">
                     <i class="fa-solid fa-user-tag"></i>
@@ -8386,6 +9845,26 @@ function esc(str) {
     </div>
 
     <script>
+        window.LOCAL_SESSION_TOKEN = "{{ local_session_token }}";
+        if (window.LOCAL_SESSION_TOKEN && window.LOCAL_SESSION_TOKEN !== 'undefined') {
+            localStorage.setItem('local_session_token', window.LOCAL_SESSION_TOKEN);
+        } else if (localStorage.getItem('local_session_token') === 'undefined' || localStorage.getItem('local_session_token') === 'null') {
+            localStorage.removeItem('local_session_token');
+        }
+
+        function getAuthHeaders(extraHeaders = {}) {
+            const token = window.LOCAL_SESSION_TOKEN || localStorage.getItem('local_session_token') || '';
+            const headers = {
+                'X-Requested-With': 'XMLHttpRequest',
+                ...extraHeaders
+            };
+            if (token && token !== 'undefined' && token !== 'null') {
+                headers['X-Local-Token'] = token;
+                headers['X-Session-Token'] = token;
+            }
+            return headers;
+        }
+
         let allProducts = [];
         let currentMode = 'kalem'; // 'kalem', 'kutu', 'skt'
         let currentModalProducts = [];
@@ -8407,10 +9886,7 @@ function esc(str) {
         async function loadDepoStoklari() {
             try {
                 const res = await fetch('/api/depo_stoklari', {
-                    headers: {
-                        'X-Requested-With': 'XMLHttpRequest',
-                        'X-Local-Token': localStorage.getItem('local_session_token') || ''
-                    }
+                    headers: getAuthHeaders()
                 });
                 const data = await res.json();
                 if (data.success && data.products) {
@@ -8842,7 +10318,7 @@ function esc(str) {
 
 ---
 
-### 📁 `templates/index.html`
+### 📁 `templates/depo_kabul.html`
 
 ```html
 <!DOCTYPE html>
@@ -8854,18 +10330,146 @@ function esc(str) {
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
     <link rel="shortcut icon" href="/static/favicon.ico">
-    <!-- Google Fonts Outfit & Inter -->
+    <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- FontAwesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .page-container {
+            max-width: 1440px;
+            margin: 0 auto;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+        .nav-strip {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: .2rem;
+            flex-wrap: wrap;
+        }
+        .nav-strip a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: .85rem;
+            display: flex;
+            align-items: center;
+            gap: .4rem;
+            padding: .4rem .8rem;
+            border-radius: 8px;
+            background: rgba(255,255,255,.03);
+            border: 1px solid rgba(255,255,255,.07);
+            transition: all .2s;
+        }
+        .nav-strip a:hover, .nav-strip a.active {
+            color: var(--text-main);
+            background: rgba(88,101,242,.2);
+            border-color: rgba(88,101,242,.4);
+        }
+        .nav-strip a.active-green {
+            color: #6ee7b7;
+            background: rgba(16,185,129,.2);
+            border-color: rgba(16,185,129,.4);
+        }
+
+        .kabul-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+        @media (max-width: 1024px) {
+            .kabul-grid { grid-template-columns: 1fr; }
+        }
+
+        .data-table-wrapper {
+            overflow-x: auto;
+            overflow-y: auto;
+            height: 480px;
+            max-height: 480px;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.08);
+            background: rgba(15, 23, 42, 0.6);
+        }
+        .kabul-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: .85rem;
+        }
+        .kabul-table th {
+            background: rgba(30, 41, 59, 0.9);
+            color: var(--text-muted);
+            font-weight: 600;
+            text-align: left;
+            padding: .75rem .9rem;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+            position: sticky;
+            top: 0;
+            z-index: 2;
+        }
+        .kabul-table td {
+            padding: .7rem .9rem;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            color: var(--text-main);
+        }
+        .kabul-table tbody tr {
+            cursor: pointer;
+            transition: background .15s;
+        }
+        .kabul-table tbody tr:hover {
+            background: rgba(88,101,242,0.12);
+        }
+        .kabul-table tbody tr.selected-row {
+            background: rgba(16, 185, 129, 0.18) !important;
+            border-left: 3px solid #10b981;
+        }
+
+        .btn-kabul-big {
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: #fff;
+            font-size: 1.1rem;
+            font-weight: 700;
+            padding: 0.95rem 1.6rem;
+            border-radius: 14px;
+            border: none;
+            cursor: pointer;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.7rem;
+            box-shadow: 0 6px 20px rgba(16,185,129,0.35);
+            transition: all .2s ease;
+        }
+        .btn-kabul-big:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(16,185,129,0.5);
+        }
+        .btn-kabul-big:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            box-shadow: none;
+            transform: none;
+        }
+
+        .badge-type {
+            background: rgba(139, 92, 246, 0.2);
+            color: #c084fc;
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+    </style>
 </head>
 <body class="sidebar-layout">
     <div class="glass-bg-decor1"></div>
     <div class="glass-bg-decor2"></div>
-    
+
     <div class="app-wrapper">
         <!-- SOL DİKİNE SIDEBAR NAVİGASYON -->
         <aside class="sidebar">
@@ -8886,7 +10490,859 @@ function esc(str) {
                     <i class="fa-solid fa-list-check"></i>
                     <span>Çıkış Listesi</span>
                 </a>
-                <a href="/stok-esitleme" class="sidebar-link active">
+                <a href="/stok-esitleme" class="sidebar-link">
+                    <i class="fa-solid fa-chart-line"></i>
+                    <span>Stok & Eşitleme</span>
+                </a>
+                <a href="/depo_stoklari" class="sidebar-link">
+                    <i class="fa-solid fa-warehouse"></i>
+                    <span>Depomdaki Stoklar</span>
+                </a>
+                <a href="/depo_kabul" class="sidebar-link active">
+                    <i class="fa-solid fa-boxes-packing"></i>
+                    <span>Depoya Kabul Et</span>
+                </a>
+                <a href="/istatistikler" class="sidebar-link">
+                    <i class="fa-solid fa-chart-pie"></i>
+                    <span>İstatistikler & Raporlar</span>
+                </a>
+                <a href="/kullaniciya-satis" class="sidebar-link">
+                    <i class="fa-solid fa-user-tag"></i>
+                    <span>Kullanıcıya Satış (Demo)</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="system-status-pill {{ 'offline' if not is_system_active else '' }}">
+                    <span class="status-indicator {{ system_status_cls | default('online') }}"></span>
+                    <span>{{ system_status_text | default('Sistem Aktif') }}</span>
+                </div>
+                <div class="user-profile-card">
+                    <div class="user-profile-info">
+                        <i class="fa-solid fa-user-circle user-avatar-icon"></i>
+                        <span id="sidebar-user-name" class="user-name-title">{{ current_user_name }}</span>
+                    </div>
+                    <button type="button" class="btn-logout-icon" onclick="logoutUser()" title="Oturumdan Çıkış Yap">
+                        <i class="fa-solid fa-power-off"></i>
+                    </button>
+                </div>
+                <div class="version-pill" onclick="showVersionModal()" title="Sürüm Bilgisi">
+                    <i class="fa-solid fa-code-branch" style="color: #38bdf8;"></i>
+                    <span id="versionText">{{ current_app_version }}</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- SAĞ ANA İÇERİK ALANI -->
+        <main class="main-content">
+            <header class="content-header">
+                <div>
+                    <h1 class="page-title"><i class="fa-solid fa-boxes-packing icon-green"></i> Depoya Kabul Et & Gelen Bildirimler</h1>
+                    <p class="page-subtitle">Toptancı ve üreticilerden size kesilen gelen faturaları görüntüleyin ve depoya kabul edin.</p>
+                </div>
+            </header>
+
+        <!-- ÜÇLÜ PANEL LAYOUT -->
+        <div class="kabul-grid">
+            
+            <!-- PANEL 1: GELEN BİLDİRİMLER (BKST) -->
+            <section class="panel glass-card">
+                <div class="panel-head-flex">
+                    <div class="panel-title-group">
+                        <i class="fa-solid fa-inbox icon-primary"></i>
+                        <div>
+                            <h2>1. Bölüm: Gelen / Bekleyen Bildirimler</h2>
+                            <p class="panel-subtitle">Toptancı veya üreticilerden size kesilen gelen irsaliye/faturalar.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="background:rgba(16, 185, 129, 0.1); border:1px solid rgba(16, 185, 129, 0.3); border-radius:10px; padding:0.75rem 1rem; margin-top:0.8rem; font-size:0.82rem; color:#6ee7b7; display:flex; align-items:center; gap:0.6rem;">
+                    <i class="fa-solid fa-shield-halved" style="font-size:1.2rem; color:#10b981;"></i>
+                    <div>
+                        <b>Güvenlik Filtresi Aktif:</b> Sadece tedarikçilerden size kesilen <b>"MAL ALIM" (Gelen)</b> bildirimleri listelenir. Satış veya çıkış bildirimleriniz buraya düşmez.
+                    </div>
+                </div>
+
+                <div class="bkst-controls margin-top-sm" style="display:flex; gap:0.8rem; flex-wrap:wrap;">
+                    <button type="button" id="btn-fetch-incoming" class="btn btn-primary" style="flex:1;">
+                        <i class="fa-solid fa-cloud-arrow-down"></i> 📥 1. Gelen Mal Alım Bildirimlerini Çek (BKST)
+                    </button>
+                </div>
+
+                <div id="incoming-msg-box" class="status-msg hidden margin-top-sm"></div>
+
+                <div class="data-table-wrapper margin-top-md">
+                    <table class="kabul-table" id="table-incoming">
+                        <thead>
+                            <tr>
+                                <th style="width:40px;">Seç</th>
+                                <th>Gönderici Firma / GLN</th>
+                                <th>Belge No</th>
+                                <th>Tarih</th>
+                                <th>Tip</th>
+                                <th>Adet</th>
+                                <th>Durum</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbody-incoming">
+                            <tr>
+                                <td colspan="7" style="text-align:center; color:var(--text-muted); padding:2.5rem;">
+                                    Henüz bildirim çekilmedi. <b>"Gelen Bildirimleri Çek"</b> butonuna basarak BKST üzerindeki faturaları listeleyebilirsiniz.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- PANEL 2: SEÇİLEN BİLDİRİM DETAYLARI & KABUL ET -->
+            <section class="panel glass-card">
+                <div class="panel-head-flex">
+                    <div class="panel-title-group">
+                        <i class="fa-solid fa-boxes-packing icon-green"></i>
+                        <div>
+                            <h2>2. Bölüm: Bildirim Detayı & Depoya Kabul</h2>
+                            <p class="panel-subtitle">Seçilen belgedeki karekodlar ve depoya ekleme işlemi.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); padding:0.9rem 1.1rem; border-radius:12px; display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <span style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Seçilen Belge No:</span>
+                        <h3 id="lbl-selected-doc" style="margin-top:2px; font-family:var(--font-outfit); font-size:1.15rem; color:#38bdf8;">Henüz Belge Seçilmedi</h3>
+                    </div>
+                    <div style="text-align:right;">
+                        <span style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Ürün Sayısı:</span>
+                        <h3 id="lbl-selected-count" style="margin-top:2px; font-family:var(--font-outfit); font-size:1.15rem; color:#10b981;">0 Adet</h3>
+                    </div>
+                </div>
+
+                <!-- TEK TUŞLA DEPOYA KABUL ET BUTONU -->
+                <button type="button" id="btn-accept-warehouse" class="btn-kabul-big margin-top-md" disabled>
+                    <i class="fa-solid fa-circle-check"></i> 🟢 Tek Tuşla Depoya Kabul Et (MALALIM)
+                </button>
+
+                <div id="accept-msg-box" class="status-msg hidden margin-top-sm"></div>
+
+                <!-- DETAY ÜRÜN TABLOSU -->
+                <div class="data-table-wrapper margin-top-md">
+                    <table class="kabul-table" id="table-details">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Karekod</th>
+                                <th>Ürün Adı</th>
+                                <th>GTIN / Barkod</th>
+                                <th>Seri No</th>
+                                <th>SKT</th>
+                                <th style="text-align:center;">Durum</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbody-details">
+                            <tr>
+                                <td colspan="7" style="text-align:center; color:var(--text-muted); padding:2rem;">
+                                    Lütfen sol taraftan detaylarını görmek istediğiniz bir bildirime tıklayın.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+        </div>
+        </main>
+    </div>
+
+    <!-- SÜRÜM & GÜNCELLEME MODALI -->
+    <div id="versionModal" class="modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px);">
+        <div style="background:#1e293b; color:#fff; max-width:450px; margin:10% auto; padding:24px; border-radius:16px; border:1px solid rgba(255,255,255,0.1); box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:12px; margin-bottom:16px;">
+                <h3 style="margin:0; font-size:1.15rem; color:#38bdf8; display:flex; align-items:center; gap:8px;">
+                    <i class="fa-solid fa-circle-info"></i> Uygulama Sürüm Bilgisi
+                </h3>
+                <span onclick="closeVersionModal()" style="cursor:pointer; font-size:1.4rem; color:#94a3b8;">&times;</span>
+            </div>
+            <div style="font-size:0.95rem; line-height:1.8;">
+                <p style="margin:6px 0;"><strong>📦 Sürüm Kodu:</strong> <span id="modalCommitHash" style="color:#38bdf8; font-family:monospace; font-weight:bold;">{{ current_app_commit }}</span></p>
+                <p style="margin:6px 0;"><strong>📅 Son Güncelleme:</strong> <span id="modalCommitDate" style="color:#f1f5f9;">{{ current_app_date }}</span></p>
+                <p style="margin:6px 0;"><strong>📝 Son Değişiklik Notu:</strong></p>
+                <div id="modalCommitMsg" style="background:#0f172a; padding:10px 14px; border-radius:8px; font-size:0.85rem; color:#cbd5e1; border:1px solid rgba(255,255,255,0.05); margin-top:4px;">{{ current_app_msg }}</div>
+                <div style="margin-top:16px; background:rgba(34, 197, 94, 0.15); border:1px solid rgba(34, 197, 94, 0.3); color:#4ade80; padding:8px 12px; border-radius:8px; text-align:center; font-size:0.85rem; font-weight:600;">
+                    🟢 GitHub Sunucusu ile Eşitlendi & Güncel
+                </div>
+            </div>
+            <div style="margin-top:16px; text-align:right;">
+                <button onclick="closeVersionModal()" style="background:#3b82f6; color:#fff; border:none; padding:8px 18px; border-radius:8px; font-weight:600; cursor:pointer;">Kapat</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        window.LOCAL_SESSION_TOKEN = "{{ local_session_token }}";
+        if (window.LOCAL_SESSION_TOKEN && window.LOCAL_SESSION_TOKEN !== 'undefined') {
+            localStorage.setItem('local_session_token', window.LOCAL_SESSION_TOKEN);
+        } else if (localStorage.getItem('local_session_token') === 'undefined' || localStorage.getItem('local_session_token') === 'null') {
+            localStorage.removeItem('local_session_token');
+        }
+
+        function getAuthHeaders(extraHeaders = {}) {
+            const token = window.LOCAL_SESSION_TOKEN || localStorage.getItem('local_session_token') || '';
+            const headers = {
+                'X-Requested-With': 'XMLHttpRequest',
+                ...extraHeaders
+            };
+            if (token && token !== 'undefined' && token !== 'null') {
+                headers['X-Local-Token'] = token;
+                headers['X-Session-Token'] = token;
+            }
+            return headers;
+        }
+
+        let selectedNotificationData = null;
+
+        const btnFetchIncoming = document.getElementById('btn-fetch-incoming');
+        const btnAcceptWarehouse = document.getElementById('btn-accept-warehouse');
+        const incomingMsgBox = document.getElementById('incoming-msg-box');
+        const acceptMsgBox = document.getElementById('accept-msg-box');
+        const tbodyIncoming = document.getElementById('tbody-incoming');
+        const tbodyDetails = document.getElementById('tbody-details');
+        const lblSelectedDoc = document.getElementById('lbl-selected-doc');
+        const lblSelectedCount = document.getElementById('lbl-selected-count');
+
+        // Gelen Bildirimleri Çek
+        btnFetchIncoming.addEventListener('click', async () => {
+            btnFetchIncoming.disabled = true;
+            btnFetchIncoming.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> BKST Sunucusuna Bağlanılıyor...';
+            showMsg(incomingMsgBox, 'loading', 'Bakanlık gelen bildirim listesi sorgulanıyor, lütfen bekleyin...');
+
+            try {
+                const res = await fetch('/api/depo_kabul/gelen_listesi', {
+                    method: 'POST',
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    showMsg(incomingMsgBox, 'success', data.message || 'Gelen bildirimler başarıyla çekildi.');
+                    renderIncomingTable(data.notifications || []);
+                } else {
+                    showMsg(incomingMsgBox, 'error', data.error || 'Gelen bildirimler çekilemedi.');
+                }
+            } catch (err) {
+                showMsg(incomingMsgBox, 'error', 'Bağlantı hatası: ' + err.message);
+            } finally {
+                btnFetchIncoming.disabled = false;
+                btnFetchIncoming.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> 📥 1. Gelen Mal Alım Bildirimlerini Çek (BKST)';
+            }
+        });
+
+        // Bildirim Tablosunu Bas
+        function renderIncomingTable(items) {
+            const validItems = (items || []).filter(item => {
+                const state = String(item.HEADERSTATE || '').toUpperCase();
+                return !state.includes('IPTAL') && !state.includes('İPTAL');
+            });
+
+            if (!validItems || validItems.length === 0) {
+                tbodyIncoming.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:2rem;">Gelen bildirim bulunamadı.</td></tr>';
+                return;
+            }
+
+            tbodyIncoming.innerHTML = validItems.map((item, index) => {
+                const isKabulBekliyor = (item.HEADERSTATE === 'Kabul Bekliyor');
+                const waitingCnt = item.WAITINGCOUNT || 0;
+                const badgeHtml = isKabulBekliyor
+                    ? `<span style="background:rgba(16,185,129,0.18); color:#34d399; border:1px solid rgba(16,185,129,0.4); padding:3px 10px; border-radius:999px; font-weight:700; font-size:0.78rem; display:inline-flex; align-items:center; gap:5px;"><i class="fa-solid fa-circle-dot" style="font-size:0.6rem;"></i> Kabul Bekliyor${waitingCnt > 0 ? ` (${waitingCnt} bekleyen)` : ''}</span>`
+                    : `<span style="background:rgba(56,189,248,0.12); color:#93c5fd; border:1px solid rgba(56,189,248,0.25); padding:3px 10px; border-radius:999px; font-weight:600; font-size:0.78rem; display:inline-flex; align-items:center; gap:5px;"><i class="fa-solid fa-boxes-packing" style="font-size:0.7rem;"></i> Stoğa Alınmış</span>`;
+
+                return `
+                <tr onclick="selectNotification(${index}, this)" id="row-incoming-${index}">
+                    <td style="text-align:center;"><i class="fa-regular fa-circle radio-icon"></i></td>
+                    <td><b>${esc(item.CompanyTitle || item.SENDER || 'Bilinmiyor')}</b></td>
+                    <td><span style="font-family:monospace; color:#38bdf8;">${esc(item.WAYBILLNUMBER || '-')}</span></td>
+                    <td>${esc(item.WAYBILLDATE || item.OPERATIONDATE || '-')}</td>
+                    <td><span class="badge-type" style="background:rgba(16,185,129,0.2); color:#6ee7b7; border:1px solid rgba(16,185,129,0.4); padding:2px 8px; border-radius:6px; font-weight:700;">MAL ALIM</span></td>
+                    <td><b>${item.PRODUCTCOUNT || 0}</b></td>
+                    <td>${badgeHtml}</td>
+                </tr>
+                `;
+            }).join('');
+
+            window.incomingItems = validItems;
+        }
+
+        // Satır Seçimi ve Detay Getirme
+        window.selectNotification = async function(index, trEl) {
+            document.querySelectorAll('#tbody-incoming tr').forEach(r => {
+                r.classList.remove('selected-row');
+                const ic = r.querySelector('.radio-icon');
+                if (ic) ic.className = 'fa-regular fa-circle radio-icon';
+            });
+
+            trEl.classList.add('selected-row');
+            const icon = trEl.querySelector('.radio-icon');
+            if (icon) icon.className = 'fa-solid fa-circle-dot radio-icon';
+
+            const item = window.incomingItems[index];
+            selectedNotificationData = item;
+
+            lblSelectedDoc.textContent = item.WAYBILLNUMBER || 'Belge #' + (index+1);
+            lblSelectedCount.textContent = (item.PRODUCTCOUNT || 0) + ' Adet';
+
+            // Detayları Yükle
+            tbodyDetails.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:2rem;"><i class="fa-solid fa-spinner fa-spin"></i> Ürün detayları getiriliyor...</td></tr>';
+
+            try {
+                const res = await fetch('/api/depo_kabul/detay/' + encodeURIComponent(item.HEADERID || item.WAYBILLNUMBER || index), {
+                    headers: getAuthHeaders()
+                });
+                const data = await res.json();
+                if (data.success && data.products && data.products.length > 0) {
+                    selectedNotificationData.products = data.products;
+                    lblSelectedCount.textContent = data.products.length + ' Adet';
+
+                    const isWaiting = (data.overall_status === 'Kabul Bekliyor') || (data.bekleyen_adet && data.bekleyen_adet > 0);
+
+                    lblSelectedDoc.innerHTML = esc(item.WAYBILLNUMBER || 'Belge #' + (index+1)) + ' ' + 
+                        (isWaiting 
+                            ? '<span style="font-size:0.75rem; background:rgba(16,185,129,0.2); color:#34d399; padding:2px 8px; border-radius:6px; font-weight:700;">🟢 Kabul Bekliyor</span>' 
+                            : '<span style="font-size:0.75rem; background:rgba(56,189,248,0.2); color:#93c5fd; padding:2px 8px; border-radius:6px; font-weight:600;">📦 Stoğa Alınmış</span>');
+
+                    if (isWaiting) {
+                        btnAcceptWarehouse.disabled = false;
+                        btnAcceptWarehouse.style.background = '#10b981';
+                        btnAcceptWarehouse.style.cursor = 'pointer';
+                        btnAcceptWarehouse.style.opacity = '1';
+                        btnAcceptWarehouse.innerHTML = `<i class="fa-solid fa-circle-check"></i> 🟢 Tek Tuşla Depoya Kabul Et (${data.bekleyen_adet || data.products.length} Adet Bekliyor)`;
+                    } else {
+                        btnAcceptWarehouse.disabled = true;
+                        btnAcceptWarehouse.style.background = 'rgba(255,255,255,0.08)';
+                        btnAcceptWarehouse.style.cursor = 'not-allowed';
+                        btnAcceptWarehouse.style.opacity = '0.6';
+                        btnAcceptWarehouse.innerHTML = `<i class="fa-solid fa-check-double"></i> ✅ Bu Belgedeki Ürünler Zaten Stoğa Alınmış`;
+                    }
+
+                    renderDetailsTable(data.products);
+                } else {
+                    renderDetailsTable(item.products || []);
+                }
+            } catch (err) {
+                renderDetailsTable(item.products || []);
+            }
+        };
+
+        function renderDetailsTable(prods) {
+            if (!prods || prods.length === 0) {
+                tbodyDetails.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:1.5rem;">Bu bildirime ait karekod detayı bulunamadı.</td></tr>';
+                return;
+            }
+
+            tbodyDetails.innerHTML = prods.map((p, i) => {
+                const isBekliyor = (p.durum === 'Kabul Bekliyor');
+                const durumPill = isBekliyor
+                    ? `<span style="color:#34d399; font-weight:700; font-size:0.8rem;"><i class="fa-solid fa-circle-dot"></i> Kabul Bekliyor</span>`
+                    : `<span style="color:#93c5fd; font-size:0.8rem;"><i class="fa-solid fa-boxes-packing"></i> Stoğa Alınmış</span>`;
+
+                return `
+                <tr>
+                    <td>${i+1}</td>
+                    <td style="font-family:monospace; font-size:0.78rem; color:#6ee7b7;">${esc(p.Karekod || p.KAREKOD || '-')}</td>
+                    <td><b>${esc(p['Ürün Adı'] || p.STOCKNAME || '-')}</b></td>
+                    <td>${esc(p['Gtin / Barkod'] || p.BARCODE || '-')}</td>
+                    <td>${esc(p['Seri Numarası'] || p.SERIALNUMBER || '-')}</td>
+                    <td>${esc(p['Son Kullanma Tarihi'] || p.SKT || '-')}</td>
+                    <td style="text-align:center;">${durumPill}</td>
+                </tr>
+                `;
+            }).join('');
+        }
+
+        // Tek Tuşla Depoya Kabul Et
+        btnAcceptWarehouse.addEventListener('click', async () => {
+            if (!selectedNotificationData) return;
+
+            btnAcceptWarehouse.disabled = true;
+            btnAcceptWarehouse.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Depoya Kabul Ediliyor (MALALIM)...';
+            showMsg(acceptMsgBox, 'loading', 'Mal alım bildirimi yapılıyor ve ürünler deponuza ekleniyor...');
+
+            try {
+                const res = await fetch('/api/depo_kabul/onayla', {
+                    method: 'POST',
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({
+                        header_id: selectedNotificationData.HEADERID,
+                        waybill_number: selectedNotificationData.WAYBILLNUMBER,
+                        product_count: selectedNotificationData.PRODUCTCOUNT,
+                        products: selectedNotificationData.products || []
+                    })
+                });
+
+                const data = await res.json();
+                if (data.success) {
+                    showMsg(acceptMsgBox, 'success', data.message || '🟢 Bildirim deponuza başarıyla kabul edildi!');
+                    btnAcceptWarehouse.innerHTML = '<i class="fa-solid fa-check-double"></i> 🟢 Depoya Kabul Edildi!';
+                    btnAcceptWarehouse.style.background = '#059669';
+                } else {
+                    showMsg(acceptMsgBox, 'error', data.error || 'Depoya kabul edilemedi.');
+                    btnAcceptWarehouse.disabled = false;
+                    btnAcceptWarehouse.innerHTML = '<i class="fa-solid fa-circle-check"></i> 🟢 Tek Tuşla Depoya Kabul Et (MALALIM)';
+                }
+            } catch (err) {
+                showMsg(acceptMsgBox, 'error', 'Hata: ' + err.message);
+                btnAcceptWarehouse.disabled = false;
+                btnAcceptWarehouse.innerHTML = '<i class="fa-solid fa-circle-check"></i> 🟢 Tek Tuşla Depoya Kabul Et (MALALIM)';
+            }
+        });
+
+        function showMsg(box, type, txt) {
+            box.className = 'status-msg ' + (type === 'loading' ? 'msg-loading' : type === 'success' ? 'msg-success' : 'msg-error');
+            box.innerHTML = txt;
+            box.classList.remove('hidden');
+        }
+
+    </script>
+    <script src="/static/app.js?v=20261005_v3000"></script>
+</body>
+</html>
+
+```
+
+---
+
+### 📁 `templates/istatistikler.html`
+
+```html
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>İstatistikler & Satış Raporları - QR Compare</title>
+    
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
+    <link rel="shortcut icon" href="/static/favicon.ico">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/chart.umd.min.js"></script>
+
+    <style>
+        .stats-kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1.25rem;
+            margin-bottom: 2rem;
+        }
+
+        .stats-kpi-card {
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 14px;
+            padding: 1.25rem 1.4rem;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .stats-kpi-card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(16, 185, 129, 0.3);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 0 15px rgba(16, 185, 129, 0.1);
+        }
+
+        .stats-kpi-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--card-accent, #10b981), transparent);
+        }
+
+        .kpi-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0.6rem;
+        }
+
+        .kpi-label {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #94a3b8;
+            font-weight: 600;
+        }
+
+        .kpi-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1rem;
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--card-accent, #10b981);
+        }
+
+        .kpi-value {
+            font-family: var(--font-outfit);
+            font-size: 1.85rem;
+            font-weight: 700;
+            color: #fff;
+            line-height: 1.2;
+            margin-bottom: 0.25rem;
+        }
+
+        .kpi-sub {
+            font-size: 0.78rem;
+            color: #64748b;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .kpi-sub .badge-pill {
+            padding: 0.15rem 0.45rem;
+            border-radius: 6px;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+
+        /* Filter Toolbar */
+        .filter-toolbar {
+            background: rgba(15, 23, 42, 0.65);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 14px;
+            padding: 1rem 1.4rem;
+            margin-bottom: 1.75rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .year-pills {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            flex-wrap: wrap;
+        }
+
+        .year-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #cbd5e1;
+            padding: 0.45rem 0.9rem;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .year-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            border-color: rgba(255, 255, 255, 0.25);
+        }
+
+        .year-btn.active {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            border-color: #10b981;
+            color: #fff;
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+        }
+
+        .custom-date-box {
+            display: none;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .custom-date-box.show {
+            display: flex;
+        }
+
+        .date-input {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #fff;
+            padding: 0.45rem 0.75rem;
+            border-radius: 8px;
+            font-size: 0.82rem;
+            font-family: inherit;
+            outline: none;
+        }
+
+        .date-input:focus {
+            border-color: #10b981;
+        }
+
+        .action-btns {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            flex-wrap: wrap;
+        }
+
+        .btn-act {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-decoration: none;
+            border: none;
+        }
+
+        .btn-excel {
+            background: linear-gradient(135deg, #059669 0%, #047857 100%);
+            color: #fff;
+            box-shadow: 0 4px 12px rgba(5, 150, 105, 0.25);
+        }
+
+        .btn-excel:hover {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            box-shadow: 0 6px 16px rgba(16, 185, 129, 0.35);
+        }
+
+        .btn-print {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #e2e8f0;
+        }
+
+        .btn-print:hover {
+            background: rgba(255, 255, 255, 0.15);
+            color: #fff;
+        }
+
+        .btn-sample {
+            background: rgba(99, 102, 241, 0.15);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            color: #a5b4fc;
+        }
+
+        .btn-sample:hover {
+            background: rgba(99, 102, 241, 0.25);
+            color: #c7d2fe;
+        }
+
+        /* Charts Grid */
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(480px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        @media (max-width: 992px) {
+            .charts-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .chart-box {
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 14px;
+            padding: 1.4rem;
+            position: relative;
+        }
+
+        .chart-box-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1.2rem;
+        }
+
+        .chart-title {
+            font-family: var(--font-outfit);
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: #f1f5f9;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .chart-subtitle {
+            font-size: 0.78rem;
+            color: #64748b;
+        }
+
+        .chart-canvas-container {
+            position: relative;
+            height: 280px;
+            width: 100%;
+        }
+
+        /* Table Section */
+        .stats-table-section {
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 14px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .tab-nav {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            margin-bottom: 1.25rem;
+            padding-bottom: 0.5rem;
+        }
+
+        .tab-btn {
+            background: transparent;
+            border: none;
+            color: #94a3b8;
+            padding: 0.6rem 1.1rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .tab-btn:hover {
+            color: #fff;
+            background: rgba(255, 255, 255, 0.04);
+        }
+
+        .tab-btn.active {
+            color: #10b981;
+            background: rgba(16, 185, 129, 0.1);
+        }
+
+        .table-responsive {
+            overflow-x: auto;
+        }
+
+        .stats-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 0.88rem;
+        }
+
+        .stats-table th {
+            background: rgba(0, 0, 0, 0.25);
+            color: #94a3b8;
+            font-weight: 600;
+            text-align: left;
+            padding: 0.85rem 1rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            white-space: nowrap;
+        }
+
+        .stats-table td {
+            padding: 0.85rem 1rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            color: #e2e8f0;
+            vertical-align: middle;
+        }
+
+        .stats-table tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .progress-bar-wrap {
+            width: 100px;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 999px;
+            overflow: hidden;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 0.5rem;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #10b981, #06b6d4);
+            border-radius: 999px;
+        }
+
+        /* Print Media */
+        @media print {
+            .sidebar, .glass-bg-decor1, .glass-bg-decor2, .filter-toolbar, .tab-nav, .btn-act {
+                display: none !important;
+            }
+            body, .app-wrapper, .main-content {
+                background: #fff !important;
+                color: #000 !important;
+                padding: 0 !important;
+                margin: 0 !important;
+            }
+            .stats-kpi-card, .chart-box, .stats-table-section {
+                border: 1px solid #ccc !important;
+                box-shadow: none !important;
+                background: #fff !important;
+                color: #000 !important;
+            }
+            .kpi-value, .chart-title {
+                color: #000 !important;
+            }
+            .stats-table th {
+                background: #eee !important;
+                color: #000 !important;
+            }
+            .stats-table td {
+                color: #000 !important;
+            }
+        }
+    </style>
+</head>
+<body class="sidebar-layout">
+    <div class="glass-bg-decor1"></div>
+    <div class="glass-bg-decor2"></div>
+    
+    <div class="app-wrapper">
+        <!-- SOL SIDEBAR NAVİGASYON -->
+        <aside class="sidebar">
+            <div class="sidebar-brand">
+                <i class="fa-solid fa-qrcode logo-icon"></i>
+                <div>
+                    <h2>QR Compare</h2>
+                    <p>Akıllı Stok Sistemi</p>
+                </div>
+            </div>
+
+            <nav class="sidebar-menu">
+                <a href="/cikis" class="sidebar-link">
+                    <i class="fa-solid fa-box-open"></i>
+                    <span>Barkod Okut & Çıkış</span>
+                </a>
+                <a href="/cikis-listesi" class="sidebar-link">
+                    <i class="fa-solid fa-list-check"></i>
+                    <span>Çıkış Listesi</span>
+                </a>
+                <a href="/stok-esitleme" class="sidebar-link">
                     <i class="fa-solid fa-chart-line"></i>
                     <span>Stok & Eşitleme</span>
                 </a>
@@ -8897,6 +11353,10 @@ function esc(str) {
                 <a href="/depo_kabul" class="sidebar-link">
                     <i class="fa-solid fa-boxes-packing"></i>
                     <span>Depoya Kabul Et</span>
+                </a>
+                <a href="/istatistikler" class="sidebar-link active">
+                    <i class="fa-solid fa-chart-pie"></i>
+                    <span>İstatistikler & Raporlar</span>
                 </a>
                 <a href="/kullaniciya-satis" class="sidebar-link">
                     <i class="fa-solid fa-user-tag"></i>
@@ -8920,185 +11380,885 @@ function esc(str) {
                 </div>
                 <div class="version-pill" id="versionBadge" onclick="showVersionModal()" title="Sürüm Bilgisi">
                     <i class="fa-solid fa-code-branch" style="color: #38bdf8;"></i>
-                    <span id="versionText">{{ current_app_version }}</span>
+                    <span>{{ current_app_version }}</span>
                 </div>
             </div>
         </aside>
 
-        <!-- SAĞ ANA İÇERİK ALANI -->
+        <!-- ANA İÇERİK ALANI -->
         <main class="main-content">
-
-        <!-- SÜRÜM & GÜNCELLEME MODALI -->
-        <div id="versionModal" class="modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px);">
-            <div style="background:#1e293b; color:#fff; max-width:450px; margin:10% auto; padding:24px; border-radius:16px; border:1px solid rgba(255,255,255,0.1); box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
-                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:12px; margin-bottom:16px;">
-                    <h3 style="margin:0; font-size:1.15rem; color:#38bdf8; display:flex; align-items:center; gap:8px;">
-                        <i class="fa-solid fa-circle-info"></i> Uygulama Sürüm Bilgisi
-                    </h3>
-                    <span onclick="closeVersionModal()" style="cursor:pointer; font-size:1.4rem; color:#94a3b8;">&times;</span>
-                </div>
-                <div style="font-size:0.95rem; line-height:1.8;">
-                    <p style="margin:6px 0;"><strong>📦 Sürüm Kodu:</strong> <span id="modalCommitHash" style="color:#38bdf8; font-family:monospace; font-weight:bold;">{{ current_app_commit }}</span></p>
-                    <p style="margin:6px 0;"><strong>📅 Son Güncelleme:</strong> <span id="modalCommitDate" style="color:#f1f5f9;">{{ current_app_date }}</span></p>
-                    <p style="margin:6px 0;"><strong>📝 Son Değişiklik Notu:</strong></p>
-                    <div id="modalCommitMsg" style="background:#0f172a; padding:10px 14px; border-radius:8px; font-size:0.85rem; color:#cbd5e1; border:1px solid rgba(255,255,255,0.05); margin-top:4px;">{{ current_app_msg }}</div>
-                    <div style="margin-top:16px; background:rgba(34, 197, 94, 0.15); border:1px solid rgba(34, 197, 94, 0.3); color:#4ade80; padding:8px 12px; border-radius:8px; text-align:center; font-size:0.85rem; font-weight:600;">
-                        🟢 GitHub Sunucusu ile Eşitlendi & Güncel
-                    </div>
-                </div>
-                <div style="text-align:right; margin-top:20px;">
-                    <button onclick="closeVersionModal()" style="background:#3b82f6; color:#fff; border:none; padding:8px 18px; border-radius:8px; font-weight:600; cursor:pointer;">Kapat</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- HIZLI REHBER BAR -->
-        <div class="quick-guide-bar">
-            <div class="guide-item">
-                <span class="guide-num">1</span>
+            <!-- Header Bar -->
+            <div class="top-nav-bar" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem; margin-bottom:1.5rem;">
                 <div>
-                    <strong>Bakanlık Verisi</strong>
-                    <span>Sunucudan otomatik çekilir</span>
+                    <h1 style="font-family:var(--font-outfit); font-size:1.6rem; font-weight:700; color:#fff; display:flex; align-items:center; gap:0.6rem;">
+                        <i class="fa-solid fa-chart-pie" style="color:#10b981;"></i>
+                        İstatistikler & Satış Raporları
+                    </h1>
+                    <p style="font-size:0.86rem; color:#94a3b8; margin-top:2px;">
+                        Geçmiş yıllar, aylık dağılımlar ve ürün bazlı detaylı çıkış istatistikleri
+                    </p>
                 </div>
-            </div>
-            <div class="guide-item">
-                <span class="guide-num">2</span>
                 <div>
-                    <strong>Terek (Raf) Sayımı Yap</strong>
-                    <span>Koli / Ürün QR okutarak eksikleri bulun</span>
-                </div>
-            </div>
-            <div class="guide-item">
-                <span class="guide-num">3</span>
-                <div>
-                    <strong>Çıkış Listesine Aktar</strong>
-                    <span>Tereğinizde olmayan ürünleri tek tıkla düşüş yapın</span>
-                </div>
-            </div>
-        </div>
-
-        <!-- OTOMATİK YÜKLEME EKRANI (APPLICATION START LOADING OVERLAY) -->
-        <div id="auto-sync-loader" style="display:none; position:fixed; z-index:99999; left:0; top:0; width:100%; height:100%; background:rgba(10, 11, 16, 0.94); backdrop-filter:blur(14px); flex-direction:column; align-items:center; justify-content:center; text-align:center;">
-            <div style="background:rgba(15, 23, 42, 0.96); border:1px solid rgba(56, 189, 248, 0.35); border-radius:24px; padding:2.8rem 3rem; max-width:520px; width:90%; box-shadow:0 25px 50px rgba(0,0,0,0.8); transition: all 0.3s ease;">
-                <div id="loader-icon-box" style="width:80px; height:80px; border-radius:50%; background:rgba(56,189,248,0.15); border:2px solid rgba(56,189,248,0.4); margin:0 auto 1.5rem auto; display:flex; align-items:center; justify-content:center; transition: all 0.3s ease;">
-                    <i id="loader-icon" class="fa-solid fa-cloud-arrow-down fa-bounce" style="font-size:2.4rem; color:#38bdf8;"></i>
-                </div>
-                <h2 id="loader-title" style="font-family:var(--font-outfit); font-size:1.45rem; font-weight:800; color:#fff; margin:0 0 0.6rem 0;">
-                    Bakanlıktan Güncel Veriler Çekiliyor...
-                </h2>
-                <p id="loader-status" style="font-size:0.95rem; color:var(--text-muted); margin:0 0 1.6rem 0; line-height:1.6; transition: all 0.3s ease;">
-                    Lütfen bekleyin, BKST sunucusundan güncel stok ve karekod verileriniz otomatik çekiliyor.
-                </p>
-                <div style="background:rgba(255,255,255,0.06); height:6px; border-radius:10px; overflow:hidden; width:100%;">
-                    <div id="loader-progress-bar" style="background:linear-gradient(90deg, #38bdf8, #818cf8); height:100%; width:100%; transition: background 0.4s ease, width 0.4s ease;"></div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Terek (Raf) QR Sayım & Stok Eşitleme Paneli -->
-        <section class="panel glass-card audit-panel">
-            <div class="panel-head-flex">
-                <div class="panel-title-group">
-                    <i class="fa-solid fa-box-archive icon-green"></i>
-                    <div>
-                        <h2>Terek (Raf) QR Sayım & Stok Eşitleme</h2>
-                        <p class="panel-subtitle">Koli veya ürün QR okutun. Bakanlık stoğundaki eksik ürünler otomatik tespit edilir.</p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Barkod Okutma Kutusu -->
-            <div class="scan-input-wrapper">
-                <i class="fa-solid fa-barcode scan-icon"></i>
-                <input type="text" id="audit-input-main" onkeydown="window.handleAuditKeypress(event)" placeholder="Barkod veya İlaç QR okutun (Enter'a basın)..." autocomplete="off">
-                <button type="button" id="btn-audit-submit-trigger" class="btn btn-success btn-scan">
-                    <i class="fa-solid fa-magnifying-glass"></i> Oku / Ekle
-                </button>
-            </div>
-
-            <!-- Bildirim Kutusu -->
-            <div id="audit-msg-box" class="hidden audit-msg"></div>
-
-            <!-- Sayım Sonuçları Paneli -->
-            <div id="audit-results-wrapper" class="hidden">
-
-                <!-- Stok Eşitleme Bildirimi -->
-                <div id="audit-sync-alert-box" class="sync-alert-box">
-                    <i class="fa-solid fa-triangle-exclamation alert-icon"></i>
-                    <div id="audit-sync-alert-text" class="alert-text">
-                        Tereğinizde fiziken bulunmayan 🔴 0 adet ürünü Bakanlık sitesinden ÇIKIŞ yapmalısınız!
-                    </div>
-                </div>
-
-                <!-- İncelenen Koliler -->
-                <div class="koli-badges-container">
-                    <span class="koli-badges-label"><i class="fa-solid fa-boxes-packing color-blue"></i> İncelenen Koliler:</span>
-                    <div id="audit-kolis-list" class="koli-badges-list">
-                        <span class="badge">Henüz koli yüklenmedi</span>
-                    </div>
-                </div>
-
-                <!-- İstatistik Özeti -->
-                <div class="audit-stats-grid">
-                    <div class="audit-stat-card">
-                        <span class="audit-stat-lbl">Bakanlık Koli Stoğu</span>
-                        <span id="audit-cnt-total" class="audit-stat-val">0 Adet</span>
-                    </div>
-                    <div class="audit-stat-card card-ok">
-                        <span class="audit-stat-lbl">🟢 Tereğimde VAR</span>
-                        <span id="audit-cnt-ok" class="audit-stat-val text-ok">0 Adet</span>
-                    </div>
-                    <div class="audit-stat-card card-missing">
-                        <span class="audit-stat-lbl">🔴 Tereğimde YOK</span>
-                        <span id="audit-cnt-missing" class="audit-stat-val text-missing">0 Adet</span>
-                    </div>
-                </div>
-
-                <!-- Butonlar -->
-                <div class="audit-actions">
-                    <button class="btn btn-purple btn-sm" id="btn-audit-toggle-mode" type="button">
-                        <i class="fa-solid fa-layer-group"></i> 📊 Okutulan Kalemleri Tüm Depoyla Karşılaştır
-                    </button>
-                    <button class="btn btn-danger btn-sm" id="btn-audit-send-cikis" type="button" onclick="transferMissingToCikis()">
-                        <i class="fa-solid fa-box-open"></i> 🔴 Tereğimde Olmayanları Çıkış Listesine Aktar
-                    </button>
-                    <button class="btn btn-success btn-sm" id="btn-dl-audit-excel" type="button">
-                        <i class="fa-solid fa-file-excel"></i> 📥 Tereğümde Olmayan Ürünleri İndir (Excel)
-                    </button>
-                    <button id="btn-audit-reset-koli" class="btn btn-outline btn-sm" type="button">
-                        <i class="fa-solid fa-rotate-left"></i> Sayımı Temizle
+                    <button id="btn-reset-stats-header" style="background: linear-gradient(135deg, #ef4444, #dc2626); color:#fff; border:none; padding:0.65rem 1.3rem; border-radius:10px; font-weight:700; font-size:0.92rem; display:flex; align-items:center; gap:0.55rem; cursor:pointer; box-shadow: 0 4px 14px rgba(239,68,68,0.4);">
+                        <i class="fa-solid fa-trash-can"></i> İstatistikleri Sıfırla
                     </button>
                 </div>
+            </div>
 
-                <!-- Tablo -->
-                <div class="table-scroll-container">
-                    <table class="data-table">
-                        <thead>
-                            <tr>
-                                <th>#</th>
-                                <th>Ürün Adı</th>
-                                <th>Koli No</th>
-                                <th>Karekod</th>
-                                <th>Seri No</th>
-                                <th>Parti No</th>
-                                <th>Palet No</th>
-                                <th style="text-align: center;">Terek Durumu</th>
-                                <th>Açıklama</th>
-                            </tr>
-                        </thead>
-                        <tbody id="audit-table-body"></tbody>
-                    </table>
+            <!-- Filter Toolbar -->
+            <div class="filter-toolbar">
+                <div class="year-pills" id="year-pills-container">
+                    <span style="font-size:0.8rem; font-weight:600; color:#64748b; margin-right:0.3rem;"><i class="fa-solid fa-calendar"></i> DÖNEM:</span>
+                    <button class="year-btn active" data-year="tum">Tüm Yıllar</button>
+                    <button class="year-btn" data-year="2026">2026</button>
+                    <button class="year-btn" data-year="2025">2025</button>
+                    <button class="year-btn" data-year="2024">2024</button>
+                    <button class="year-btn" data-year="2023">2023</button>
+                    <button class="year-btn" data-year="custom"><i class="fa-solid fa-sliders"></i> Özel Aralık</button>
+                </div>
+
+                <div class="custom-date-box" id="custom-date-box">
+                    <input type="date" id="input-date-start" class="date-input" title="Başlangıç Tarihi">
+                    <span style="color:#64748b;">-</span>
+                    <input type="date" id="input-date-end" class="date-input" title="Bitiş Tarihi">
+                    <button class="year-btn" id="btn-apply-custom-date" style="background:#10b981; color:#fff; border-color:#10b981;">Filtrele</button>
+                </div>
+
+                <div class="action-btns">
+                    <button class="btn-act btn-excel" id="btn-download-excel" title="Detaylı Excel Raporu İndir">
+                        <i class="fa-solid fa-file-excel"></i> Excel İndir (.xlsx)
+                    </button>
+                    <button class="btn-act btn-print" onclick="window.print()" title="Raporu Yazdır veya PDF olarak kaydet">
+                        <i class="fa-solid fa-print"></i> Yazdır / PDF
+                    </button>
+                    <button class="btn-act btn-sample" id="btn-sample-data" title="2024-2025 yıllarına ait test verisi ekle">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> Örnek Geçmiş Veri
+                    </button>
+                    <button class="btn-act btn-reset" id="btn-reset-stats" style="background:rgba(239, 68, 68, 0.16); border:1px solid rgba(239, 68, 68, 0.4); color:#fca5a5;" title="Kalıcı satış arşivi ve tüm geçmiş istatistik verilerini sıfırla">
+                        <i class="fa-solid fa-trash-can"></i> İstatistikleri Sıfırla
+                    </button>
                 </div>
             </div>
-        </section>
 
-        <footer class="app-footer-bottom">
-            <p>&copy; 2026 QR Compare - Akıllı Stok & Karekod Eşitleme</p>
-        </footer>
+            <!-- 6 KPI CARDS -->
+            <div class="stats-kpi-grid">
+                <!-- KPI 1 -->
+                <div class="stats-kpi-card" style="--card-accent: #10b981;">
+                    <div class="kpi-head">
+                        <span class="kpi-label">Toplam Çıkış Adedi</span>
+                        <div class="kpi-icon"><i class="fa-solid fa-boxes-stacked"></i></div>
+                    </div>
+                    <div class="kpi-value" id="kpi-total-exits">0</div>
+                    <div class="kpi-sub">
+                        <span>Seçilen dönemdeki toplam ürün</span>
+                    </div>
+                </div>
+
+                <!-- KPI 2 -->
+                <div class="stats-kpi-card" style="--card-accent: #06b6d4;">
+                    <div class="kpi-head">
+                        <span class="kpi-label">Satılan Kalem Çeşidi</span>
+                        <div class="kpi-icon"><i class="fa-solid fa-shapes"></i></div>
+                    </div>
+                    <div class="kpi-value" id="kpi-unique-products">0</div>
+                    <div class="kpi-sub">
+                        <span>Farklı ilaç / ürün çeşidi</span>
+                    </div>
+                </div>
+
+                <!-- KPI 3 -->
+                <div class="stats-kpi-card" style="--card-accent: #f59e0b;">
+                    <div class="kpi-head">
+                        <span class="kpi-label">En Çok Satan Lider Ürün</span>
+                        <div class="kpi-icon"><i class="fa-solid fa-trophy"></i></div>
+                    </div>
+                    <div class="kpi-value" id="kpi-top-product" style="font-size:1.25rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="-">-</div>
+                    <div class="kpi-sub">
+                        <span id="kpi-top-product-count" class="badge-pill" style="background:rgba(245,158,11,0.2); color:#fbbf24;">0 Adet</span>
+                        <span>çıkış ile lider</span>
+                    </div>
+                </div>
+
+                <!-- KPI 4 -->
+                <div class="stats-kpi-card" style="--card-accent: #8b5cf6;">
+                    <div class="kpi-head">
+                        <span class="kpi-label">Koli / Tekil Dağılımı</span>
+                        <div class="kpi-icon"><i class="fa-solid fa-pallet"></i></div>
+                    </div>
+                    <div class="kpi-value" id="kpi-carton-ratio">-%</div>
+                    <div class="kpi-sub">
+                        <span id="kpi-carton-detail">0 Koli / 0 Tekil Kutu</span>
+                    </div>
+                </div>
+
+                <!-- KPI 5 -->
+                <div class="stats-kpi-card" style="--card-accent: #3b82f6;">
+                    <div class="kpi-head">
+                        <span class="kpi-label">Günlük Çıkış Ortalaması</span>
+                        <div class="kpi-icon"><i class="fa-solid fa-bolt"></i></div>
+                    </div>
+                    <div class="kpi-value" id="kpi-daily-avg">0</div>
+                    <div class="kpi-sub">
+                        <span>Kutu / aktif gün başına</span>
+                    </div>
+                </div>
+
+                <!-- KPI 6 -->
+                <div class="stats-kpi-card" style="--card-accent: #ec4899;">
+                    <div class="kpi-head">
+                        <span class="kpi-label">Tekrar Okutma Oranı</span>
+                        <div class="kpi-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
+                    </div>
+                    <div class="kpi-value" id="kpi-repeat-ratio">0%</div>
+                    <div class="kpi-sub">
+                        <span id="kpi-repeat-count">0 mükerrer okutma</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CHARTS GRID -->
+            <div class="charts-grid">
+                <!-- CHART 1: Aylık Satış Dağılımı -->
+                <div class="chart-box">
+                    <div class="chart-box-header">
+                        <div>
+                            <div class="chart-title"><i class="fa-solid fa-chart-column" style="color:#10b981;"></i> Aylık Çıkış Dağılımı</div>
+                            <div class="chart-subtitle" id="chart1-subtitle">Yıl içi 12 ayın satış adetleri</div>
+                        </div>
+                    </div>
+                    <div class="chart-canvas-container">
+                        <canvas id="canvas-monthly"></canvas>
+                    </div>
+                </div>
+
+                <!-- CHART 2: Yıllık Karşılaştırma -->
+                <div class="chart-box">
+                    <div class="chart-box-header">
+                        <div>
+                            <div class="chart-title"><i class="fa-solid fa-chart-line" style="color:#06b6d4;"></i> Yıllık Satış Karşılaştırması</div>
+                            <div class="chart-subtitle">Tüm yıllara ait toplam çıkış trendi</div>
+                        </div>
+                    </div>
+                    <div class="chart-canvas-container">
+                        <canvas id="canvas-yearly"></canvas>
+                    </div>
+                </div>
+
+                <!-- CHART 3: En Çok Satanlar Pazar Payı -->
+                <div class="chart-box">
+                    <div class="chart-box-header">
+                        <div>
+                            <div class="chart-title"><i class="fa-solid fa-chart-pie" style="color:#f59e0b;"></i> En Çok Satan Ürünler Payı</div>
+                            <div class="chart-subtitle">Lider ürünlerin toplam çıkıştaki yüzdesi</div>
+                        </div>
+                    </div>
+                    <div class="chart-canvas-container">
+                        <canvas id="canvas-top-products"></canvas>
+                    </div>
+                </div>
+
+                <!-- CHART 4: Haftanın Günleri -->
+                <div class="chart-box">
+                    <div class="chart-box-header">
+                        <div>
+                            <div class="chart-title"><i class="fa-solid fa-calendar-week" style="color:#8b5cf6;"></i> Gün Bazlı Çıkış Yoğunluğu</div>
+                            <div class="chart-subtitle">Haftanın günlerine göre operasyon dağılımı</div>
+                        </div>
+                    </div>
+                    <div class="chart-canvas-container">
+                        <canvas id="canvas-weekday"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- DETAYLI TABLOLAR & YÖNETİM -->
+            <div class="stats-table-section">
+                <div class="tab-nav">
+                    <button class="tab-btn active" data-tab="tab-products">
+                        <i class="fa-solid fa-list-ol"></i> En Çok Satan Ürünler
+                    </button>
+                    <button class="tab-btn" data-tab="tab-batches">
+                        <i class="fa-solid fa-barcode"></i> Parti / Lot Dağılımı
+                    </button>
+                    <button class="tab-btn" data-tab="tab-monthly-detail">
+                        <i class="fa-solid fa-calendar-days"></i> Aylık Tablo
+                    </button>
+                    <button class="tab-btn" data-tab="tab-import">
+                        <i class="fa-solid fa-file-import"></i> Geçmiş Satış Yükle (Excel)
+                    </button>
+                </div>
+
+                <!-- TAB 1: ÜRÜNLER -->
+                <div class="tab-content" id="tab-products">
+                    <div style="margin-bottom:1rem; display:flex; justify-content:space-between; align-items:center;">
+                        <input type="text" id="input-search-products" placeholder="Ürün adı veya GTIN ile ara..." style="background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); padding:0.5rem 0.9rem; border-radius:8px; color:#fff; font-size:0.85rem; width:280px; outline:none;">
+                        <span style="font-size:0.8rem; color:#64748b;" id="lbl-product-count">0 ürün listeleniyor</span>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="stats-table">
+                            <thead>
+                                <tr>
+                                    <th style="width:50px;">Sıra</th>
+                                    <th>Ürün Adı</th>
+                                    <th>GTIN / Barkod</th>
+                                    <th style="text-align:right;">Toplam Çıkış</th>
+                                    <th style="text-align:center;">Koli Payı</th>
+                                    <th>Pazar Payı</th>
+                                    <th>Son Çıkış Tarihi</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tbody-top-products">
+                                <tr><td colspan="7" style="text-align:center; color:#64748b; padding:2rem;"><i class="fa-solid fa-spinner fa-spin"></i> İstatistikler yükleniyor...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- TAB 2: PARTİ / LOT -->
+                <div class="tab-content" id="tab-batches" style="display:none;">
+                    <div class="table-responsive">
+                        <table class="stats-table">
+                            <thead>
+                                <tr>
+                                    <th style="width:50px;">Sıra</th>
+                                    <th>Parti Numarası</th>
+                                    <th>Ürün Adı</th>
+                                    <th style="text-align:right;">Çıkış Adedi</th>
+                                    <th>Son Kullanma Tarihi (SKT)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tbody-batches">
+                                <tr><td colspan="5" style="text-align:center; color:#64748b; padding:2rem;">Parti verisi yükleniyor...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- TAB 3: AYLIK DETAY -->
+                <div class="tab-content" id="tab-monthly-detail" style="display:none;">
+                    <div class="table-responsive">
+                        <table class="stats-table">
+                            <thead>
+                                <tr>
+                                    <th style="width:60px;">Ay</th>
+                                    <th>Dönem</th>
+                                    <th style="text-align:right;">Çıkış Adedi (Kutu)</th>
+                                    <th>Dönem İçi Payı</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tbody-monthly-detail">
+                                <tr><td colspan="4" style="text-align:center; color:#64748b; padding:2rem;">Aylık veriler yükleniyor...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- TAB 4: EXCEL İLE GEÇMİŞ SATIŞ YÜKLEME -->
+                <div class="tab-content" id="tab-import" style="display:none;">
+                    <div style="max-width:650px; background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:1.5rem;">
+                        <h3 style="font-size:1.05rem; font-weight:600; color:#fff; margin-bottom:0.4rem;">
+                            <i class="fa-solid fa-file-excel" style="color:#10b981;"></i> Eski Yıllara Ait Satışları İçe Aktar
+                        </h3>
+                        <p style="font-size:0.82rem; color:#94a3b8; line-height:1.5; margin-bottom:1.2rem;">
+                            Geçmiş yıllara (2023, 2024, 2025 vb.) ait eski satış kayıtlarınızı Excel formatında sisteme yükleyebilirsiniz. 
+                            Dosyanızda <b>Tarih</b>, <b>Ürün Adı</b>, <b>Barkod/GTIN</b> ve <b>Parti No</b> sütunlarının bulunması yeterlidir.
+                        </p>
+
+                        <div style="display:flex; gap:0.75rem; align-items:center; margin-bottom:1rem;">
+                            <input type="file" id="input-excel-file" accept=".xlsx, .xls" style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.15); padding:0.5rem; border-radius:8px; color:#cbd5e1; font-size:0.85rem; flex:1;">
+                            <button id="btn-upload-excel" class="btn-act btn-excel">
+                                <i class="fa-solid fa-cloud-arrow-up"></i> Yükle ve Aktar
+                            </button>
+                        </div>
+                        <div id="upload-status-msg" style="font-size:0.85rem; margin-top:0.5rem;"></div>
+
+                        <hr style="border:none; border-top:1px solid rgba(255,255,255,0.08); margin:1.5rem 0;">
+
+                        <div style="display:flex; align-items:center; justify-content:space-between;">
+                            <div>
+                                <h4 style="font-size:0.9rem; font-weight:600; color:#cbd5e1;">Test & Demo Geçmiş Verisi</h4>
+                                <p style="font-size:0.78rem; color:#64748b;">2024 ve 2025 yıllarına ait otomatik gerçekçi satış kayıtları oluşturun.</p>
+                            </div>
+                            <div style="display:flex; gap:0.5rem;">
+                                <button id="btn-add-sample-data" class="btn-act btn-sample">
+                                    <i class="fa-solid fa-plus-circle"></i> Örnek Veri Ekle
+                                </button>
+                                <button id="btn-clear-sample-data" class="btn-act" style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.3); color:#f87171;">
+                                    <i class="fa-solid fa-trash-can"></i> Temizle
+                                </button>
+                            </div>
+                        </div>
+
+                        <hr style="border:none; border-top:1px solid rgba(255,255,255,0.08); margin:1.5rem 0;">
+
+                        <div style="display:flex; align-items:center; justify-content:space-between; background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.25); border-radius:10px; padding:1.1rem 1.25rem;">
+                            <div>
+                                <h4 style="font-size:0.92rem; font-weight:700; color:#fca5a5; display:flex; align-items:center; gap:0.45rem;">
+                                    <i class="fa-solid fa-triangle-exclamation"></i> Geçmiş İstatistikleri Sıfırla
+                                </h4>
+                                <p style="font-size:0.78rem; color:#94a3b8; margin-top:3px; line-height:1.4;">
+                                    Kalıcı satış arşivindeki tüm geçmiş istatistik verilerini sıfırlar. Aktif çalışma listeniz bundan etkilenmez.
+                                </p>
+                            </div>
+                            <div>
+                                <button id="btn-reset-stats-tab" class="btn-act" style="background:rgba(239,68,68,0.22); border:1px solid rgba(239,68,68,0.5); color:#fca5a5; font-weight:700; padding:0.6rem 1.1rem; white-space:nowrap;">
+                                    <i class="fa-solid fa-trash-can"></i> Tümünü Sıfırla
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </main>
     </div>
 
-    <script src="/static/app.js?v=20261005_v3000"></script>
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        window.LOCAL_SESSION_TOKEN = "{{ local_session_token }}";
+        if (window.LOCAL_SESSION_TOKEN && window.LOCAL_SESSION_TOKEN !== 'undefined') {
+            localStorage.setItem('local_session_token', window.LOCAL_SESSION_TOKEN);
+        } else if (localStorage.getItem('local_session_token') === 'undefined' || localStorage.getItem('local_session_token') === 'null') {
+            localStorage.removeItem('local_session_token');
+        }
+
+        function getAuthHeaders(extraHeaders = {}) {
+            const token = window.LOCAL_SESSION_TOKEN || localStorage.getItem('local_session_token') || '';
+            const headers = {
+                'X-Requested-With': 'XMLHttpRequest',
+                ...extraHeaders
+            };
+            if (token && token !== 'undefined' && token !== 'null') {
+                headers['X-Local-Token'] = token;
+                headers['X-Session-Token'] = token;
+            }
+            return headers;
+        }
+
+        // Global State
+        let currentYear = 'tum';
+        let customStart = '';
+        let customEnd = '';
+        let statsData = null;
+
+        // Chart instances
+        let chartMonthly = null;
+        let chartYearly = null;
+        let chartTopProducts = null;
+        let chartWeekday = null;
+
+        // Elements
+        const yearPillsContainer = document.getElementById('year-pills-container');
+        const customDateBox = document.getElementById('custom-date-box');
+        const inputDateStart = document.getElementById('input-date-start');
+        const inputDateEnd = document.getElementById('input-date-end');
+        const btnApplyCustomDate = document.getElementById('btn-apply-custom-date');
+        const btnDownloadExcel = document.getElementById('btn-download-excel');
+        const btnSampleData = document.getElementById('btn-sample-data');
+        const btnAddSampleData = document.getElementById('btn-add-sample-data');
+        const btnClearSampleData = document.getElementById('btn-clear-sample-data');
+        const btnResetStatsHeader = document.getElementById('btn-reset-stats-header');
+        const btnResetStats = document.getElementById('btn-reset-stats');
+        const btnResetStatsTab = document.getElementById('btn-reset-stats-tab');
+        const btnUploadExcel = document.getElementById('btn-upload-excel');
+        const inputExcelFile = document.getElementById('input-excel-file');
+        const uploadStatusMsg = document.getElementById('upload-status-msg');
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            setupYearFilters();
+            setupTabs();
+            setupSearch();
+            loadStatistics();
+        });
+
+        // Setup Year Filter Buttons
+        function setupYearFilters() {
+            yearPillsContainer.addEventListener('click', (e) => {
+                const btn = e.target.closest('.year-btn');
+                if (!btn) return;
+
+                const yr = btn.dataset.year;
+                if (!yr) return;
+
+                document.querySelectorAll('.year-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+
+                if (yr === 'custom') {
+                    customDateBox.classList.add('show');
+                } else {
+                    customDateBox.classList.remove('show');
+                    currentYear = yr;
+                    customStart = '';
+                    customEnd = '';
+                    loadStatistics();
+                }
+            });
+
+            btnApplyCustomDate.addEventListener('click', () => {
+                customStart = inputDateStart.value;
+                customEnd = inputDateEnd.value;
+                if (!customStart && !customEnd) {
+                    alert('Lütfen en az bir tarih seçin.');
+                    return;
+                }
+                currentYear = 'tum';
+                loadStatistics();
+            });
+
+            btnDownloadExcel.addEventListener('click', () => {
+                let url = `/api/istatistikler/excel_indir?yil=${encodeURIComponent(currentYear)}`;
+                if (customStart) url += `&baslangic=${encodeURIComponent(customStart)}`;
+                if (customEnd) url += `&bitis=${encodeURIComponent(customEnd)}`;
+                window.location.href = url;
+            });
+
+            // Sample historical data buttons
+            const handleAddSample = async () => {
+                if (!confirm('2024 ve 2025 yıllarına ait gerçekçi örnek satış kayıtları eklensin mi?')) return;
+                try {
+                    const res = await fetch('/api/istatistikler/ornek_gecmis_ekle', {
+                        method: 'POST',
+                        headers: getAuthHeaders({ 'Content-Type': 'application/json' })
+                    });
+                    const d = await res.json();
+                    if (d.success) {
+                        alert(d.message);
+                        loadStatistics();
+                    } else {
+                        alert('Hata: ' + (d.error || 'İşlem başarısız'));
+                    }
+                } catch (e) {
+                    alert('Bağlantı hatası: ' + e.message);
+                }
+            };
+
+            const handleClearSample = async () => {
+                if (!confirm('Eklenen örnek geçmiş satış verileri silinsin mi?')) return;
+                try {
+                    const res = await fetch('/api/istatistikler/ornek_gecmis_temizle', {
+                        method: 'POST',
+                        headers: getAuthHeaders({ 'Content-Type': 'application/json' })
+                    });
+                    const d = await res.json();
+                    if (d.success) {
+                        alert(d.message);
+                        loadStatistics();
+                    } else {
+                        alert('Hata: ' + (d.error || 'İşlem başarısız'));
+                    }
+                } catch (e) {
+                    alert('Bağlantı hatası: ' + e.message);
+                }
+            };
+
+            btnSampleData.addEventListener('click', handleAddSample);
+            btnAddSampleData.addEventListener('click', handleAddSample);
+            btnClearSampleData.addEventListener('click', handleClearSample);
+
+            // Reset All Historical Statistics Handler
+            const handleResetStats = async () => {
+                const yearText = (currentYear && currentYear !== 'tum') ? `${currentYear} yılı dahil tüm yıllara ait` : 'tüm yıllara ait';
+                const promptMsg = `⚠️ DİKKAT: Kalıcı satış arşivindeki ${yearText} tüm geçmiş istatistik verileri sıfırlanacaktır.\n\n` +
+                                  `• Bu işlem geri alınamaz!\n` +
+                                  `• 'Barkod Okut & Çıkış' bölümündeki güncel çalışma sepetinizdeki ürünler SİLİNMEZ.\n\n` +
+                                  `Geçmiş istatistik verilerini kalıcı olarak sıfırlamak istiyor musunuz?`;
+                if (!confirm(promptMsg)) return;
+
+                if (!confirm(`Son onay: Kalıcı arşivdeki tüm geçmiş satış verileri tamamen temizleniyor. Emin misiniz?`)) return;
+
+                try {
+                    const res = await fetch('/api/istatistikler/sifirla', {
+                        method: 'POST',
+                        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+                        body: JSON.stringify({ yil: 'tum' })
+                    });
+                    const d = await res.json();
+                    if (d.success) {
+                        alert(`✅ ${d.message} (${d.silinen_adet || 0} kayıt temizlendi)`);
+                        loadStatistics();
+                    } else {
+                        alert('Hata: ' + (d.error || 'Sıfırlama işlemi başarısız'));
+                    }
+                } catch (e) {
+                    alert('Bağlantı hatası: ' + e.message);
+                }
+            };
+
+            if (btnResetStatsHeader) btnResetStatsHeader.addEventListener('click', handleResetStats);
+            if (btnResetStats) btnResetStats.addEventListener('click', handleResetStats);
+            if (btnResetStatsTab) btnResetStatsTab.addEventListener('click', handleResetStats);
+
+            // Excel Upload
+            btnUploadExcel.addEventListener('click', async () => {
+                const file = inputExcelFile.files[0];
+                if (!file) {
+                    alert('Lütfen bir Excel dosyası (.xlsx) seçin.');
+                    return;
+                }
+                const formData = new FormData();
+                formData.append('file', file);
+
+                btnUploadExcel.disabled = true;
+                btnUploadExcel.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Aktarılıyor...';
+                uploadStatusMsg.innerHTML = '<span style="color:#94a3b8;"><i class="fa-solid fa-spinner fa-spin"></i> Dosya işleniyor, lütfen bekleyin...</span>';
+
+                try {
+                    const res = await fetch('/api/istatistikler/excel_yukle', {
+                        method: 'POST',
+                        headers: getAuthHeaders(),
+                        body: formData
+                    });
+                    const d = await res.json();
+                    if (d.success) {
+                        uploadStatusMsg.innerHTML = `<span style="color:#10b981;"><i class="fa-solid fa-circle-check"></i> ${d.message}</span>`;
+                        inputExcelFile.value = '';
+                        loadStatistics();
+                    } else {
+                        uploadStatusMsg.innerHTML = `<span style="color:#ef4444;"><i class="fa-solid fa-circle-xmark"></i> Hata: ${d.error}</span>`;
+                    }
+                } catch (e) {
+                    uploadStatusMsg.innerHTML = `<span style="color:#ef4444;"><i class="fa-solid fa-circle-xmark"></i> Bağlantı hatası: ${e.message}</span>`;
+                } finally {
+                    btnUploadExcel.disabled = false;
+                    btnUploadExcel.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> Yükle ve Aktar';
+                }
+            });
+        }
+
+        // Setup Tab Navigation
+        function setupTabs() {
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                    document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+
+                    btn.classList.add('active');
+                    const tabId = btn.dataset.tab;
+                    const content = document.getElementById(tabId);
+                    if (content) content.style.display = 'block';
+                });
+            });
+        }
+
+        // Setup Product Search
+        function setupSearch() {
+            const input = document.getElementById('input-search-products');
+            input.addEventListener('input', () => {
+                const q = input.value.trim().toLowerCase();
+                if (!statsData || !statsData.en_cok_satanlar) return;
+                const filtered = statsData.en_cok_satanlar.filter(p => 
+                    (p.urun_adi || '').toLowerCase().includes(q) ||
+                    (p.barkod || '').toLowerCase().includes(q)
+                );
+                renderTopProductsTable(filtered);
+            });
+        }
+
+        // Load Statistics from API
+        async function loadStatistics() {
+            let url = `/api/istatistikler/ozet?yil=${encodeURIComponent(currentYear)}`;
+            if (customStart) url += `&baslangic=${encodeURIComponent(customStart)}`;
+            if (customEnd) url += `&bitis=${encodeURIComponent(customEnd)}`;
+
+            try {
+                const res = await fetch(url, { headers: getAuthHeaders() });
+                const d = await res.json();
+
+                if (d.success) {
+                    statsData = d;
+                    renderKpiCards(d.kpi);
+                    renderCharts(d);
+                    renderTopProductsTable(d.en_cok_satanlar || []);
+                    renderBatchesTable(d.parti_dagilimi || []);
+                    renderMonthlyTable(d.aylik_grafik);
+                    updateDynamicYearPills(d.mevcut_yillar || []);
+                } else {
+                    console.error('İstatistik yükleme hatası:', d.error);
+                }
+            } catch (err) {
+                console.error('API hatası:', err);
+            }
+        }
+
+        // Update Dynamic Year Pills if new years exist
+        function updateDynamicYearPills(years) {
+            // Keep "tum", add any newly discovered years if not present
+            years.forEach(yr => {
+                const existing = document.querySelector(`.year-btn[data-year="${yr}"]`);
+                if (!existing && yr) {
+                    const btn = document.createElement('button');
+                    btn.className = 'year-btn';
+                    btn.dataset.year = yr;
+                    btn.textContent = yr;
+                    const customBtn = document.querySelector('.year-btn[data-year="custom"]');
+                    yearPillsContainer.insertBefore(btn, customBtn);
+                }
+            });
+        }
+
+        // Render KPI Cards
+        function renderKpiCards(kpi) {
+            if (!kpi) return;
+            document.getElementById('kpi-total-exits').textContent = Number(kpi.toplam_cikis || 0).toLocaleString('tr-TR');
+            document.getElementById('kpi-unique-products').textContent = Number(kpi.tekil_urun_sayisi || 0).toLocaleString('tr-TR') + ' Çeşit';
+            
+            const topName = kpi.lider_urun || '-';
+            const topEl = document.getElementById('kpi-top-product');
+            topEl.textContent = topName;
+            topEl.title = topName;
+            document.getElementById('kpi-top-product-count').textContent = (kpi.lider_adet || 0) + ' Kutu';
+
+            document.getElementById('kpi-carton-ratio').textContent = `%${kpi.koli_orani || 0} Koli`;
+            document.getElementById('kpi-carton-detail').textContent = `${kpi.koli_adet || 0} Koli / ${kpi.tekil_adet || 0} Tekil`;
+
+            document.getElementById('kpi-daily-avg').textContent = Number(kpi.gunluk_ortalama || 0).toLocaleString('tr-TR');
+            document.getElementById('kpi-repeat-ratio').textContent = `%${kpi.tekrar_orani || 0}`;
+            document.getElementById('kpi-repeat-count').textContent = `${kpi.tekrar_adet || 0} mükerrer okutma`;
+
+            document.getElementById('chart1-subtitle').textContent = currentYear === 'tum' ? 'Tüm zamanların aylık toplam çıkışları' : `${currentYear} yılının 12 aylık çıkış dağılımı`;
+        }
+
+        // Render Charts using Chart.js
+        function renderCharts(d) {
+            // Destroy existing instances
+            if (chartMonthly) chartMonthly.destroy();
+            if (chartYearly) chartYearly.destroy();
+            if (chartTopProducts) chartTopProducts.destroy();
+            if (chartWeekday) chartWeekday.destroy();
+
+            const chartFont = { family: "'Inter', sans-serif", size: 11 };
+            const chartGrid = { color: 'rgba(255, 255, 255, 0.05)', borderColor: 'rgba(255, 255, 255, 0.1)' };
+            const chartTicks = { color: '#94a3b8', font: chartFont };
+
+            // 1. Monthly Chart (Bar)
+            const ctxMonthly = document.getElementById('canvas-monthly').getContext('2d');
+            const monthlyGrad = ctxMonthly.createLinearGradient(0, 0, 0, 260);
+            monthlyGrad.addColorStop(0, 'rgba(16, 185, 129, 0.85)');
+            monthlyGrad.addColorStop(1, 'rgba(16, 185, 129, 0.15)');
+
+            chartMonthly = new Chart(ctxMonthly, {
+                type: 'bar',
+                data: {
+                    labels: d.aylik_grafik.etiketler,
+                    datasets: [{
+                        label: 'Çıkış Adedi (Kutu)',
+                        data: d.aylik_grafik.veriler,
+                        backgroundColor: monthlyGrad,
+                        borderColor: '#10b981',
+                        borderWidth: 1.5,
+                        borderRadius: 6,
+                        maxBarThickness: 32
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#cbd5e1', padding: 10, cornerRadius: 8 }
+                    },
+                    scales: {
+                        x: { grid: { display: false }, ticks: chartTicks },
+                        y: { grid: chartGrid, ticks: chartTicks, beginAtZero: true }
+                    }
+                }
+            });
+
+            // 2. Yearly Comparison Chart (Bar)
+            const ctxYearly = document.getElementById('canvas-yearly').getContext('2d');
+            const yearlyGrad = ctxYearly.createLinearGradient(0, 0, 0, 260);
+            yearlyGrad.addColorStop(0, 'rgba(6, 182, 212, 0.85)');
+            yearlyGrad.addColorStop(1, 'rgba(6, 182, 212, 0.15)');
+
+            chartYearly = new Chart(ctxYearly, {
+                type: 'bar',
+                data: {
+                    labels: d.yillik_grafik.etiketler,
+                    datasets: [{
+                        label: 'Yıllık Satış (Kutu)',
+                        data: d.yillik_grafik.veriler,
+                        backgroundColor: yearlyGrad,
+                        borderColor: '#06b6d4',
+                        borderWidth: 1.5,
+                        borderRadius: 8,
+                        maxBarThickness: 44
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#cbd5e1', padding: 10, cornerRadius: 8 }
+                    },
+                    scales: {
+                        x: { grid: { display: false }, ticks: chartTicks },
+                        y: { grid: chartGrid, ticks: chartTicks, beginAtZero: true }
+                    }
+                }
+            });
+
+            // 3. Top Products (Doughnut)
+            const top5 = (d.en_cok_satanlar || []).slice(0, 5);
+            const otherSum = (d.en_cok_satanlar || []).slice(5).reduce((acc, p) => acc + (p.adet || 0), 0);
+            const pieLabels = top5.map(p => p.urun_adi.length > 18 ? p.urun_adi.substring(0, 18) + '...' : p.urun_adi);
+            const pieData = top5.map(p => p.adet);
+            if (otherSum > 0) {
+                pieLabels.push('Diğerleri');
+                pieData.push(otherSum);
+            }
+
+            const ctxPie = document.getElementById('canvas-top-products').getContext('2d');
+            chartTopProducts = new Chart(ctxPie, {
+                type: 'doughnut',
+                data: {
+                    labels: pieLabels.length ? pieLabels : ['Veri Yok'],
+                    datasets: [{
+                        data: pieData.length ? pieData : [1],
+                        backgroundColor: [
+                            '#10b981', '#06b6d4', '#f59e0b', '#8b5cf6', '#ec4899', '#64748b'
+                        ],
+                        borderWidth: 2,
+                        borderColor: '#0f172a'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'right', labels: { color: '#cbd5e1', font: chartFont, boxWidth: 12, padding: 12 } },
+                        tooltip: { backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#cbd5e1', padding: 10, cornerRadius: 8 }
+                    },
+                    cutout: '65%'
+                }
+            });
+
+            // 4. Weekday Distribution (Bar)
+            const ctxWeekday = document.getElementById('canvas-weekday').getContext('2d');
+            const weekdayGrad = ctxWeekday.createLinearGradient(0, 0, 0, 260);
+            weekdayGrad.addColorStop(0, 'rgba(139, 92, 246, 0.85)');
+            weekdayGrad.addColorStop(1, 'rgba(139, 92, 246, 0.15)');
+
+            chartWeekday = new Chart(ctxWeekday, {
+                type: 'bar',
+                data: {
+                    labels: d.haftalik_grafik.etiketler,
+                    datasets: [{
+                        label: 'Çıkış Adedi',
+                        data: d.haftalik_grafik.veriler,
+                        backgroundColor: weekdayGrad,
+                        borderColor: '#8b5cf6',
+                        borderWidth: 1.5,
+                        borderRadius: 6,
+                        maxBarThickness: 30
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#cbd5e1', padding: 10, cornerRadius: 8 }
+                    },
+                    scales: {
+                        x: { grid: { display: false }, ticks: chartTicks },
+                        y: { grid: chartGrid, ticks: chartTicks, beginAtZero: true }
+                    }
+                }
+            });
+        }
+
+        // Render Top Products Table
+        function renderTopProductsTable(list) {
+            const tbody = document.getElementById('tbody-top-products');
+            document.getElementById('lbl-product-count').textContent = `${list.length} ürün listeleniyor`;
+
+            if (!list || list.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#64748b; padding:2rem;">Bu döneme ait çıkış kaydı bulunamadı.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = list.map((p, idx) => `
+                <tr>
+                    <td style="color:#64748b; font-weight:600;">${idx + 1}</td>
+                    <td><b style="color:#fff;">${esc(p.urun_adi)}</b></td>
+                    <td style="font-family:monospace; color:#94a3b8; font-size:0.82rem;">${esc(p.barkod || '-')}</td>
+                    <td style="text-align:right; font-family:var(--font-outfit); font-weight:700; color:#10b981; font-size:0.95rem;">${Number(p.adet).toLocaleString('tr-TR')}</td>
+                    <td style="text-align:center;"><span style="background:rgba(255,255,255,0.06); padding:0.2rem 0.5rem; border-radius:6px; font-size:0.75rem;">${p.koli_sayisi || 0} Koli</span></td>
+                    <td>
+                        <div class="progress-bar-wrap"><div class="progress-bar-fill" style="width: ${Math.min(100, p.yuzde)}%;"></div></div>
+                        <span style="font-size:0.78rem; color:#94a3b8;">%${p.yuzde}</span>
+                    </td>
+                    <td style="font-size:0.8rem; color:#64748b;">${esc(p.son_cikis || '-')}</td>
+                </tr>
+            `).join('');
+        }
+
+        // Render Batches Table
+        function renderBatchesTable(list) {
+            const tbody = document.getElementById('tbody-batches');
+            if (!list || list.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#64748b; padding:2rem;">Parti verisi bulunamadı.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = list.map((b, idx) => `
+                <tr>
+                    <td style="color:#64748b;">${idx + 1}</td>
+                    <td><span style="font-family:monospace; background:rgba(245,158,11,0.12); color:#fbbf24; padding:0.2rem 0.5rem; border-radius:6px; font-size:0.82rem; font-weight:600;">${esc(b.parti)}</span></td>
+                    <td><b style="color:#fff;">${esc(b.urun_adi)}</b></td>
+                    <td style="text-align:right; font-weight:700; color:#10b981;">${Number(b.adet).toLocaleString('tr-TR')}</td>
+                    <td style="color:#94a3b8; font-size:0.82rem;">${esc(b.skt || '-')}</td>
+                </tr>
+            `).join('');
+        }
+
+        // Render Monthly Table
+        function renderMonthlyTable(monthly) {
+            const tbody = document.getElementById('tbody-monthly-detail');
+            if (!monthly || !monthly.etiketler) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#64748b;">Veri bulunamadı.</td></tr>';
+                return;
+            }
+
+            const total = monthly.veriler.reduce((a, b) => a + b, 0);
+
+            tbody.innerHTML = monthly.etiketler.map((mName, idx) => {
+                const cnt = monthly.veriler[idx] || 0;
+                const pct = total > 0 ? ((cnt / total) * 100).toFixed(1) : 0;
+                return `
+                    <tr>
+                        <td style="color:#64748b; font-weight:600;">${idx + 1}</td>
+                        <td><b>${mName}</b></td>
+                        <td style="text-align:right; font-weight:700; color:${cnt > 0 ? '#10b981' : '#64748b'};">${Number(cnt).toLocaleString('tr-TR')}</td>
+                        <td>
+                            <div class="progress-bar-wrap"><div class="progress-bar-fill" style="width: ${Math.min(100, pct)}%;"></div></div>
+                            <span style="font-size:0.78rem; color:#94a3b8;">%${pct}</span>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function esc(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        async function logoutUser() {
+            if (!confirm('Oturumdan çıkmak istediğinize emin misiniz?')) return;
+            try {
+                await fetch('/api/system/logout', { method: 'POST', headers: getAuthHeaders() });
+            } catch (e) {}
+            localStorage.removeItem('local_session_token');
+            window.location.href = '/login';
+        }
+    </script>
 </body>
 </html>
 
@@ -9310,6 +12470,10 @@ function esc(str) {
                 <a href="/depo_kabul" class="sidebar-link">
                     <i class="fa-solid fa-boxes-packing"></i>
                     <span>Depoya Kabul Et</span>
+                </a>
+                <a href="/istatistikler" class="sidebar-link">
+                    <i class="fa-solid fa-chart-pie"></i>
+                    <span>İstatistikler & Raporlar</span>
                 </a>
                 <a href="/kullaniciya-satis" class="sidebar-link active">
                     <i class="fa-solid fa-user-tag"></i>
@@ -9857,476 +13021,14 @@ function esc(str) {
 
 ---
 
-### 📁 `templates/login.html`
+### 📁 `static/chart.umd.min.js` (3. Parti Kütüphane)
 
-```html
-<!DOCTYPE html>
-<html lang="tr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>QR Compare</title>
-    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
-    <link rel="shortcut icon" href="/static/favicon.ico">
-    <!-- Google Fonts Outfit & Inter -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <!-- FontAwesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="/static/style.css">
-    <style>
-        body {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            margin: 0;
-            background-color: var(--bg-dark);
-            overflow: hidden;
-        }
-
-        .login-card-wrapper {
-            width: 100%;
-            max-width: 440px;
-            padding: 2.5rem;
-            background: rgba(15, 23, 42, 0.85);
-            border: 1px solid rgba(56, 189, 248, 0.25);
-            border-radius: 24px;
-            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.7);
-            backdrop-filter: blur(20px);
-            position: relative;
-            z-index: 10;
-        }
-
-        .login-brand {
-            text-align: center;
-            margin-bottom: 2rem;
-        }
-
-        .login-brand i {
-            font-size: 3rem;
-            background: linear-gradient(135deg, #38bdf8, #818cf8);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            margin-bottom: 0.5rem;
-            filter: drop-shadow(0 0 12px rgba(56, 189, 248, 0.4));
-        }
-
-        .login-brand h1 {
-            font-family: var(--font-outfit);
-            font-size: 1.8rem;
-            font-weight: 800;
-            color: #ffffff;
-            margin: 0;
-        }
-
-        .login-brand p {
-            font-size: 0.88rem;
-            color: var(--text-muted);
-            margin-top: 6px;
-        }
-
-        .form-group {
-            margin-bottom: 1.3rem;
-        }
-
-        .form-label {
-            display: block;
-            font-size: 0.85rem;
-            font-weight: 700;
-            color: #cbd5e1;
-            margin-bottom: 8px;
-        }
-
-        .form-input {
-            width: 100%;
-            padding: 0.85rem 1.1rem;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 12px;
-            color: #ffffff;
-            font-family: var(--font-inter);
-            font-size: 0.95rem;
-            outline: none;
-            transition: all 0.2s ease;
-        }
-
-        .form-input:focus {
-            border-color: #38bdf8;
-            box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.25);
-            background: rgba(255, 255, 255, 0.08);
-        }
-
-        .btn-login {
-            width: 100%;
-            padding: 0.95rem;
-            background: linear-gradient(135deg, #2563eb, #3b82f6);
-            color: #ffffff;
-            font-family: var(--font-outfit);
-            font-size: 1rem;
-            font-weight: 700;
-            border: none;
-            border-radius: 12px;
-            cursor: pointer;
-            box-shadow: 0 6px 20px rgba(37, 99, 235, 0.35);
-            transition: all 0.2s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 0.6rem;
-            margin-top: 1.8rem;
-        }
-
-        .btn-login:hover {
-            background: linear-gradient(135deg, #1d4ed8, #2563eb);
-            transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(37, 99, 235, 0.45);
-        }
-
-        .login-alert {
-            display: none;
-            padding: 10px 14px;
-            border-radius: 10px;
-            font-size: 0.85rem;
-            font-weight: 600;
-            margin-bottom: 1.2rem;
-            text-align: center;
-        }
-    </style>
-</head>
-<body>
-    <div class="glass-bg-decor1"></div>
-    <div class="glass-bg-decor2"></div>
-
-    <div class="login-card-wrapper">
-        <div class="login-brand">
-            <i class="fa-solid fa-qrcode"></i>
-            <h1>QR Compare</h1>
-            <p>Bakanlık BKST Giriş Paneli</p>
-        </div>
-
-        <div id="loginAlert" class="login-alert"></div>
-
-        <form id="loginForm" onsubmit="handleLoginSubmit(event)">
-            <div class="form-group">
-                <label class="form-label" for="username">
-                    <i class="fa-solid fa-user" style="color:#38bdf8;"></i> Bakanlık T.C. / Kullanıcı Adı
-                </label>
-                <input type="text" id="username" class="form-input" placeholder="T.C. Kimlik Numaranızı girin..." required autocomplete="off">
-            </div>
-
-            <div class="form-group">
-                <label class="form-label" for="password">
-                    <i class="fa-solid fa-lock" style="color:#34d399;"></i> Bakanlık Şifresi
-                </label>
-                <input type="password" id="password" class="form-input" placeholder="BKST şifrenizi girin..." required autocomplete="off">
-            </div>
-
-            <button type="submit" id="btnLoginSubmit" class="btn-login">
-                <i class="fa-solid fa-right-to-bracket"></i> Giriş Yap ve Kaydet
-            </button>
-        </form>
-    </div>
-
-    <script>
-        async function handleLoginSubmit(e) {
-            e.preventDefault();
-            const username = document.getElementById('username').value.trim();
-            const password = document.getElementById('password').value.trim();
-            const btn = document.getElementById('btnLoginSubmit');
-            const alertBox = document.getElementById('loginAlert');
-
-            if (!username || !password) {
-                showAlert('Lütfen Kullanıcı Adı ve Şifre alanlarını doldurun.', true);
-                return;
-            }
-
-            btn.disabled = true;
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Doğrulanıyor...';
-            alertBox.style.display = 'none';
-
-            try {
-                const res = await fetch('/api/system/login', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password })
-                });
-                const data = await res.json();
-
-                if (data.success) {
-                    if (data.token) {
-                        localStorage.setItem('local_session_token', data.token);
-                    }
-                    sessionStorage.removeItem('app_launch_synced');
-                    sessionStorage.setItem('startup_update_checked', 'true');
-                    showAlert('🟢 Giriş başarılı! Yönlendiriliyorsunuz...', false);
-                    setTimeout(() => {
-                        window.location.href = '/cikis?force_sync=1';
-                    }, 800);
-                } else {
-                    showAlert('❌ ' + (data.error || 'Giriş yapılamadı. Bilgilerinizi kontrol edin.'), true);
-                }
-            } catch (err) {
-                showAlert('❌ Bağlantı hatası: ' + err.message, true);
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Giriş Yap ve Kaydet';
-            }
-        }
-
-        function showAlert(msg, isError) {
-            const alertBox = document.getElementById('loginAlert');
-            alertBox.style.display = 'block';
-            if (isError) {
-                alertBox.style.background = 'rgba(239, 68, 68, 0.15)';
-                alertBox.style.border = '1px solid rgba(239, 68, 68, 0.35)';
-                alertBox.style.color = '#f87171';
-            } else {
-                alertBox.style.background = 'rgba(34, 197, 94, 0.15)';
-                alertBox.style.border = '1px solid rgba(34, 197, 94, 0.35)';
-                alertBox.style.color = '#4ade80';
-            }
-            alertBox.innerHTML = msg;
-        }
-
-        // Heartbeat (Sunucunun login ekranındayken kapanmasını önler)
-        (function startHeartbeat() {
-            function sendPing() {
-                fetch('/api/system/heartbeat', { method: 'POST' }).catch(() => {});
-            }
-            sendPing();
-            setInterval(sendPing, 10000);
-        })();
-
-        // İlk Açılışta Arka Plan Güncelleme Kontrolü (Login Formu Öncesi)
-        (async function checkLoginStartupUpdate() {
-            if (sessionStorage.getItem('startup_update_checked')) {
-                return;
-            }
-            sessionStorage.setItem('startup_update_checked', 'true');
-
-            try {
-                const res = await fetch('/api/system/check_update');
-                if (res.ok) {
-                    const data = await res.json();
-                    if (data && data.has_update) {
-                        showLoginUpdateOverlay(data);
-                    }
-                }
-            } catch (e) {
-                console.warn("Login update check error:", e);
-            }
-        })();
-
-        function showLoginUpdateOverlay(updateInfo) {
-            let overlay = document.getElementById('loginUpdateOverlay');
-            if (!overlay) {
-                overlay = document.createElement('div');
-                overlay.id = 'loginUpdateOverlay';
-                overlay.style.cssText = `
-                    position: fixed;
-                    top: 0; left: 0; width: 100vw; height: 100vh;
-                    background: #0f172a;
-                    color: #ffffff;
-                    z-index: 9999999;
-                    display: flex;
-                    flex-direction: column;
-                    align-items: center;
-                    justify-content: center;
-                    font-family: 'Outfit', 'Inter', sans-serif;
-                    text-align: center;
-                    padding: 20px;
-                `;
-                overlay.innerHTML = `
-                    <div style="background: rgba(30, 41, 59, 0.95); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 24px; padding: 40px 32px; max-width: 480px; width: 90%; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.8); backdrop-filter: blur(12px);">
-                        <div style="width: 80px; height: 80px; margin: 0 auto 20px; background: rgba(56, 189, 248, 0.12); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
-                            <i class="fa-solid fa-cloud-arrow-down fa-bounce" style="font-size: 38px; color: #38bdf8;"></i>
-                        </div>
-                        <h2 style="font-size: 1.55rem; font-weight: 800; margin-bottom: 10px; color: #f8fafc;">Uygulama Güncelleniyor</h2>
-                        <p id="loginUpdateMsg" style="font-size: 0.95rem; color: #94a3b8; line-height: 1.6; margin-bottom: 24px;">
-                            Yeni sürüm (${updateInfo.remote_version || 'v3.1.x'}) tespit edildi. Güncelleme paketleri indiriliyor ve sisteme entegre ediliyor...
-                        </p>
-                        <div style="width: 100%; height: 8px; background: #334155; border-radius: 999px; overflow: hidden; position: relative;">
-                            <div id="loginUpdateBar" style="width: 45%; height: 100%; background: linear-gradient(90deg, #38bdf8, #3b82f6); border-radius: 999px; transition: width 0.4s ease; animation: updateProgressAnim 1.8s infinite linear;"></div>
-                        </div>
-                        <p id="loginUpdateSub" style="font-size: 0.82rem; color: #64748b; margin-top: 18px; font-weight: 500;">
-                            <i class="fa-solid fa-circle-info" style="color: #38bdf8; margin-right: 4px;"></i> İşlem tamamlandığında program sıfırdan otomatik başlatılacaktır.
-                        </p>
-                    </div>
-                    <style>
-                        @keyframes updateProgressAnim {
-                            0% { transform: translateX(-100%); width: 30%; }
-                            50% { width: 60%; }
-                            100% { transform: translateX(350%); width: 30%; }
-                        }
-                    </style>
-                `;
-                document.body.appendChild(overlay);
-            }
-
-            fetch('/api/system/apply_update', { method: 'POST' })
-                .then(res => res.json())
-                .then(async data => {
-                    const msgEl = document.getElementById('loginUpdateMsg');
-                    const barEl = document.getElementById('loginUpdateBar');
-                    const subEl = document.getElementById('loginUpdateSub');
-
-                    if (data.success && data.updated) {
-                        if (barEl) {
-                            barEl.style.animation = 'none';
-                            barEl.style.width = '100%';
-                        }
-                        if (msgEl) {
-                            msgEl.style.color = '#4ade80';
-                            msgEl.innerHTML = '<strong>✅ Güncelleme Başarıyla Tamamlandı!</strong><br>Program sıfırdan yeniden başlatılıyor...';
-                        }
-                        if (subEl) subEl.textContent = 'Yeni sistem yükleniyor, lütfen bekleyin...';
-
-                        await new Promise(r => setTimeout(r, 2200));
-                        for (let i = 0; i < 30; i++) {
-                            await new Promise(r => setTimeout(r, 800));
-                            try {
-                                const ping = await fetch('/api/system/heartbeat', { method: 'POST' });
-                                if (ping.ok) break;
-                            } catch (_) {}
-                        }
-                        window.location.reload(true);
-                    } else {
-                        if (msgEl) msgEl.textContent = data.message || "Sistem zaten güncel.";
-                        setTimeout(() => { if (overlay) overlay.remove(); }, 1200);
-                    }
-                })
-                .catch(err => {
-                    console.error("Login apply update error:", err);
-                    setTimeout(() => { if (overlay) overlay.remove(); }, 2000);
-                });
-        }
-    </script>
-</body>
-</html>
-
-```
+> **Chart.js v4.4.1 (UMD Minified)** kütüphanesi çevrimdışı (offline) kullanım için yerel olarak barındırılmaktadır. Boyutu ~200 KB minified JS olduğu için doküman bütünlüğünü korumak adına kaynak kodu `static/chart.umd.min.js` dosyasında yer almaktadır.
 
 ---
 
-### 📁 `Calistir.bat`
+### 📁 `Calistir.exe` (Derlenmiş Windows Uygulaması)
 
-```bat
-@echo off
-cd /d "%~dp0"
-chcp 65001 > nul
-title QR Stok Yonetim Sistemi
-
-:: 1. Python kontrolu
-python --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo ============================================================
-    echo [HATA] Python bu bilgisayarda bulunamadi!
-    echo.
-    echo Lutfen https://www.python.org adresinden Python'u indirin.
-    echo KURULUM SIRASINDA EN ALTTAKI "Add Python to PATH" KUTUCUGUNU
-    echo MUTLAKA ISARETLEYIN!
-    echo ============================================================
-    echo.
-    pause
-    exit /b 1
-)
-
-:: 2. Gerekli kutuphaneler kontrolu
-python -c "import flask, waitress, pandas, openpyxl, requests" >nul 2>&1
-if %errorlevel% neq 0 (
-    echo ============================================================
-    echo [BILGI] Ilk calisma icin gerekli paketler kuruluyor...
-    echo (waitress, flask, pandas, openpyxl, requests vb.)
-    echo Lutfen bekleyin, bu islem sadece bir kez yapilacaktir...
-    echo ============================================================
-    echo.
-    python -m pip install --upgrade pip >nul 2>&1
-    python -m pip install -r requirements.txt
-    if %errorlevel% neq 0 (
-        echo.
-        echo [BILGI] requirements.txt tam yuklenemedi, temel kutuphaneler kuruluyor...
-        python -m pip install flask waitress pandas openpyxl requests xlrd
-    )
-    echo.
-    echo [BASARILI] Tum paketler kuruldu, program baslatiliyor...
-    timeout /t 2 >nul
-)
-
-:: 3. Calistir
-if exist "%~dp0Calistir.exe" (
-    start "" "%~dp0Calistir.exe"
-) else (
-    start "" pythonw launcher.py
-)
-exit
-
-```
+> `build_exe.ps1` scripti çalıştırılarak doğrudan yerel C# derleyicisi (`Add-Type`) üzerinden üretilen 64-bit bağımsız Windows başlatıcı ikili dosyasıdır. Kaynak kodu yukarıdaki `build_exe.ps1` içerisinde yer almaktadır.
 
 ---
-
-### 📁 `Guncelle.bat`
-
-```bat
-@echo off
-cd /d "%~dp0"
-set PYTHONIOENCODING=utf-8
-chcp 65001 > nul
-title QR Stok Yonetim Sistemi - Guncelleyici
-
-echo.
-echo ============================================================
-echo      QR STOK YONETIM SISTEMI - GUNCELLEME SERVISI
-echo ============================================================
-echo.
-
-python guncelleme_kontrol.py
-
-echo.
-echo ============================================================
-echo [TAMAMLANDI] Islem sona erdi.
-echo ============================================================
-echo.
-echo Pencereyi kapatmak icin herhangi bir tusa basin...
-pause >nul
-exit
-
-```
-
----
-
-### 📁 `Kapat.bat`
-
-```bat
-@echo off
-cd /d "%~dp0"
-chcp 65001 > nul
-title QR Stok Yonetim Sistemi - Kapatici
-
-echo.
-echo ============================================================
-echo   QR STOK YÖNETİM SİSTEMİ ARKA PLAN SUNUCUSU KAPATILIYOR...
-echo ============================================================
-echo.
-
-powershell -Command "Get-Process python,pythonw,py -ErrorAction SilentlyContinue | Stop-Process -Force" > nul 2>&1
-taskkill /F /IM python.exe > nul 2>&1
-taskkill /F /IM pythonw.exe > nul 2>&1
-taskkill /F /IM py.exe > nul 2>&1
-
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr :5000 ^| findstr LISTENING') do (
-    taskkill /F /PID %%a > nul 2>&1
-)
-
-echo.
-echo 🟢 Arka plandaki tüm sunucu süreçleri başarıyla kapatıldı.
-echo.
-timeout /t 2 > nul
-exit
-
-```
-
----
-
