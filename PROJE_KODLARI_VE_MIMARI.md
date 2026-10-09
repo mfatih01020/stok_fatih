@@ -1,6 +1,6 @@
 # QR COMPARE STOK & KAREKOD YÖNETİM SİSTEMİ - TÜM PROJE KODLARI VE MİMARİSİ
 
-> **Sürüm:** v3.2.0 (Son Güncelleme: 09.10.2026 - Çoklu Yıl Destekli İstatistikler, Depoya Kabul Gerçek Durum Tespiti, GTIN/Koli Geliştirmeleri)  
+> **Sürüm:** v3.2.1 (Son Güncelleme: 09.10.2026 - CSRF ve X-Requested-With İstemci/Sunucu Tam Uyumluluğu, Reçetesiz Satış SMS Doğrulama & QR Düzeltmeleri)  
 > **Konum:** `c:\Users\fatih\Desktop\asım iş`
 
 ---
@@ -90,10 +90,10 @@ Aşağıda QR Compare v3.2.0 projesinin tüm kaynak kodları eksiksiz olarak lis
 
 ```json
 {
-  "version": "v3.2.0",
-  "commit": "3.2.0",
+  "version": "v3.2.1",
+  "commit": "3.2.1",
   "date": "09.10.2026",
-  "message": "v3.2.0: Kalıcı satış istatistiği arşivi (satis_arsivi), /api/istatistikler tam modülü, Depoya Kabul gerçek durum tespiti (Kabul Bekliyor / Stoğa Alınmış), GTIN tek başına reddi, Single-Instance Mutex ve Bring-to-Front, çoklu yıl istatistikleri",
+  "message": "v3.2.1: CSRF & X-Requested-With istemci/sunucu tam uyumluluğu, Reçetesiz Satış SMS doğrulama ve QR okutma düzeltmeleri, regresyon temizlikleri",
   "files": [
     ".gitignore",
     "Calistir.bat",
