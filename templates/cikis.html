@@ -583,7 +583,8 @@ document.getElementById('btn-temizle-son').addEventListener('click', async () =>
 });
 
 function esc(str) {
-    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    if (window.esc) return window.esc(str);
+    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
     </script>
 

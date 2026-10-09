@@ -13,6 +13,8 @@ os.chdir(BASE_DIR)
 
 NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
 
+SSL_VERIFY = os.environ.get("QR_SSL_VERIFY", "1") == "1"
+
 # Windows Konsolu için ANSI Renk ve UTF-8 Türkçe Karakter Desteğini Aktifleştir
 if os.name == 'nt':
     try:
@@ -141,7 +143,7 @@ def http_update():
     remote_vurl = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/main/version.json?t={timestamp}"
 
     try:
-        resp = requests.get(remote_vurl, verify=False, timeout=10, headers=headers)
+        resp = requests.get(remote_vurl, verify=SSL_VERIFY, timeout=10, headers=headers)
         if resp.status_code != 200:
             print(f"  {RED}[HATA] Güncelleme sunucusuna ulaşılamadı (HTTP {resp.status_code}){RESET}")
             return False
@@ -179,7 +181,7 @@ def http_update():
         print(f"\n  {YELLOW}{BOLD}[2/3] [🔄 YENİ SÜRÜM TESPİT EDİLDİ: {remote_version}] Dosyalar indiriliyor...{RESET}")
 
         zip_url = f"https://github.com/mfatih01020/stok_fatih/archive/refs/heads/main.zip?t={timestamp}"
-        zip_resp = requests.get(zip_url, verify=False, timeout=40, headers=headers)
+        zip_resp = requests.get(zip_url, verify=SSL_VERIFY, timeout=40, headers=headers)
 
         if zip_resp.status_code != 200:
             print(f"  {RED}[HATA] Güncelleme zip paketi indirilemedi (HTTP {zip_resp.status_code}){RESET}")

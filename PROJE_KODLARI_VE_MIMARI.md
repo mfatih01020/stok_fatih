@@ -93,7 +93,7 @@ Aşağıda QR Compare v3.2.0 projesinin tüm kaynak kodları eksiksiz olarak lis
   "version": "v3.2.0",
   "commit": "3.2.0",
   "date": "09.10.2026",
-  "message": "v3.2.0: Çoklu yıl destekli İstatistikler & Satış Raporları, aylık trend grafikleri, Depoya Kabul Et gerçek durum filtreleme (Kabul Bekliyor / Stoğa Alınmış), GTIN ve koli eşleme geliştirmeleri",
+  "message": "v3.2.0: Kalıcı satış istatistiği arşivi (satis_arsivi), /api/istatistikler tam modülü, Depoya Kabul gerçek durum tespiti (Kabul Bekliyor / Stoğa Alınmış), GTIN tek başına reddi, Single-Instance Mutex ve Bring-to-Front, çoklu yıl istatistikleri",
   "files": [
     ".gitignore",
     "Calistir.bat",
@@ -258,6 +258,10 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 
+// NOT: Mutex yalnızca launcher'ın kendi çift tıklama yarışını engeller.
+// Asıl single-instance kontrolü IsPortOpen("127.0.0.1", 5000) ile yapılır.
+// Python sunucusu bir kere başladıktan sonra ikinci Calistir.exe çağrısı
+// port açık olduğu için yeni Python başlatmaz; sadece pencereyi öne getirir.
 public class AppLauncher {
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
@@ -811,6 +815,8 @@ os.chdir(BASE_DIR)
 
 NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
 
+SSL_VERIFY = os.environ.get("QR_SSL_VERIFY", "1") == "1"
+
 # Windows Konsolu için ANSI Renk ve UTF-8 Türkçe Karakter Desteğini Aktifleştir
 if os.name == 'nt':
     try:
@@ -939,7 +945,7 @@ def http_update():
     remote_vurl = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/main/version.json?t={timestamp}"
 
     try:
-        resp = requests.get(remote_vurl, verify=False, timeout=10, headers=headers)
+        resp = requests.get(remote_vurl, verify=SSL_VERIFY, timeout=10, headers=headers)
         if resp.status_code != 200:
             print(f"  {RED}[HATA] Güncelleme sunucusuna ulaşılamadı (HTTP {resp.status_code}){RESET}")
             return False
@@ -977,7 +983,7 @@ def http_update():
         print(f"\n  {YELLOW}{BOLD}[2/3] [🔄 YENİ SÜRÜM TESPİT EDİLDİ: {remote_version}] Dosyalar indiriliyor...{RESET}")
 
         zip_url = f"https://github.com/mfatih01020/stok_fatih/archive/refs/heads/main.zip?t={timestamp}"
-        zip_resp = requests.get(zip_url, verify=False, timeout=40, headers=headers)
+        zip_resp = requests.get(zip_url, verify=SSL_VERIFY, timeout=40, headers=headers)
 
         if zip_resp.status_code != 200:
             print(f"  {RED}[HATA] Güncelleme zip paketi indirilemedi (HTTP {zip_resp.status_code}){RESET}")
@@ -1067,6 +1073,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import concurrent.futures
 from datetime import datetime
+import random
 import subprocess
 import socket
 import atexit
@@ -1101,6 +1108,8 @@ handler = RotatingFileHandler(os.path.join(os.path.dirname(os.path.abspath(__fil
 handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
 logging.basicConfig(level=logging.INFO, handlers=[handler])
 logger = logging.getLogger('qr_compare')
+
+SSL_VERIFY = os.environ.get("QR_SSL_VERIFY", "1") == "1"
 
 # ── Dynamic Flask Secret Key ─────────────────────────────────────────────────
 FLASK_SECRET_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".flask_secret")
@@ -1138,16 +1147,13 @@ _app_bkst_synced = False
 _fetch_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix='bkst_fetch')
 _fetch_future = None
 
-# ── Heartbeat Watchdog Thread ─────────────────────────────────────────────────
-_last_heartbeat = time.time()
-
-def heartbeat_watchdog():
-    while True:
-        time.sleep(15)
-        if time.time() - _last_heartbeat > 60:
-            logger.warning("Heartbeat timeout (60s). Uygulama otomatik yenileniyor/kapatılıyor.")
-
-threading.Thread(target=heartbeat_watchdog, daemon=True).start()
+# ── Template Vars TTL Cache ───────────────────────────────────────────────────
+_template_vars_cache = {
+    'expires_at': 0,
+    'user_name': '', 'v_code': '', 'full_commit': '',
+    'v_date': '', 'v_msg': ''
+}
+_template_vars_lock = threading.Lock()
 
 # ── Session Token Authentication Helper ───────────────────────────────────────
 SESSION_TOKEN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".session_token")
@@ -1213,6 +1219,13 @@ def check_authentication():
         if not any(t == LOCAL_SESSION_TOKEN for t in valid_tokens):
             return jsonify({'success': False, 'error': 'Geçersiz veya eksik oturum anahtarı', 'code': 401}), 401
 
+        # CSRF Koruması: Veri değiştiren isteklerde X-Requested-With zorunludur
+        if request.method in ['POST', 'PUT', 'DELETE']:
+            if request.headers.get('X-Requested-With') != 'XMLHttpRequest':
+                return jsonify({'success': False,
+                                'error': 'CSRF koruması: X-Requested-With başlığı eksik',
+                                'code': 403}), 403
+
     return None
 
 # ── Sürüm & Güncelleme Bilgisi ────────────────────────────────────────────────
@@ -1245,16 +1258,12 @@ def get_version_info():
 
 @app.route('/api/system/heartbeat', methods=['POST', 'GET'])
 def system_heartbeat():
-    global _last_heartbeat
-    _last_heartbeat = time.time()
     payload = _bkst_state_payload()
-    payload["local_count"] = _local_item_count()
+    payload["local_count"] = _local_item_count_cached()
     return jsonify(payload)
 
 @app.route('/api/heartbeat', methods=['POST', 'GET'])
 def api_heartbeat():
-    global _last_heartbeat
-    _last_heartbeat = time.time()
     return jsonify({'status': 'ok'})
 
 # ── SQLite Veritabanı Katmanı & Staging Swap ──────────────────────────────────
@@ -1495,13 +1504,7 @@ def ensure_db_schema(conn=None):
             c.execute('''
                 INSERT INTO satis_arsivi (tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no, uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi, durum)
                 SELECT tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no, uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi, 'CIKIS_YAPILDI'
-                FROM cikis_kayitlari ck
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM satis_arsivi sa 
-                    WHERE sa.tarih = ck.tarih 
-                      AND sa.ham_karekod = ck.ham_karekod 
-                      AND (sa.seri_no = ck.seri_no OR (sa.seri_no IS NULL AND ck.seri_no IS NULL))
-                )
+                FROM cikis_kayitlari
             ''')
             c.execute("INSERT OR REPLACE INTO schema_migrations (key, migrated_at) VALUES ('v315_initial_archive_backfill', ?)", 
                       (datetime.now().strftime('%Y-%m-%d %H:%M:%S'),))
@@ -1622,41 +1625,58 @@ def clean_user_name(name):
 
 @app.context_processor
 def inject_global_template_vars():
-    username, password, address_id, api_key = read_bkst_credentials()
-    user_name = "Giriş Yapılmadı"
-    if username:
-        user_name = username
-        cred_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bakanlik_giris_bilgileri.txt")
-        if os.path.exists(cred_file):
-            try:
-                with open(cred_file, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        if line.strip().startswith("KULLANICI_ISIM="):
-                            val = line.strip().split("=", 1)[1].strip()
-                            if val:
-                                user_name = val
-                                break
-            except Exception:
-                pass
-        user_name = clean_user_name(user_name or username)
+    now = time.time()
+    with _template_vars_lock:
+        if now > _template_vars_cache['expires_at']:
+            username, password, address_id, api_key = read_bkst_credentials()
+            user_name = "Giriş Yapılmadı"
+            if username:
+                user_name = username
+                cred_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bakanlik_giris_bilgileri.txt")
+                if os.path.exists(cred_file):
+                    try:
+                        with open(cred_file, 'r', encoding='utf-8') as f:
+                            for line in f:
+                                if line.strip().startswith("KULLANICI_ISIM="):
+                                    val = line.strip().split("=", 1)[1].strip()
+                                    if val:
+                                        user_name = val
+                                        break
+                    except Exception:
+                        pass
+                user_name = clean_user_name(user_name or username)
 
-    v_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.json")
-    v_code = "v1.0"
-    v_commit = ""
-    v_date = datetime.now().strftime("%d.%m.%Y")
-    v_msg = "Sistem Güncel"
-    if os.path.exists(v_path):
-        try:
-            with open(v_path, "r", encoding="utf-8") as f:
-                v_data = json.load(f)
-                v_code = str(v_data.get("version", "v1.0")).strip()
-                v_commit = str(v_data.get("commit", "")).strip()
-                v_date = str(v_data.get("date", "")).strip()
-                v_msg = str(v_data.get("message", "Sistem Güncel")).strip()
-        except Exception:
-            pass
+            v_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.json")
+            v_code = "v1.0"
+            v_commit = ""
+            v_date = datetime.now().strftime("%d.%m.%Y")
+            v_msg = "Sistem Güncel"
+            if os.path.exists(v_path):
+                try:
+                    with open(v_path, "r", encoding="utf-8") as f:
+                        v_data = json.load(f)
+                        v_code = str(v_data.get("version", "v1.0")).strip()
+                        v_commit = str(v_data.get("commit", "")).strip()
+                        v_date = str(v_data.get("date", "")).strip()
+                        v_msg = str(v_data.get("message", "Sistem Güncel")).strip()
+                except Exception:
+                    pass
 
-    full_commit = f"{v_code} ({v_commit})" if v_commit else v_code
+            full_commit = f"{v_code} ({v_commit})" if v_commit else v_code
+            _template_vars_cache.update({
+                'expires_at': now + 30,
+                'user_name': user_name,
+                'v_code': v_code,
+                'full_commit': full_commit,
+                'v_date': v_date,
+                'v_msg': v_msg
+            })
+
+        user_name = _template_vars_cache['user_name']
+        v_code = _template_vars_cache['v_code']
+        full_commit = _template_vars_cache['full_commit']
+        v_date = _template_vars_cache['v_date']
+        v_msg = _template_vars_cache['v_msg']
 
     global bkst_online, bkst_status
     is_offline = (bkst_online is False or bkst_status in ("offline", "error"))
@@ -1681,7 +1701,7 @@ def normalize_qr(qr):
         return ""
     qr_str = str(qr).strip().replace(" ", "")
     qr_str = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', qr_str)
-    return qr_str.upper()
+    return qr_str
 
 def parse_gs1_qr(qr_str):
     if not qr_str or pd.isna(qr_str):
@@ -1713,13 +1733,17 @@ def parse_gs1_qr(qr_str):
             elif token[idx:].startswith("17") and len(token[idx:]) >= 8 and token[idx+2:idx+8].isdigit():
                 if not result["skt"]:
                     yy, mm, dd = token[idx+2:idx+4], token[idx+4:idx+6], token[idx+6:idx+8]
-                    result["skt"] = f"{dd}.{mm}.20{yy}"
+                    yy_int = int(yy)
+                    century = "19" if 50 <= yy_int <= 99 else "20"
+                    result["skt"] = f"{dd}.{mm}.{century}{yy}"
                 idx += 8
                 continue
             elif token[idx:].startswith("11") and len(token[idx:]) >= 8 and token[idx+2:idx+8].isdigit():
                 if not result["uretim_tarihi"]:
                     yy, mm, dd = token[idx+2:idx+4], token[idx+4:idx+6], token[idx+6:idx+8]
-                    result["uretim_tarihi"] = f"{dd}.{mm}.20{yy}"
+                    yy_int = int(yy)
+                    century = "19" if 50 <= yy_int <= 99 else "20"
+                    result["uretim_tarihi"] = f"{dd}.{mm}.{century}{yy}"
                 idx += 8
                 continue
             elif token[idx:].startswith("21") and len(token[idx:]) > 2:
@@ -1759,8 +1783,62 @@ def find_koli_column(cols):
 
 def get_bkst_cache():
     username, _, _, _ = read_bkst_credentials()
-    user_key = username or "default_user"
+    if not username:
+        # FIX-CACHE-ANON: username yoksa DB'den oku, bellek önbelleğine yazmadan döndür
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        try:
+            df = pd.read_sql_query("SELECT * FROM bkst_depo_verileri", conn)
+        except Exception:
+            df = pd.DataFrame()
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
+        if df is None or df.empty:
+            return None, {}, {}, {}
+
+        df = df.rename(columns={
+            'gtin': 'Gtin Numarası',
+            'urun_adi': 'Ürün Adı',
+            'seri_no': 'Seri Numarası',
+            'parti_no': 'Parti Numarası',
+            'koli_no': 'Koli Numarası',
+            'palet_no': 'Palet Numarası',
+            'uretim_tarihi': 'Üretim Tarihi',
+            'skt': 'Son Kullanma Tarihi',
+            'tam_karekod': 'Karekod'
+        })
+        if 'Karekod' in df.columns:
+            df = df.drop_duplicates(subset=['Karekod'])
+
+        koli_dict = {}
+        qr_dict = {}
+        gtin_dict = {}
+
+        for r in df.to_dict(orient="records"):
+            qr_val = normalize_qr(str(r.get("Karekod", "")))
+            gtin_val = normalize_qr(str(r.get("Gtin Numarası", "")))
+            koli_val = str(r.get("Koli Numarası", "")).strip().upper()
+
+            if qr_val:
+                qr_dict[qr_val] = r
+                qr_dict[qr_val.casefold()] = r
+            if gtin_val:
+                if gtin_val not in gtin_dict:
+                    gtin_dict[gtin_val] = r
+                if gtin_val.casefold() not in gtin_dict:
+                    gtin_dict[gtin_val.casefold()] = r
+
+            if koli_val and koli_val != "NAN":
+                if koli_val not in koli_dict:
+                    koli_dict[koli_val] = []
+                koli_dict[koli_val].append(r)
+
+        return (df, qr_dict, gtin_dict, koli_dict)
+
+    user_key = username
     with _state_lock:
         if user_key in _user_cache_map:
             if user_key in _cache_access_order:
@@ -1770,18 +1848,12 @@ def get_bkst_cache():
 
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
     try:
-        if username:
-            df = pd.read_sql_query("SELECT * FROM bkst_depo_verileri WHERE kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = ''", conn, params=(username,))
-        else:
-            df = pd.read_sql_query("SELECT * FROM bkst_depo_verileri", conn)
+        df = pd.read_sql_query("SELECT * FROM bkst_depo_verileri WHERE kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = ''", conn, params=(username,))
     except Exception as e:
         logger.error(f"Error querying bkst_depo_verileri, repairing schema: {e}")
         try:
             ensure_db_schema()
-            if username:
-                df = pd.read_sql_query("SELECT * FROM bkst_depo_verileri WHERE kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = ''", conn, params=(username,))
-            else:
-                df = pd.read_sql_query("SELECT * FROM bkst_depo_verileri", conn)
+            df = pd.read_sql_query("SELECT * FROM bkst_depo_verileri WHERE kullanici_adi = ? OR kullanici_adi IS NULL OR kullanici_adi = ''", conn, params=(username,))
         except Exception:
             df = pd.DataFrame()
     finally:
@@ -1819,8 +1891,12 @@ def get_bkst_cache():
 
         if qr_val:
             qr_dict[qr_val] = r
-        if gtin_val and gtin_val not in gtin_dict:
-            gtin_dict[gtin_val] = r
+            qr_dict[qr_val.casefold()] = r
+        if gtin_val:
+            if gtin_val not in gtin_dict:
+                gtin_dict[gtin_val] = r
+            if gtin_val.casefold() not in gtin_dict:
+                gtin_dict[gtin_val.casefold()] = r
 
         if koli_val and koli_val != "NAN":
             if koli_val not in koli_dict:
@@ -2439,16 +2515,13 @@ def find_matching_koli(code, koli_dict):
         if len(key_digits) == 20 and key_digits.startswith('00'):
             key_digits_stripped = key_digits[2:]
 
-        if clean_code_all and clean_key_all and (clean_code_all == clean_key_all or clean_code_all.endswith(clean_key_all) or clean_key_all.endswith(clean_code_all)):
+        if clean_code_all and clean_key_all and len(clean_code_all) >= 6 and len(clean_key_all) >= 6 and clean_code_all == clean_key_all:
             return k_key, k_rows
 
-        if digits_stripped and key_digits_stripped:
-            if digits_stripped == key_digits_stripped or digits_stripped.lstrip('0') == key_digits_stripped.lstrip('0'):
-                return k_key, k_rows
-
-        if digits_only and key_digits and digits_only.lstrip('0') == key_digits.lstrip('0'):
-            if len(raw_code) <= 8 or "KOLI" in clean_code_all or "PAKET" in clean_code_all or "PALET" in clean_code_all:
-                return k_key, k_rows
+        if (digits_stripped and key_digits_stripped
+            and len(digits_stripped) >= 6 and len(key_digits_stripped) >= 6
+            and digits_stripped == key_digits_stripped):
+            return k_key, k_rows
 
     return None, []
 
@@ -2667,12 +2740,26 @@ bkst_online = None
 bkst_fetched_count = 0
 
 
+_local_count_cache = {"val": 0, "ts": 0}
+_local_count_lock = threading.Lock()
+
 def _local_item_count():
     try:
         df_cache, _, _, _ = get_bkst_cache()
         return len(df_cache) if df_cache is not None else 0
     except Exception:
         return 0
+
+def _local_item_count_cached():
+    with _local_count_lock:
+        now = time.monotonic()
+        if now - _local_count_cache["ts"] < 30:
+            return _local_count_cache["val"]
+    v = _local_item_count()
+    with _local_count_lock:
+        _local_count_cache["val"] = v
+        _local_count_cache["ts"] = time.monotonic()
+    return v
 
 
 def _set_bkst_state(status, message, online, fetched=0):
@@ -2721,7 +2808,7 @@ def _do_fetch_api_worker():
 
         # 1) Ana sayfa
         try:
-            r_home = session.get("https://bkst.tarbil.gov.tr/", verify=False, timeout=(5, 10))
+            r_home = session.get("https://bkst.tarbil.gov.tr/", verify=SSL_VERIFY, timeout=(5, 10))
         except Exception as e_home:
             _mark_offline(f"Bakanlık sunucusuna (bkst.tarbil.gov.tr) ulaşılamıyor ({type(e_home).__name__}).")
             return
@@ -2735,7 +2822,7 @@ def _do_fetch_api_worker():
         # 2) Giriş
         res_login = session.post("https://bkst.tarbil.gov.tr/UserOperation/GetUserInf",
                                  data={"tcNo": username, "sifre": password, "__RequestVerificationToken": token1},
-                                 verify=False, timeout=(5, 15))
+                                 verify=SSL_VERIFY, timeout=(5, 15))
         if res_login.status_code != 200:
             _mark_offline(f"Bakanlık giriş servisi yanıt vermiyor (HTTP {res_login.status_code}).")
             return
@@ -2744,7 +2831,7 @@ def _do_fetch_api_worker():
             return
 
         # 3) Stok sayfası + GLN
-        r_stock_page = session.get("https://bkst.tarbil.gov.tr/Main/StockList", verify=False, timeout=(5, 10))
+        r_stock_page = session.get("https://bkst.tarbil.gov.tr/Main/StockList", verify=SSL_VERIFY, timeout=(5, 10))
         token2_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', r_stock_page.text)
         token2 = token2_match.group(1) if token2_match else token1
 
@@ -2754,7 +2841,7 @@ def _do_fetch_api_worker():
                 try:
                     r_gln = session.post("https://bkst.tarbil.gov.tr/Partial/GetGLN",
                                          data={"FirmType": f_type, "__RequestVerificationToken": token2},
-                                         verify=False, timeout=(5, 10))
+                                         verify=SSL_VERIFY, timeout=(5, 10))
                     if r_gln.status_code == 200:
                         gln_data = r_gln.json()
                         if isinstance(gln_data, list) and len(gln_data) > 0:
@@ -2775,7 +2862,7 @@ def _do_fetch_api_worker():
         # 4) Stok listesi
         r_grid = session.post("https://bkst.tarbil.gov.tr/Main/GetStockList",
                               data={"CompanyAddressId": gln_guid, "Gtin": "", "__RequestVerificationToken": token2},
-                              verify=False, timeout=(5, 15))
+                              verify=SSL_VERIFY, timeout=(5, 15))
         if r_grid.status_code != 200:
             _mark_offline(f"Bakanlık stok listesi servisi yanıt vermiyor (HTTP {r_grid.status_code}).")
             return
@@ -2797,10 +2884,10 @@ def _do_fetch_api_worker():
             try:
                 session.post("https://bkst.tarbil.gov.tr/Main/GetViewReport",
                              data={"gtin": gtin_code, "gln": gln_guid, "__RequestVerificationToken": token2},
-                             verify=False, timeout=(5, 10))
+                             verify=SSL_VERIFY, timeout=(5, 10))
                 r_detail = session.post("https://bkst.tarbil.gov.tr/Main/GetStockDetailList",
                                         data={"CompanyAddressId": gln_guid, "Gtin": gtin_code, "__RequestVerificationToken": token2},
-                                        verify=False, timeout=(5, 15))
+                                        verify=SSL_VERIFY, timeout=(5, 15))
             except Exception:
                 detail_errors += 1
                 continue
@@ -2891,7 +2978,7 @@ def _bkst_state_payload():
 @app.route('/api/bkst/fetch_status', methods=['GET'])
 def bkst_fetch_status():
     payload = _bkst_state_payload()
-    payload["local_count"] = _local_item_count()
+    payload["local_count"] = _local_item_count_cached()
     return jsonify(payload)
 
 @app.route('/api/bkst/download_api_data', methods=['GET'])
@@ -2943,10 +3030,39 @@ def api_depo_stoklari():
                 r['GTIN'] = gtin_val
                 rows.append(r)
 
+        total_count = len(rows)
+        page_param = request.args.get('page')
+        size_param = request.args.get('size')
+
+        if page_param is not None or size_param is not None:
+            try:
+                page = max(1, int(page_param or 1))
+            except Exception:
+                page = 1
+            try:
+                size = min(2000, max(1, int(size_param or 500)))
+            except Exception:
+                size = 500
+            start_idx = (page - 1) * size
+            end_idx = start_idx + size
+            paged_products = rows[start_idx:end_idx]
+            has_more = end_idx < total_count
+            return jsonify({
+                "success": True,
+                "products": paged_products,
+                "total": total_count,
+                "page": page,
+                "size": size,
+                "has_more": has_more
+            })
+
         return jsonify({
             "success": True,
             "products": rows,
-            "total": len(rows)
+            "total": total_count,
+            "page": 1,
+            "size": total_count,
+            "has_more": False
         })
     except Exception as e:
         logger.error(f"api_depo_stoklari error: {e}", exc_info=True)
@@ -2954,6 +3070,9 @@ def api_depo_stoklari():
             "success": False,
             "products": [],
             "total": 0,
+            "page": 1,
+            "size": 0,
+            "has_more": False,
             "error": str(e)
         })
 
@@ -3290,9 +3409,9 @@ def cikis_toplu_ekle():
             # Kalıcı satış & istatistik arşivine de ekle
             c.executemany('''INSERT INTO satis_arsivi
                 (tarih, urun_adi, barkod, koli_no, seri_no, parti_no, palet_no,
-                 uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi, durum)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CIKIS_YAPILDI')''',
-                [r + ('CIKIS_YAPILDI',) for r in insert_rows])
+                 uretim_tarihi, skt, ham_karekod, tekrar_uyari, kullanici_adi)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                insert_rows)
             conn.commit()
 
         conn.close()
@@ -3897,7 +4016,6 @@ def api_istatistikler_ornek_gecmis_ekle():
                 ("08680123456789", "TEBUCONAZOLE 250 EW", "TB5521", "15.01.2024", "15.01.2027")
             ]
 
-        import random
         demo_rows = []
         serial_counter = 500000
 
@@ -4066,11 +4184,21 @@ def api_istatistikler_excel_yukle():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # ── BKST AUTHENTICATED SESSION HELPER ────────────────────────────────────────
+_bkst_session_cache = {"session": None, "gln": None, "token2": None, "ts": 0}
+_bkst_session_lock = threading.Lock()
+
 def get_bkst_authenticated_session():
     username, password, address_id, api_key = read_bkst_credentials()
     if not username or not password:
         return None, None, None, "Kullanıcı adı veya şifre bulunamadı."
-    
+
+    now = time.monotonic()
+    with _bkst_session_lock:
+        if (_bkst_session_cache["session"] is not None 
+            and _bkst_session_cache["gln"] 
+            and (now - _bkst_session_cache["ts"] < 300)):
+            return _bkst_session_cache["session"], _bkst_session_cache["gln"], _bkst_session_cache["token2"], None
+
     import requests
     import urllib3
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -4084,20 +4212,20 @@ def get_bkst_authenticated_session():
     if api_key:
         session.headers.update({"Authorization": f"Bearer {api_key}", "Key": api_key})
 
-    r_home = session.get("https://bkst.tarbil.gov.tr/", verify=False, timeout=(5, 10))
+    r_home = session.get("https://bkst.tarbil.gov.tr/", verify=SSL_VERIFY, timeout=(5, 10))
     token_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', r_home.text)
     token1 = token_match.group(1) if token_match else ""
 
     login_payload = {"tcNo": username, "sifre": password, "__RequestVerificationToken": token1}
-    res_login = session.post("https://bkst.tarbil.gov.tr/UserOperation/GetUserInf", data=login_payload, verify=False, timeout=(5, 15))
+    res_login = session.post("https://bkst.tarbil.gov.tr/UserOperation/GetUserInf", data=login_payload, verify=SSL_VERIFY, timeout=(5, 15))
     if "0" not in res_login.text:
         return None, None, None, "Bakanlık kullanıcı adı veya şifreniz hatalı."
 
-    r_stock_page = session.get("https://bkst.tarbil.gov.tr/Main/StockList", verify=False, timeout=(5, 10))
+    r_stock_page = session.get("https://bkst.tarbil.gov.tr/Main/StockList", verify=SSL_VERIFY, timeout=(5, 10))
     token2_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', r_stock_page.text)
     token2 = token2_match.group(1) if token2_match else token1
 
-    r_gln = session.post("https://bkst.tarbil.gov.tr/Partial/GetGLN", data={"FirmType": "0", "__RequestVerificationToken": token2}, verify=False, timeout=(5, 10))
+    r_gln = session.post("https://bkst.tarbil.gov.tr/Partial/GetGLN", data={"FirmType": "0", "__RequestVerificationToken": token2}, verify=SSL_VERIFY, timeout=(5, 10))
     gln_guid = address_id
     if r_gln.status_code == 200:
         try:
@@ -4106,6 +4234,14 @@ def get_bkst_authenticated_session():
                 gln_guid = str(gln_data[0].get("Value") or "").strip()
         except Exception:
             pass
+
+    with _bkst_session_lock:
+        _bkst_session_cache.update({
+            "session": session,
+            "gln": gln_guid,
+            "token2": token2,
+            "ts": time.monotonic()
+        })
 
     return session, gln_guid, token2, None
 
@@ -4124,7 +4260,7 @@ def bkst_sms_gonder():
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-        r_page = session.get('https://bkst.tarbil.gov.tr/Main/SellToProducerNonPrescribed', verify=False, timeout=(5, 10))
+        r_page = session.get('https://bkst.tarbil.gov.tr/Main/SellToProducerNonPrescribed', verify=SSL_VERIFY, timeout=(5, 10))
         token_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', r_page.text)
         token = token_match.group(1) if token_match else token2
 
@@ -4135,7 +4271,7 @@ def bkst_sms_gonder():
             '__RequestVerificationToken': token
         }
 
-        res = session.post('https://bkst.tarbil.gov.tr/Main/SendSmsVerificationCode', data=payload, verify=False, timeout=(5, 15))
+        res = session.post('https://bkst.tarbil.gov.tr/Main/SendSmsVerificationCode', data=payload, verify=SSL_VERIFY, timeout=(5, 15))
         if res.status_code == 200:
             res_json = res.json()
             if res_json.get('IsSuccess') is True:
@@ -4171,7 +4307,7 @@ def bkst_sms_dogrula():
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-        r_page = session.get('https://bkst.tarbil.gov.tr/Main/SellToProducerNonPrescribed', verify=False, timeout=(5, 10))
+        r_page = session.get('https://bkst.tarbil.gov.tr/Main/SellToProducerNonPrescribed', verify=SSL_VERIFY, timeout=(5, 10))
         token_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', r_page.text)
         token = token_match.group(1) if token_match else token2
 
@@ -4183,7 +4319,7 @@ def bkst_sms_dogrula():
             '__RequestVerificationToken': token
         }
 
-        res = session.post('https://bkst.tarbil.gov.tr/Main/CheckSmsVerificationCode', data=payload, verify=False, timeout=(5, 15))
+        res = session.post('https://bkst.tarbil.gov.tr/Main/CheckSmsVerificationCode', data=payload, verify=SSL_VERIFY, timeout=(5, 15))
         if res.status_code == 200:
             res_str = res.text.strip().replace('"', '')
             if res_str and res_str != "00000000-0000-0000-0000-000000000000":
@@ -4222,7 +4358,7 @@ def bkst_recetesiz_satis():
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-        r_page = session.get('https://bkst.tarbil.gov.tr/Main/SellToProducerNonPrescribed', verify=False, timeout=(5, 10))
+        r_page = session.get('https://bkst.tarbil.gov.tr/Main/SellToProducerNonPrescribed', verify=SSL_VERIFY, timeout=(5, 10))
         token_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', r_page.text)
         token = token_match.group(1) if token_match else token2
 
@@ -4269,7 +4405,7 @@ def bkst_recetesiz_satis():
             '__RequestVerificationToken': token
         }
 
-        res = session.post('https://bkst.tarbil.gov.tr/Main/NewCheckOutNotificationForProducerNonPrescribed', data=payload, verify=False, timeout=(5, 20))
+        res = session.post('https://bkst.tarbil.gov.tr/Main/NewCheckOutNotificationForProducerNonPrescribed', data=payload, verify=SSL_VERIFY, timeout=(5, 20))
 
         if res.status_code == 200:
             try:
@@ -4340,7 +4476,7 @@ def api_depo_kabul_gelen_listesi():
 
     # Token'ı ReceivedNotificationList sayfasından al
     try:
-        r_page = session.get("https://bkst.tarbil.gov.tr/Main/ReceivedNotificationList", verify=False, timeout=(5, 10))
+        r_page = session.get("https://bkst.tarbil.gov.tr/Main/ReceivedNotificationList", verify=SSL_VERIFY, timeout=(5, 10))
         token_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', r_page.text)
         if token_match:
             token2 = token_match.group(1)
@@ -4360,7 +4496,7 @@ def api_depo_kabul_gelen_listesi():
             "pageSize": 100,
             "__RequestVerificationToken": token2
         }
-        res = session.post("https://bkst.tarbil.gov.tr/Main/GetReceivedNotificationList", data=payload, verify=False, timeout=(5, 15))
+        res = session.post("https://bkst.tarbil.gov.tr/Main/GetReceivedNotificationList", data=payload, verify=SSL_VERIFY, timeout=(5, 15))
         if res.status_code == 200:
             jdata = res.json()
             raw_list = jdata.get("Data") if isinstance(jdata, dict) else (jdata if isinstance(jdata, list) else [])
@@ -4384,17 +4520,20 @@ def api_depo_kabul_gelen_listesi():
                 })
 
             # Her bildirimin ürün detaylarını sorgulayarak 'Kabul Bekliyor' mu yoksa 'Stoğa Alınmış' mı olduğunu belirle
+            _bkst_fetch_lock = threading.Lock()
+
             def resolve_header_state(notif):
                 h_id = notif.get("HEADERID")
                 if not h_id:
                     return h_id, "Stoğa Alınmış", 0
                 try:
-                    r = session.post(
-                        "https://bkst.tarbil.gov.tr/Main/GetNotificationDetailList",
-                        data={"CompanyAddressId": gln_guid, "HeaderId": h_id, "__RequestVerificationToken": token2},
-                        verify=False,
-                        timeout=(3, 8)
-                    )
+                    with _bkst_fetch_lock:
+                        r = session.post(
+                            "https://bkst.tarbil.gov.tr/Main/GetNotificationDetailList",
+                            data={"CompanyAddressId": gln_guid, "HeaderId": h_id, "__RequestVerificationToken": token2},
+                            verify=SSL_VERIFY,
+                            timeout=(3, 8)
+                        )
                     if r.status_code == 200:
                         d = r.json()
                         d_list = d if isinstance(d, list) else (d.get("Data", []) if isinstance(d, dict) else [])
@@ -4402,13 +4541,13 @@ def api_depo_kabul_gelen_listesi():
                         if waiting_cnt > 0:
                             return h_id, "Kabul Bekliyor", waiting_cnt
                         return h_id, "Stoğa Alınmış", 0
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"resolve_header_state hatası (h_id={h_id}): {e}")
                 return h_id, "Stoğa Alınmış", 0
 
-            # Bildirimleri hızlıca eşzamanlı sorgula (tüm liste)
+            # Bildirimleri kontrollü eşzamanlı sorgula (max_workers=5)
             state_map = {}
-            with concurrent.futures.ThreadPoolExecutor(max_workers=25) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
                 for h_id, state_str, w_cnt in executor.map(resolve_header_state, notifications):
                     state_map[h_id] = (state_str, w_cnt)
 
@@ -4446,7 +4585,7 @@ def api_depo_kabul_detay(header_id):
         return jsonify({"success": False, "error": err, "products": []})
 
     try:
-        r_page = session.get("https://bkst.tarbil.gov.tr/Main/ReceivedNotificationList", verify=False, timeout=(5, 10))
+        r_page = session.get("https://bkst.tarbil.gov.tr/Main/ReceivedNotificationList", verify=SSL_VERIFY, timeout=(5, 10))
         token_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', r_page.text)
         if token_match:
             token2 = token_match.group(1)
@@ -4460,7 +4599,7 @@ def api_depo_kabul_detay(header_id):
         res = session.post(
             "https://bkst.tarbil.gov.tr/Main/GetNotificationDetailList",
             data={"CompanyAddressId": gln_guid, "HeaderId": header_id, "__RequestVerificationToken": token2},
-            verify=False,
+            verify=SSL_VERIFY,
             timeout=(5, 15)
         )
         if res.status_code == 200:
@@ -4526,7 +4665,7 @@ def api_depo_kabul_onayla():
             r_detail = session.post(
                 "https://bkst.tarbil.gov.tr/Main/GetNotificationDetailList",
                 data={"CompanyAddressId": gln_guid, "HeaderId": header_id, "__RequestVerificationToken": token2},
-                verify=False,
+                verify=SSL_VERIFY,
                 timeout=(5, 15)
             )
             if r_detail.status_code == 200:
@@ -4545,7 +4684,7 @@ def api_depo_kabul_onayla():
         ]
         for ep in accept_endpoints:
             try:
-                res = session.post(ep, data={"HeaderId": header_id, "CompanyAddressId": gln_guid, "__RequestVerificationToken": token2}, verify=False, timeout=(5, 12))
+                res = session.post(ep, data={"HeaderId": header_id, "CompanyAddressId": gln_guid, "__RequestVerificationToken": token2}, verify=SSL_VERIFY, timeout=(5, 12))
                 if res.status_code == 200:
                     bkst_msg = "Bakanlık (BKST) bildirimi onaylandı."
                     break
@@ -4653,12 +4792,12 @@ def api_system_login():
             "X-Requested-With": "XMLHttpRequest"
         })
 
-        r_home = session.get("https://bkst.tarbil.gov.tr/", verify=False, timeout=(4, 8))
+        r_home = session.get("https://bkst.tarbil.gov.tr/", verify=SSL_VERIFY, timeout=(4, 8))
         token_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', r_home.text)
         token1 = token_match.group(1) if token_match else ""
 
         login_payload = {"tcNo": username, "sifre": password, "__RequestVerificationToken": token1}
-        res_login = session.post("https://bkst.tarbil.gov.tr/UserOperation/GetUserInf", data=login_payload, verify=False, timeout=(5, 10))
+        res_login = session.post("https://bkst.tarbil.gov.tr/UserOperation/GetUserInf", data=login_payload, verify=SSL_VERIFY, timeout=(5, 10))
         
         if "0" not in res_login.text:
             return jsonify({'success': False, 'error': 'Bakanlık kullanıcı adı veya şifreniz hatalı.'})
@@ -4673,11 +4812,11 @@ def api_system_login():
             pass
 
         try:
-            r_stock = session.get("https://bkst.tarbil.gov.tr/Main/StockList", verify=False, timeout=(4, 8))
+            r_stock = session.get("https://bkst.tarbil.gov.tr/Main/StockList", verify=SSL_VERIFY, timeout=(4, 8))
             token2_match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', r_stock.text)
             token2 = token2_match.group(1) if token2_match else token1
 
-            r_gln = session.post("https://bkst.tarbil.gov.tr/Partial/GetGLN", data={"FirmType": "0", "__RequestVerificationToken": token2}, verify=False, timeout=(4, 8))
+            r_gln = session.post("https://bkst.tarbil.gov.tr/Partial/GetGLN", data={"FirmType": "0", "__RequestVerificationToken": token2}, verify=SSL_VERIFY, timeout=(4, 8))
             if r_gln.status_code == 200:
                 gln_data = r_gln.json()
                 if isinstance(gln_data, list) and len(gln_data) > 0:
@@ -4705,6 +4844,11 @@ def api_system_login():
         ]
         with open(cred_file, 'w', encoding='utf-8') as f:
             f.write("\n".join(lines))
+
+        with _bkst_session_lock:
+            _bkst_session_cache.update({"session": None, "gln": None, "token2": None, "ts": 0})
+        with _template_vars_lock:
+            _template_vars_cache['expires_at'] = 0
 
         return jsonify({'success': True, 'message': 'Giriş başarılı ve kaydedildi.', 'user_name': user_name, 'token': LOCAL_SESSION_TOKEN})
 
@@ -4794,7 +4938,7 @@ def api_system_check_update():
 
         headers = {"User-Agent": "Mozilla/5.0", "Cache-Control": "no-cache, no-store, must-revalidate"}
         remote_vurl = f"https://raw.githubusercontent.com/mfatih01020/stok_fatih/main/version.json?t={time.time_ns()}"
-        resp = requests.get(remote_vurl, verify=False, timeout=(4, 8), headers=headers)
+        resp = requests.get(remote_vurl, verify=SSL_VERIFY, timeout=(4, 8), headers=headers)
         if resp.status_code == 200:
             rdata = resp.json()
             remote_commit = str(rdata.get("commit", "")).strip()
@@ -4877,6 +5021,11 @@ def api_system_logout():
     ]
     with open(cred_file, 'w', encoding='utf-8') as f:
         f.write("\n".join(lines))
+
+    with _bkst_session_lock:
+        _bkst_session_cache.update({"session": None, "gln": None, "token2": None, "ts": 0})
+    with _template_vars_lock:
+        _template_vars_cache['expires_at'] = 0
 
     return jsonify({'success': True, 'message': 'Oturum kapatıldı.'})
 
@@ -8811,7 +8960,8 @@ document.getElementById('btn-temizle-son').addEventListener('click', async () =>
 });
 
 function esc(str) {
-    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    if (window.esc) return window.esc(str);
+    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
     </script>
 
@@ -10931,6 +11081,11 @@ function esc(str) {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/static/style.css">
     <script src="/static/chart.umd.min.js"></script>
+    <script>
+        if (typeof Chart === 'undefined') {
+            document.write('<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"><\\/script>');
+        }
+    </script>
 
     <style>
         .stats-kpi-grid {
@@ -12241,6 +12396,7 @@ function esc(str) {
         }
 
         function esc(str) {
+            if (window.esc) return window.esc(str);
             if (!str) return '';
             return String(str)
                 .replace(/&/g, '&amp;')

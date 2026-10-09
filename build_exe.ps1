@@ -7,6 +7,10 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 
+// NOT: Mutex yalnızca launcher'ın kendi çift tıklama yarışını engeller.
+// Asıl single-instance kontrolü IsPortOpen("127.0.0.1", 5000) ile yapılır.
+// Python sunucusu bir kere başladıktan sonra ikinci Calistir.exe çağrısı
+// port açık olduğu için yeni Python başlatmaz; sadece pencereyi öne getirir.
 public class AppLauncher {
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);

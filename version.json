@@ -2,7 +2,7 @@
   "version": "v3.2.0",
   "commit": "3.2.0",
   "date": "09.10.2026",
-  "message": "v3.2.0: Çoklu yıl destekli İstatistikler & Satış Raporları, aylık trend grafikleri, Depoya Kabul Et gerçek durum filtreleme (Kabul Bekliyor / Stoğa Alınmış), GTIN ve koli eşleme geliştirmeleri",
+  "message": "v3.2.0: Kalıcı satış istatistiği arşivi (satis_arsivi), /api/istatistikler tam modülü, Depoya Kabul gerçek durum tespiti (Kabul Bekliyor / Stoğa Alınmış), GTIN tek başına reddi, Single-Instance Mutex ve Bring-to-Front, çoklu yıl istatistikleri",
   "files": [
     ".gitignore",
     "Calistir.bat",
