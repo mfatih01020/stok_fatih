@@ -17,22 +17,26 @@ window.escAttr = function(str) {
         .replace(/'/g, '&#39;');
 };
 
-// Global Session Authenticated Fetch Helper
-window.apiFetch = async function(resource, init = {}) {
+// Global Session Authenticated Fetch Helper & Native Fetch Interceptor
+const _nativeGlobalFetch = window.fetch;
+window.fetch = async function(resource, init = {}) {
     init = init || {};
     const urlStr = typeof resource === 'string' ? resource : (resource && resource.url ? resource.url : '');
-    if (init.headers instanceof Headers) {
-        if (!init.headers.has('X-Requested-With')) init.headers.append('X-Requested-With', 'XMLHttpRequest');
-    } else {
-        init.headers = init.headers || {};
-        if (!init.headers['X-Requested-With']) init.headers['X-Requested-With'] = 'XMLHttpRequest';
+    if (urlStr && (urlStr.startsWith('/api/') || urlStr.includes('/api/'))) {
+        if (init.headers instanceof Headers) {
+            if (!init.headers.has('X-Requested-With')) init.headers.append('X-Requested-With', 'XMLHttpRequest');
+        } else {
+            init.headers = init.headers || {};
+            if (!init.headers['X-Requested-With']) init.headers['X-Requested-With'] = 'XMLHttpRequest';
+        }
     }
-    const response = await fetch(resource, init);
+    const response = await _nativeGlobalFetch.call(window, resource, init);
     if (response.status === 401 && urlStr && urlStr.startsWith('/api/') && !urlStr.startsWith('/api/system/heartbeat') && !urlStr.startsWith('/api/system/user_info')) {
         window.location.href = '/login';
     }
     return response;
 };
+window.apiFetch = window.fetch;
 
 (function initAppWindowControl() {
     if (window.outerWidth < screen.availWidth || window.outerHeight < screen.availHeight) {

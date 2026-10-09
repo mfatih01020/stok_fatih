@@ -157,9 +157,22 @@ def check_authentication():
         if not any(t == LOCAL_SESSION_TOKEN for t in valid_tokens):
             return jsonify({'success': False, 'error': 'Geçersiz veya eksik oturum anahtarı', 'code': 401}), 401
 
-        # CSRF Koruması: Veri değiştiren isteklerde X-Requested-With zorunludur
+        # CSRF Koruması: Veri değiştiren isteklerde X-Requested-With veya Same-Origin zorunludur
         if request.method in ['POST', 'PUT', 'DELETE']:
-            if request.headers.get('X-Requested-With') != 'XMLHttpRequest':
+            is_xhr = (request.headers.get('X-Requested-With') == 'XMLHttpRequest')
+            sec_fetch = (request.headers.get('Sec-Fetch-Site') or '').lower()
+            is_same_origin = (sec_fetch == 'same-origin')
+
+            host = request.headers.get('Host', '')
+            origin = request.headers.get('Origin', '')
+            referer = request.headers.get('Referer', '')
+            if host:
+                if origin and (host in origin):
+                    is_same_origin = True
+                if referer and (host in referer):
+                    is_same_origin = True
+
+            if not (is_xhr or is_same_origin):
                 return jsonify({'success': False,
                                 'error': 'CSRF koruması: X-Requested-With başlığı eksik',
                                 'code': 403}), 403

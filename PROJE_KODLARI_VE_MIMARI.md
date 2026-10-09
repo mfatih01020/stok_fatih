@@ -1219,9 +1219,22 @@ def check_authentication():
         if not any(t == LOCAL_SESSION_TOKEN for t in valid_tokens):
             return jsonify({'success': False, 'error': 'Geçersiz veya eksik oturum anahtarı', 'code': 401}), 401
 
-        # CSRF Koruması: Veri değiştiren isteklerde X-Requested-With zorunludur
+        # CSRF Koruması: Veri değiştiren isteklerde X-Requested-With veya Same-Origin zorunludur
         if request.method in ['POST', 'PUT', 'DELETE']:
-            if request.headers.get('X-Requested-With') != 'XMLHttpRequest':
+            is_xhr = (request.headers.get('X-Requested-With') == 'XMLHttpRequest')
+            sec_fetch = (request.headers.get('Sec-Fetch-Site') or '').lower()
+            is_same_origin = (sec_fetch == 'same-origin')
+
+            host = request.headers.get('Host', '')
+            origin = request.headers.get('Origin', '')
+            referer = request.headers.get('Referer', '')
+            if host:
+                if origin and (host in origin):
+                    is_same_origin = True
+                if referer and (host in referer):
+                    is_same_origin = True
+
+            if not (is_xhr or is_same_origin):
                 return jsonify({'success': False,
                                 'error': 'CSRF koruması: X-Requested-With başlığı eksik',
                                 'code': 403}), 403
@@ -6357,22 +6370,26 @@ window.escAttr = function(str) {
         .replace(/'/g, '&#39;');
 };
 
-// Global Session Authenticated Fetch Helper
-window.apiFetch = async function(resource, init = {}) {
+// Global Session Authenticated Fetch Helper & Native Fetch Interceptor
+const _nativeGlobalFetch = window.fetch;
+window.fetch = async function(resource, init = {}) {
     init = init || {};
     const urlStr = typeof resource === 'string' ? resource : (resource && resource.url ? resource.url : '');
-    if (init.headers instanceof Headers) {
-        if (!init.headers.has('X-Requested-With')) init.headers.append('X-Requested-With', 'XMLHttpRequest');
-    } else {
-        init.headers = init.headers || {};
-        if (!init.headers['X-Requested-With']) init.headers['X-Requested-With'] = 'XMLHttpRequest';
+    if (urlStr && (urlStr.startsWith('/api/') || urlStr.includes('/api/'))) {
+        if (init.headers instanceof Headers) {
+            if (!init.headers.has('X-Requested-With')) init.headers.append('X-Requested-With', 'XMLHttpRequest');
+        } else {
+            init.headers = init.headers || {};
+            if (!init.headers['X-Requested-With']) init.headers['X-Requested-With'] = 'XMLHttpRequest';
+        }
     }
-    const response = await fetch(resource, init);
+    const response = await _nativeGlobalFetch.call(window, resource, init);
     if (response.status === 401 && urlStr && urlStr.startsWith('/api/') && !urlStr.startsWith('/api/system/heartbeat') && !urlStr.startsWith('/api/system/user_info')) {
         window.location.href = '/login';
     }
     return response;
 };
+window.apiFetch = window.fetch;
 
 (function initAppWindowControl() {
     if (window.outerWidth < screen.availWidth || window.outerHeight < screen.availHeight) {
@@ -8808,9 +8825,12 @@ async function okutBarkod(barkod) {
     barkodInput.classList.remove('input-success', 'input-error');
 
     try {
-        const res = await fetch('/api/cikis/okut', {
+        const res = await (window.apiFetch || fetch)('/api/cikis/okut', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
             body: JSON.stringify({barkod})
         });
         const data = await res.json();
@@ -8909,7 +8929,10 @@ function prependRow(k, tekrar) {
 
 async function geriAl(id, btn) {
     if (!confirm('Bu kaydı geri almak istediğinize emin misiniz?')) return;
-    const res = await fetch(`/api/cikis/sil/${id}`, {method:'DELETE'});
+    const res = await (window.apiFetch || fetch)(`/api/cikis/sil/${id}`, {
+        method: 'DELETE',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    });
     const data = await res.json();
     if (data.success) {
         btn.closest('tr').remove();
@@ -8922,7 +8945,9 @@ async function geriAl(id, btn) {
 }
 
 async function loadRecent() {
-    const res  = await fetch('/api/cikis/listesi');
+    const res  = await (window.apiFetch || fetch)('/api/cikis/listesi', {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    });
     const data = await res.json();
     if (!data.success) return;
     cntToplam.textContent = data.toplam;
@@ -8947,7 +8972,10 @@ async function loadRecent() {
 
 document.getElementById('btn-temizle-son').addEventListener('click', async () => {
     if (!confirm('Tüm çıkış kayıtları silinecek. Emin misiniz?')) return;
-    const res  = await fetch('/api/cikis/temizle', {method:'POST'});
+    const res  = await (window.apiFetch || fetch)('/api/cikis/temizle', {
+        method: 'POST',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    });
     const data = await res.json();
     if (data.success) {
         recentTbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:2rem;">Henüz kayıt yok</td></tr>';
@@ -10059,7 +10087,10 @@ function esc(str) {
             if (window.updateSystemStatusPill) window.updateSystemStatusPill('fetching', 'Bağlantı Kuruluyor...');
             
             try {
-                const res = await fetch('/api/bkst/fetch_api', { method: 'POST' });
+                const res = await fetch('/api/bkst/fetch_api', { 
+                    method: 'POST',
+                    headers: getAuthHeaders({ 'X-Requested-With': 'XMLHttpRequest' })
+                });
                 const data = await res.json();
                 if (data.success) {
                     let pollAttempts = 0;
@@ -12959,9 +12990,12 @@ function esc(str) {
             banner.style.display = 'none';
 
             try {
-                const res = await fetch('/api/bkst/recetesiz_satis/sms_gonder', {
+                const res = await (window.apiFetch || fetch)('/api/bkst/recetesiz_satis/sms_gonder', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
                     body: JSON.stringify({ tc_no: tcNo })
                 });
 
@@ -13013,9 +13047,12 @@ function esc(str) {
             btnVerify.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Doğrulanıyor...';
 
             try {
-                const res = await fetch('/api/bkst/recetesiz_satis/sms_dogrula', {
+                const res = await (window.apiFetch || fetch)('/api/bkst/recetesiz_satis/sms_dogrula', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
                     body: JSON.stringify({
                         tc_no: tcNo,
                         sms_code: smsCode,
@@ -13134,9 +13171,12 @@ function esc(str) {
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> BKST Sunucusuna Bildiriliyor...';
 
             try {
-                const res = await fetch('/api/bkst/recetesiz_satis', {
+                const res = await (window.apiFetch || fetch)('/api/bkst/recetesiz_satis', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
                     body: JSON.stringify({
                         tc_no: tcNo,
                         verification_token: currentVerificationToken,

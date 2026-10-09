@@ -431,9 +431,12 @@ async function okutBarkod(barkod) {
     barkodInput.classList.remove('input-success', 'input-error');
 
     try {
-        const res = await fetch('/api/cikis/okut', {
+        const res = await (window.apiFetch || fetch)('/api/cikis/okut', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
             body: JSON.stringify({barkod})
         });
         const data = await res.json();
@@ -532,7 +535,10 @@ function prependRow(k, tekrar) {
 
 async function geriAl(id, btn) {
     if (!confirm('Bu kaydı geri almak istediğinize emin misiniz?')) return;
-    const res = await fetch(`/api/cikis/sil/${id}`, {method:'DELETE'});
+    const res = await (window.apiFetch || fetch)(`/api/cikis/sil/${id}`, {
+        method: 'DELETE',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    });
     const data = await res.json();
     if (data.success) {
         btn.closest('tr').remove();
@@ -545,7 +551,9 @@ async function geriAl(id, btn) {
 }
 
 async function loadRecent() {
-    const res  = await fetch('/api/cikis/listesi');
+    const res  = await (window.apiFetch || fetch)('/api/cikis/listesi', {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    });
     const data = await res.json();
     if (!data.success) return;
     cntToplam.textContent = data.toplam;
@@ -570,7 +578,10 @@ async function loadRecent() {
 
 document.getElementById('btn-temizle-son').addEventListener('click', async () => {
     if (!confirm('Tüm çıkış kayıtları silinecek. Emin misiniz?')) return;
-    const res  = await fetch('/api/cikis/temizle', {method:'POST'});
+    const res  = await (window.apiFetch || fetch)('/api/cikis/temizle', {
+        method: 'POST',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    });
     const data = await res.json();
     if (data.success) {
         recentTbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:2rem;">Henüz kayıt yok</td></tr>';

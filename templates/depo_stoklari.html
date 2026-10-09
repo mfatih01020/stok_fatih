@@ -450,7 +450,10 @@
             if (window.updateSystemStatusPill) window.updateSystemStatusPill('fetching', 'Bağlantı Kuruluyor...');
             
             try {
-                const res = await fetch('/api/bkst/fetch_api', { method: 'POST' });
+                const res = await fetch('/api/bkst/fetch_api', { 
+                    method: 'POST',
+                    headers: getAuthHeaders({ 'X-Requested-With': 'XMLHttpRequest' })
+                });
                 const data = await res.json();
                 if (data.success) {
                     let pollAttempts = 0;

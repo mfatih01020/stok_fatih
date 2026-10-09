@@ -532,9 +532,12 @@
             banner.style.display = 'none';
 
             try {
-                const res = await fetch('/api/bkst/recetesiz_satis/sms_gonder', {
+                const res = await (window.apiFetch || fetch)('/api/bkst/recetesiz_satis/sms_gonder', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
                     body: JSON.stringify({ tc_no: tcNo })
                 });
 
@@ -586,9 +589,12 @@
             btnVerify.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Doğrulanıyor...';
 
             try {
-                const res = await fetch('/api/bkst/recetesiz_satis/sms_dogrula', {
+                const res = await (window.apiFetch || fetch)('/api/bkst/recetesiz_satis/sms_dogrula', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
                     body: JSON.stringify({
                         tc_no: tcNo,
                         sms_code: smsCode,
@@ -707,9 +713,12 @@
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> BKST Sunucusuna Bildiriliyor...';
 
             try {
-                const res = await fetch('/api/bkst/recetesiz_satis', {
+                const res = await (window.apiFetch || fetch)('/api/bkst/recetesiz_satis', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
                     body: JSON.stringify({
                         tc_no: tcNo,
                         verification_token: currentVerificationToken,
