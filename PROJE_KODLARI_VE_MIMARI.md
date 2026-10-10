@@ -1,6 +1,6 @@
 # QR COMPARE STOK & KAREKOD YÖNETİM SİSTEMİ - TÜM PROJE KODLARI VE MİMARİSİ
 
-> **Sürüm:** v3.2.1 (Son Güncelleme: 09.10.2026 - CSRF ve X-Requested-With İstemci/Sunucu Tam Uyumluluğu, Reçetesiz Satış SMS Doğrulama & QR Düzeltmeleri)  
+> **Sürüm:** v3.2.3 (Geliştirici Modu - BKST Reçetesiz Satış Tarla / Parsel Yönetimi, ÇKS/TÜKAS/KOBUKS Desteği, Aynı Bitki/Aynı İl Kuralı Doğrulaması, Cascading Zararlı/BKU Zinciri, Hata Öngörme & Uyarı Alanları)  
 > **Konum:** `c:\Users\fatih\Desktop\asım iş`
 
 ---
@@ -1072,7 +1072,7 @@ import secrets
 import logging
 from logging.handlers import RotatingFileHandler
 import concurrent.futures
-from datetime import datetime
+from datetime import datetime, timedelta
 import random
 import subprocess
 import socket
@@ -2558,6 +2558,29 @@ def audit_box():
             matched_rows = matched_koli_rows
             is_koli_scan = True
 
+        # Koli değilse ve bir GTIN / Çizgi Barkod veya Parti No ise REDDET (rastgele ürün seçilmesini engelle)
+        if not is_koli_scan:
+            is_gtin, g_count, g_urun = check_is_gtin_no(code_norm, df, gtin_dict)
+            if is_gtin:
+                return jsonify({
+                    "success": False,
+                    "is_gtin_no": True,
+                    "error": f'"{code}" bir GTIN / Çizgi Barkod numarasıdır ({g_urun}). Bu barkod tekil bir ilaca ait karekod değildir. Lütfen kutu üzerindeki 2D Karekodu (DataMatrix) okutunuz.'
+                })
+            if code_norm.isdigit() and len(code_norm) in (8, 12, 13, 14):
+                return jsonify({
+                    "success": False,
+                    "is_gtin_no": True,
+                    "error": f'"{code}" bir ürün çizgi barkodudur (GTIN). Tekil ilaç sayımı için lütfen kutu üzerindeki 2D Karekodu (DataMatrix) okutunuz.'
+                })
+            is_parti, p_count, p_urun = check_is_parti_no(code_norm, df)
+            if is_parti:
+                return jsonify({
+                    "success": False,
+                    "is_parti_no": True,
+                    "error": f'"{code}" bir Parti Numarasıdır ({p_urun}). Bu numara üretim grubunu temsil eder. Lütfen kutu üzerindeki 2D Karekodu (DataMatrix) okutunuz.'
+                })
+
         if not target_koli and code_norm in qr_dict:
             item_row = qr_dict[code_norm]
             scanned_qr = str(item_row.get("Karekod", item_row.get("QR", ""))).strip()
@@ -2571,9 +2594,9 @@ def audit_box():
                 target_koli = str(item_row.get("Ürün Adı", "Kolisiz Stok Ürün"))
                 matched_rows = [item_row]
 
-        if not target_koli:
+        if not target_koli and len(code_norm) >= 20:
             for q_key, r_dict in qr_dict.items():
-                if code_norm in q_key or q_key in code_norm:
+                if len(q_key) >= 20 and (code_norm in q_key or q_key in code_norm):
                     item_row = r_dict
                     scanned_qr = str(item_row.get("Karekod", item_row.get("QR", ""))).strip()
                     k_col = find_koli_column(item_row.keys())
@@ -2587,20 +2610,12 @@ def audit_box():
                         matched_rows = [item_row]
                     break
 
-        if not target_koli and code in gtin_dict:
-            item_row = gtin_dict[code]
-            scanned_qr = str(item_row.get("Karekod", item_row.get("QR", ""))).strip()
-            k_col = find_koli_column(item_row.keys())
-            if k_col and item_row.get(k_col):
-                val = str(item_row[k_col]).strip().upper()
-                if val and val != "NAN":
-                    target_koli = val
-                    matched_rows = koli_dict.get(target_koli, [item_row])
-            if not target_koli:
-                target_koli = str(item_row.get("Ürün Adı", "Kolisiz Stok Ürün"))
-                matched_rows = [item_row]
-
     if not target_koli or not matched_rows:
+        if len(code_norm) < 18:
+            return jsonify({
+                "success": False,
+                "error": f'"{code}" geçerli bir 2D Karekod (DataMatrix) veya koli numarası değildir. Lütfen kutu üzerindeki karekodu okutunuz.'
+            })
         target_koli = "Sistem Dışı Ürün"
         scanned_qr = code_norm if code_norm else code
         matched_rows = [{
@@ -4496,14 +4511,49 @@ def api_depo_kabul_gelen_listesi():
     except Exception:
         pass
 
+    req_data = request.get_json(silent=True) or {}
+    period = req_data.get('period') or request.args.get('period') or 'son_180'
+    start_date = req_data.get('start_date') or request.args.get('start_date')
+    end_date = req_data.get('end_date') or request.args.get('end_date')
+
+    now = datetime.now()
+    range_label = ""
+    if period == 'son_30':
+        start_date = (now - timedelta(days=30)).strftime('%d.%m.%Y')
+        end_date = now.strftime('%d.%m.%Y')
+        range_label = f"Son 30 Gün ({start_date} - {end_date})"
+    elif period == 'son_90':
+        start_date = (now - timedelta(days=90)).strftime('%d.%m.%Y')
+        end_date = now.strftime('%d.%m.%Y')
+        range_label = f"Son 90 Gün ({start_date} - {end_date})"
+    elif period == 'son_180':
+        start_date = (now - timedelta(days=180)).strftime('%d.%m.%Y')
+        end_date = now.strftime('%d.%m.%Y')
+        range_label = f"Son 6 Ay / Sezon ({start_date} - {end_date})"
+    elif period in ['son_365', 'son_1_yil', 'bu_yil']:
+        start_date = (now - timedelta(days=365)).strftime('%d.%m.%Y')
+        end_date = now.strftime('%d.%m.%Y')
+        range_label = f"Son 1 Yıl ({start_date} - {end_date})"
+    elif period == 'tum':
+        start_date = ""
+        end_date = ""
+        range_label = "Tüm Zamanlar"
+    elif not start_date:
+        # Varsayılan: Son 180 Gün (6 Ay / Sezon) - Yıl geçişlerinde (örneğin 2027 başında 2026 sonu faturaları) KESİNLİKLE kesilmez!
+        start_date = (now - timedelta(days=180)).strftime('%d.%m.%Y')
+        end_date = now.strftime('%d.%m.%Y')
+        range_label = f"Son 6 Ay / Sezon ({start_date} - {end_date})"
+    else:
+        range_label = f"Özel Tarih ({start_date} - {end_date or 'Bugün'})"
+
     notifications = []
     try:
         payload = {
             "CompanyAddressId": gln_guid,
             "SenderGln": "",
             "DocumentNo": "",
-            "StartDate": "",
-            "EndDate": "",
+            "StartDate": start_date or "",
+            "EndDate": end_date or "",
             "NotificationType": "",
             "page": 1,
             "pageSize": 100,
@@ -4551,7 +4601,22 @@ def api_depo_kabul_gelen_listesi():
                         d = r.json()
                         d_list = d if isinstance(d, list) else (d.get("Data", []) if isinstance(d, dict) else [])
                         waiting_cnt = sum(1 for x in d_list if "ALIMA UYGUN" in str(x.get("DETAILSTATE", "")).upper() and "DEĞİL" not in str(x.get("DETAILSTATE", "")).upper() and "DEGIL" not in str(x.get("DETAILSTATE", "")).upper())
-                        if waiting_cnt > 0:
+
+                        # Eski/Arşiv Bildirim Koruması: 180 günden eski faturalar ticari/yasal olarak
+                        # beklemede olamaz. Bakanlık sisteminden silinmiş veya zaman aşımına uğramış
+                        # hayalet kayıtların yanlışlıkla 'Kabul Bekliyor' olarak öne çıkmasını engelle.
+                        w_date_str = str(notif.get("WAYBILLDATE") or "")
+                        is_ancient = False
+                        try:
+                            d_parts = w_date_str.split(".")
+                            if len(d_parts) == 3:
+                                notif_dt = datetime(int(d_parts[2]), int(d_parts[1]), int(d_parts[0]))
+                                if (datetime.now() - notif_dt).days > 180:
+                                    is_ancient = True
+                        except Exception:
+                            pass
+
+                        if waiting_cnt > 0 and not is_ancient:
                             return h_id, "Kabul Bekliyor", waiting_cnt
                         return h_id, "Stoğa Alınmış", 0
                 except Exception as e:
@@ -4582,12 +4647,16 @@ def api_depo_kabul_gelen_listesi():
         return jsonify({"success": False, "error": f"BKST sunucusundan bildirimler çekilirken hata oluştu: {str(e)}"})
 
     kabul_bekleyen_sayisi = sum(1 for n in notifications if n.get("HEADERSTATE") == "Kabul Bekliyor")
-    msg = f"Toplam {len(notifications)} bildirim incelendi. ({kabul_bekleyen_sayisi} adet Kabul Bekliyor, {len(notifications)-kabul_bekleyen_sayisi} adet Stoğa Alınmış)" if notifications else "Gelen/bekleyen bildirim bulunamadı."
+    msg = f"Toplam {len(notifications)} bildirim incelendi [{range_label}]. ({kabul_bekleyen_sayisi} adet Kabul Bekliyor, {len(notifications)-kabul_bekleyen_sayisi} adet Stoğa Alınmış)" if notifications else f"Belirtilen dönemde [{range_label}] gelen bildirim bulunamadı."
 
     return jsonify({
         "success": True,
         "notifications": notifications,
         "kabul_bekleyen_sayisi": kabul_bekleyen_sayisi,
+        "period": period,
+        "start_date": start_date,
+        "end_date": end_date,
+        "range_label": range_label,
         "message": msg
     })
 
@@ -6589,11 +6658,11 @@ function isItemScanned(item) {
         const sClean = (scanned || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
         if (!sClean) continue;
 
-        if (itemQrClean && (sClean === itemQrClean || sClean.includes(itemQrClean) || itemQrClean.includes(sClean))) {
+        if (itemQrClean && (sClean === itemQrClean || (sClean.length >= 20 && itemQrClean.length >= 20 && (sClean.includes(itemQrClean) || itemQrClean.includes(sClean))))) {
             return true;
         }
 
-        if (itemSeriClean && itemSeriClean.length >= 3 && sClean.includes(itemSeriClean)) {
+        if (itemSeriClean && itemSeriClean.length >= 4 && (sClean === itemSeriClean || (sClean.length >= 20 && sClean.includes(itemSeriClean)))) {
             return true;
         }
     }
@@ -6733,6 +6802,53 @@ function rebuildShelfItems() {
     });
 }
 
+function saveAuditState() {
+    try {
+        const state = {
+            koliEntries: Array.from(window.shelfKoliMap.entries()),
+            scannedQRs: Array.from(window.scannedQRsInShelf),
+            isAuditAllMode: !!window.isAuditAllMode,
+            allWarehouseItems: window.allWarehouseItems || []
+        };
+        sessionStorage.setItem('qr_audit_shelf_state', JSON.stringify(state));
+        try { localStorage.removeItem('qr_audit_shelf_state'); } catch (_) {}
+    } catch (e) {
+        console.warn("Audit state save error:", e);
+    }
+}
+
+function loadAuditState() {
+    try {
+        try { localStorage.removeItem('qr_audit_shelf_state'); } catch (_) {}
+        const raw = sessionStorage.getItem('qr_audit_shelf_state');
+        if (!raw) return;
+        const state = JSON.parse(raw);
+        if (!state || !state.koliEntries || state.koliEntries.length === 0) return;
+
+        window.shelfKoliMap = new Map(state.koliEntries);
+        window.scannedQRsInShelf = new Set(state.scannedQRs || []);
+        window.isAuditAllMode = !!state.isAuditAllMode;
+        window.allWarehouseItems = state.allWarehouseItems || [];
+
+        rebuildShelfItems();
+        renderAuditTable();
+
+        const wrapper = document.getElementById('audit-results-wrapper');
+        if (wrapper && window.shelfItems.length > 0) {
+            wrapper.classList.remove('hidden');
+        }
+    } catch (e) {
+        console.warn("Audit state restore error:", e);
+    }
+}
+
+function clearAuditState() {
+    try {
+        sessionStorage.removeItem('qr_audit_shelf_state');
+        localStorage.removeItem('qr_audit_shelf_state');
+    } catch (e) {}
+}
+
 window.toggleAuditMode = async function() {
     console.log("toggleAuditMode called. Current mode:", window.isAuditAllMode);
     if (window.shelfItems.length === 0) {
@@ -6771,22 +6887,26 @@ window.toggleAuditMode = async function() {
             if (data.success) {
                 window.allWarehouseItems = data.items || [];
                 renderAuditTable();
+                saveAuditState();
                 const missingCnt = window.allWarehouseItems.filter(i => !isItemScanned(i)).length;
                 showAuditMsg(`📊 Okutulan Kalem Karşılaştırma Modu AÇILDI! Bakanlık depodaki toplam ${window.allWarehouseItems.length} kutunun ${missingCnt} adeti tereğinizde EKSİK (Kırmızı renkte listenin en üstünde sıralandı).`, false);
             } else {
                 window.isAuditAllMode = false;
                 renderAuditTable();
+                saveAuditState();
                 showAuditMsg('Hata: ' + data.error, true);
                 return;
             }
         } catch (err) {
             window.isAuditAllMode = false;
             renderAuditTable();
+            saveAuditState();
             showAuditMsg('Sunucu hatası: ' + err.message, true);
             return;
         }
     } else {
         renderAuditTable();
+        saveAuditState();
         showAuditMsg('📦 Okutulan Koliler Sayım Moduna Dönüldü.', false);
     }
 
@@ -6919,7 +7039,7 @@ async function handleScanSubmit(rawCode) {
         const matchedItem = window.shelfItems.find(i => {
             const iQr = (i.qr || '').replace(/\s+/g, '').toUpperCase();
             const iSeri = (i.seri_no || '').replace(/\s+/g, '').toUpperCase();
-            return iQr === normCode || normCode.includes(iQr) || iQr.includes(normCode) || (iSeri && iSeri === normCode);
+            return iQr === normCode || (normCode.length >= 20 && (normCode.includes(iQr) || iQr.includes(normCode))) || (iSeri && iSeri === normCode);
         });
 
         if (matchedItem) {
@@ -6928,6 +7048,7 @@ async function handleScanSubmit(rawCode) {
             } else {
                 window.scannedQRsInShelf.add(matchedItem.qr);
                 renderAuditTable();
+                saveAuditState();
                 showAuditMsg(`🟢 Ürün tereğinizde doğrulandı (Tereğimde VAR): ${matchedItem.product_name} (Koli: ${matchedItem.koli_no})`, false);
             }
             const mainInput = document.getElementById('audit-input-main');
@@ -6956,13 +7077,14 @@ async function handleScanSubmit(rawCode) {
                     if (item.qr) window.scannedQRsInShelf.add(item.qr);
                 });
                 renderAuditTable();
+                saveAuditState();
                 showAuditMsg(`📦 Koli (${newKoliNo}) barkodu okutuldu! Kolideki ${newItems.length} adet ürünün TAMAMI tereğümde VAR olarak işaretlendi.`, false);
             } else {
                 if (scannedQr) window.scannedQRsInShelf.add(scannedQr);
                 const targetMatch = window.shelfItems.find(i => {
                     const iQr = (i.qr || '').replace(/\s+/g, '').toUpperCase();
                     const iSeri = (i.seri_no || '').replace(/\s+/g, '').toUpperCase();
-                    return iQr === normCode || normCode.includes(iQr) || iQr.includes(normCode) || (iSeri && iSeri === normCode) || (scannedQr && iQr === scannedQr.replace(/\s+/g, '').toUpperCase());
+                    return iQr === normCode || (normCode.length >= 20 && (normCode.includes(iQr) || iQr.includes(normCode))) || (iSeri && iSeri === normCode) || (scannedQr && iQr === scannedQr.replace(/\s+/g, '').toUpperCase());
                 });
 
                 if (targetMatch) {
@@ -6970,6 +7092,7 @@ async function handleScanSubmit(rawCode) {
                 }
 
                 renderAuditTable();
+                saveAuditState();
                 if (targetMatch) {
                     showAuditMsg(`🟢 Ürün okundu (Tereğimde VAR): ${targetMatch.product_name} (Koli: ${newKoliNo}).`, false);
                 } else {
@@ -7037,6 +7160,7 @@ window.resetAudit = function() {
     window.scannedQRsInShelf.clear();
     window.allWarehouseItems = [];
     window.isAuditAllMode = false;
+    clearAuditState();
 
     renderAuditTable();
     hideAuditMsg();
@@ -7148,6 +7272,7 @@ window.transferMissingToCikis = async function() {
         });
         const data = await res.json();
         if (data.success) {
+            saveAuditState();
             alert(`✅ BAŞARILI!\n\n${data.added_count} adet eksik ürün Çıkış Listesine aktarıldı.${data.already_count > 0 ? ` (${data.already_count} ürün zaten listedeydi)` : ''}`);
         } else {
             alert(`❌ Hata: ${data.error || 'Aktarım gerçekleştirilemedi.'}`);
@@ -7174,6 +7299,7 @@ function formatBytes(bytes, decimals = 2) {
 // Direct DOM Event Binding
 document.addEventListener('DOMContentLoaded', () => {
     console.log("DOM loaded, binding event listeners...");
+    loadAuditState();
 
     const btnFetch = document.getElementById('btn-bkst-fetch');
     if (btnFetch) {
@@ -8027,7 +8153,7 @@ if (document.readyState === "loading") {
         </main>
     </div>
 
-    <script src="/static/app.js?v=20261005_v3000"></script>
+    <script src="/static/app.js?v=20261009_v322"></script>
 </body>
 </html>
 
@@ -10645,6 +10771,30 @@ function esc(str) {
             font-size: 0.75rem;
             font-weight: 600;
         }
+
+        .btn-period-pill {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: var(--text-muted);
+            padding: 0.35rem 0.85rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .btn-period-pill:hover {
+            background: rgba(88, 101, 242, 0.2);
+            color: var(--text-main);
+            border-color: rgba(88, 101, 242, 0.4);
+        }
+        .btn-period-pill.active {
+            background: #2563eb;
+            color: #fff;
+            border-color: #3b82f6;
+            font-weight: 600;
+            box-shadow: 0 2px 8px rgba(37, 99, 235, 0.4);
+        }
     </style>
 </head>
 <body class="sidebar-layout">
@@ -10742,6 +10892,22 @@ function esc(str) {
                     <i class="fa-solid fa-shield-halved" style="font-size:1.2rem; color:#10b981;"></i>
                     <div>
                         <b>Güvenlik Filtresi Aktif:</b> Sadece tedarikçilerden size kesilen <b>"MAL ALIM" (Gelen)</b> bildirimleri listelenir. Satış veya çıkış bildirimleriniz buraya düşmez.
+                    </div>
+                </div>
+
+                <div class="period-filter-wrapper margin-top-sm" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.6rem; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); padding:0.6rem 0.9rem; border-radius:10px;">
+                    <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                        <span style="font-size:0.8rem; color:var(--text-muted); font-weight:600;"><i class="fa-regular fa-calendar-days" style="color:#38bdf8;"></i> Dönem:</span>
+                        <div class="period-pills" id="period-pill-group" style="display:inline-flex; gap:0.4rem; flex-wrap:wrap;">
+                            <button type="button" class="btn-period-pill" data-period="son_30" title="Son 30 gün içinde kesilen faturalar">Son 30 Gün</button>
+                            <button type="button" class="btn-period-pill" data-period="son_90" title="Son 3 ay içinde kesilen faturalar">Son 90 Gün</button>
+                            <button type="button" class="btn-period-pill active" data-period="son_180" title="Son 6 ay (Sezon) - Yıl devirlerinden etkilenmez">Son 6 Ay (Sezon)</button>
+                            <button type="button" class="btn-period-pill" data-period="son_365" title="Son 1 yıl içindeki faturalar">Son 1 Yıl</button>
+                            <button type="button" class="btn-period-pill" data-period="tum" title="Tüm zamanlar (Filtresiz)">Tüm Zamanlar</button>
+                        </div>
+                    </div>
+                    <div id="period-range-indicator" style="font-size:0.75rem; color:#38bdf8; font-weight:600;">
+                        <i class="fa-solid fa-clock-rotate-left"></i> <span id="lbl-range-info">Son 6 Ay / Sezon</span>
                     </div>
                 </div>
 
@@ -10882,6 +11048,27 @@ function esc(str) {
         }
 
         let selectedNotificationData = null;
+        let currentPeriod = localStorage.getItem('depo_kabul_period') || 'son_180';
+
+        function updatePeriodPillsUI(activePeriod) {
+            document.querySelectorAll('.btn-period-pill').forEach(b => {
+                const isAct = (b.getAttribute('data-period') === activePeriod);
+                b.classList.toggle('active', isAct);
+            });
+        }
+        updatePeriodPillsUI(currentPeriod);
+
+        // Dönem butonuna tıklandığında anında Bakanlık sorgusunu çalıştır
+        document.querySelectorAll('.btn-period-pill').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                const p = btn.getAttribute('data-period') || 'son_180';
+                currentPeriod = p;
+                localStorage.setItem('depo_kabul_period', p);
+                updatePeriodPillsUI(p);
+                fetchIncomingNotifications(p);
+            });
+        });
 
         const btnFetchIncoming = document.getElementById('btn-fetch-incoming');
         const btnAcceptWarehouse = document.getElementById('btn-accept-warehouse');
@@ -10892,22 +11079,37 @@ function esc(str) {
         const lblSelectedDoc = document.getElementById('lbl-selected-doc');
         const lblSelectedCount = document.getElementById('lbl-selected-count');
 
-        // Gelen Bildirimleri Çek
-        btnFetchIncoming.addEventListener('click', async () => {
+        // Gelen Bildirimleri Çeken Ana Fonksiyon
+        async function fetchIncomingNotifications(periodToFetch) {
+            const period = periodToFetch || currentPeriod || 'son_180';
             btnFetchIncoming.disabled = true;
-            btnFetchIncoming.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> BKST Sunucusuna Bağlanılıyor...';
+            btnFetchIncoming.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> BKST Sunucusundan Bildirimler Çekiliyor...';
             showMsg(incomingMsgBox, 'loading', 'Bakanlık gelen bildirim listesi sorgulanıyor, lütfen bekleyin...');
 
             try {
                 const res = await fetch('/api/depo_kabul/gelen_listesi', {
                     method: 'POST',
-                    headers: getAuthHeaders({ 'Content-Type': 'application/json' })
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({ period: period })
                 });
                 const data = await res.json();
 
                 if (data.success) {
                     showMsg(incomingMsgBox, 'success', data.message || 'Gelen bildirimler başarıyla çekildi.');
+                    const rangeLbl = document.getElementById('lbl-range-info');
+                    if (rangeLbl && data.range_label) {
+                        rangeLbl.textContent = data.range_label;
+                    }
                     renderIncomingTable(data.notifications || []);
+                    try {
+                        sessionStorage.setItem('bkst_incoming_cache', JSON.stringify({
+                            notifications: data.notifications || [],
+                            message: data.message || '',
+                            period: period,
+                            range_label: data.range_label || '',
+                            timestamp: Date.now()
+                        }));
+                    } catch (e) {}
                 } else {
                     showMsg(incomingMsgBox, 'error', data.error || 'Gelen bildirimler çekilemedi.');
                 }
@@ -10917,7 +11119,33 @@ function esc(str) {
                 btnFetchIncoming.disabled = false;
                 btnFetchIncoming.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> 📥 1. Gelen Mal Alım Bildirimlerini Çek (BKST)';
             }
+        }
+
+        btnFetchIncoming.addEventListener('click', () => {
+            fetchIncomingNotifications(currentPeriod);
         });
+
+        // Sayfa ilk açıldığında veya sekmeler arası geçişte önceki çekilen bildirimleri geri yükle
+        try {
+            const cachedRaw = sessionStorage.getItem('bkst_incoming_cache');
+            if (cachedRaw) {
+                const cached = JSON.parse(cachedRaw);
+                if (cached && cached.notifications && cached.notifications.length > 0) {
+                    if (cached.period) {
+                        currentPeriod = cached.period;
+                        updatePeriodPillsUI(currentPeriod);
+                    }
+                    const rangeLbl = document.getElementById('lbl-range-info');
+                    if (rangeLbl && cached.range_label) {
+                        rangeLbl.textContent = cached.range_label;
+                    }
+                    renderIncomingTable(cached.notifications);
+                    showMsg(incomingMsgBox, 'success', cached.message || `Önceki sorgu sonuçları yüklendi (${cached.notifications.length} bildirim).`);
+                }
+            }
+        } catch (e) {
+            console.warn("Önbellek geri yükleme hatası:", e);
+        }
 
         // Bildirim Tablosunu Bas
         function renderIncomingTable(items) {
@@ -11065,6 +11293,26 @@ function esc(str) {
                     showMsg(acceptMsgBox, 'success', data.message || '🟢 Bildirim deponuza başarıyla kabul edildi!');
                     btnAcceptWarehouse.innerHTML = '<i class="fa-solid fa-check-double"></i> 🟢 Depoya Kabul Edildi!';
                     btnAcceptWarehouse.style.background = '#059669';
+
+                    if (selectedNotificationData) {
+                        selectedNotificationData.HEADERSTATE = 'Stoğa Alınmış';
+                        selectedNotificationData.WAITINGCOUNT = 0;
+                        if (selectedNotificationData.products) {
+                            selectedNotificationData.products.forEach(p => p.durum = 'Stoğa Alınmış');
+                            renderDetailsTable(selectedNotificationData.products);
+                        }
+                    }
+                    if (window.incomingItems) {
+                        renderIncomingTable(window.incomingItems);
+                        try {
+                            sessionStorage.setItem('bkst_incoming_cache', JSON.stringify({
+                                notifications: window.incomingItems,
+                                message: 'Bildirimler güncellendi.',
+                                period: currentPeriod,
+                                timestamp: Date.now()
+                            }));
+                        } catch (e) {}
+                    }
                 } else {
                     showMsg(acceptMsgBox, 'error', data.error || 'Depoya kabul edilemedi.');
                     btnAcceptWarehouse.disabled = false;
@@ -11084,7 +11332,7 @@ function esc(str) {
         }
 
     </script>
-    <script src="/static/app.js?v=20261005_v3000"></script>
+    <script src="/static/app.js?v=20261009_v322"></script>
 </body>
 </html>
 
@@ -11113,8 +11361,19 @@ function esc(str) {
     <link rel="stylesheet" href="/static/style.css">
     <script src="/static/chart.umd.min.js"></script>
     <script>
+        window.ensureChartJs = function(callback) {
+            if (typeof Chart !== 'undefined') {
+                if (callback) callback();
+                return;
+            }
+            const s = document.createElement('script');
+            s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js';
+            s.onload = () => { if (callback) callback(); };
+            s.onerror = () => { console.warn('Chart.js CDN yüklenemedi.'); };
+            document.head.appendChild(s);
+        };
         if (typeof Chart === 'undefined') {
-            document.write('<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"><\\/script>');
+            window.ensureChartJs();
         }
     </script>
 
@@ -11950,12 +12209,18 @@ function esc(str) {
         const uploadStatusMsg = document.getElementById('upload-status-msg');
 
         // Initialize
-        document.addEventListener('DOMContentLoaded', () => {
+        function initStatistics() {
             setupYearFilters();
             setupTabs();
             setupSearch();
             loadStatistics();
-        });
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initStatistics);
+        } else {
+            initStatistics();
+        }
 
         // Setup Year Filter Buttons
         function setupYearFilters() {
@@ -12140,6 +12405,16 @@ function esc(str) {
             });
         }
 
+        function showTableError(msg) {
+            const errHtml = `<tr><td colspan="7" style="text-align:center; color:#f87171; padding:2rem;"><i class="fa-solid fa-triangle-exclamation"></i> Veri yüklenemedi: ${esc(msg)}</td></tr>`;
+            const tb1 = document.getElementById('tbody-top-products');
+            if (tb1) tb1.innerHTML = errHtml;
+            const tb2 = document.getElementById('tbody-batches');
+            if (tb2) tb2.innerHTML = `<tr><td colspan="5" style="text-align:center; color:#f87171; padding:2rem;"><i class="fa-solid fa-triangle-exclamation"></i> Veri yüklenemedi: ${esc(msg)}</td></tr>`;
+            const tb3 = document.getElementById('tbody-monthly-detail');
+            if (tb3) tb3.innerHTML = `<tr><td colspan="4" style="text-align:center; color:#f87171; padding:2rem;"><i class="fa-solid fa-triangle-exclamation"></i> Veri yüklenemedi: ${esc(msg)}</td></tr>`;
+        }
+
         // Load Statistics from API
         async function loadStatistics() {
             let url = `/api/istatistikler/ozet?yil=${encodeURIComponent(currentYear)}`;
@@ -12147,28 +12422,31 @@ function esc(str) {
             if (customEnd) url += `&bitis=${encodeURIComponent(customEnd)}`;
 
             try {
-                const res = await fetch(url, { headers: getAuthHeaders() });
+                const res = await (window.apiFetch || fetch)(url, { headers: getAuthHeaders() });
                 const d = await res.json();
 
                 if (d.success) {
                     statsData = d;
-                    renderKpiCards(d.kpi);
-                    renderCharts(d);
-                    renderTopProductsTable(d.en_cok_satanlar || []);
-                    renderBatchesTable(d.parti_dagilimi || []);
-                    renderMonthlyTable(d.aylik_grafik);
-                    updateDynamicYearPills(d.mevcut_yillar || []);
+                    // Tabloları ve kartları önce yükle (grafik hatası olsa bile tablolar aksamaz)
+                    try { renderKpiCards(d.kpi); } catch(e) { console.error('renderKpiCards error:', e); }
+                    try { renderTopProductsTable(d.en_cok_satanlar || []); } catch(e) { console.error('renderTopProductsTable error:', e); }
+                    try { renderBatchesTable(d.parti_dagilimi || []); } catch(e) { console.error('renderBatchesTable error:', e); }
+                    try { renderMonthlyTable(d.aylik_grafik); } catch(e) { console.error('renderMonthlyTable error:', e); }
+                    try { updateDynamicYearPills(d.mevcut_yillar || []); } catch(e) { console.error('updateDynamicYearPills error:', e); }
+                    try { renderCharts(d); } catch(e) { console.error('renderCharts error:', e); }
                 } else {
                     console.error('İstatistik yükleme hatası:', d.error);
+                    showTableError(d.error || 'İstatistikler sunucudan alınamadı.');
                 }
             } catch (err) {
                 console.error('API hatası:', err);
+                showTableError(err.message || 'Sunucuya bağlanılamadı.');
             }
         }
 
         // Update Dynamic Year Pills if new years exist
         function updateDynamicYearPills(years) {
-            // Keep "tum", add any newly discovered years if not present
+            if (!years || !yearPillsContainer) return;
             years.forEach(yr => {
                 const existing = document.querySelector(`.year-btn[data-year="${yr}"]`);
                 if (!existing && yr) {
@@ -12177,7 +12455,11 @@ function esc(str) {
                     btn.dataset.year = yr;
                     btn.textContent = yr;
                     const customBtn = document.querySelector('.year-btn[data-year="custom"]');
-                    yearPillsContainer.insertBefore(btn, customBtn);
+                    if (customBtn) {
+                        yearPillsContainer.insertBefore(btn, customBtn);
+                    } else {
+                        yearPillsContainer.appendChild(btn);
+                    }
                 }
             });
         }
@@ -12185,180 +12467,217 @@ function esc(str) {
         // Render KPI Cards
         function renderKpiCards(kpi) {
             if (!kpi) return;
-            document.getElementById('kpi-total-exits').textContent = Number(kpi.toplam_cikis || 0).toLocaleString('tr-TR');
-            document.getElementById('kpi-unique-products').textContent = Number(kpi.tekil_urun_sayisi || 0).toLocaleString('tr-TR') + ' Çeşit';
+            const elTotal = document.getElementById('kpi-total-exits');
+            if (elTotal) elTotal.textContent = Number(kpi.toplam_cikis || 0).toLocaleString('tr-TR');
+            const elUnique = document.getElementById('kpi-unique-products');
+            if (elUnique) elUnique.textContent = Number(kpi.tekil_urun_sayisi || 0).toLocaleString('tr-TR') + ' Çeşit';
             
             const topName = kpi.lider_urun || '-';
             const topEl = document.getElementById('kpi-top-product');
-            topEl.textContent = topName;
-            topEl.title = topName;
-            document.getElementById('kpi-top-product-count').textContent = (kpi.lider_adet || 0) + ' Kutu';
+            if (topEl) {
+                topEl.textContent = topName;
+                topEl.title = topName;
+            }
+            const elTopCount = document.getElementById('kpi-top-product-count');
+            if (elTopCount) elTopCount.textContent = (kpi.lider_adet || 0) + ' Kutu';
 
-            document.getElementById('kpi-carton-ratio').textContent = `%${kpi.koli_orani || 0} Koli`;
-            document.getElementById('kpi-carton-detail').textContent = `${kpi.koli_adet || 0} Koli / ${kpi.tekil_adet || 0} Tekil`;
+            const elCarton = document.getElementById('kpi-carton-ratio');
+            if (elCarton) elCarton.textContent = `%${kpi.koli_orani || 0} Koli`;
+            const elCartonDetail = document.getElementById('kpi-carton-detail');
+            if (elCartonDetail) elCartonDetail.textContent = `${kpi.koli_adet || 0} Koli / ${kpi.tekil_adet || 0} Tekil`;
 
-            document.getElementById('kpi-daily-avg').textContent = Number(kpi.gunluk_ortalama || 0).toLocaleString('tr-TR');
-            document.getElementById('kpi-repeat-ratio').textContent = `%${kpi.tekrar_orani || 0}`;
-            document.getElementById('kpi-repeat-count').textContent = `${kpi.tekrar_adet || 0} mükerrer okutma`;
+            const elDailyAvg = document.getElementById('kpi-daily-avg');
+            if (elDailyAvg) elDailyAvg.textContent = Number(kpi.gunluk_ortalama || 0).toLocaleString('tr-TR');
+            const elRepeat = document.getElementById('kpi-repeat-ratio');
+            if (elRepeat) elRepeat.textContent = `%${kpi.tekrar_orani || 0}`;
+            const elRepeatCount = document.getElementById('kpi-repeat-count');
+            if (elRepeatCount) elRepeatCount.textContent = `${kpi.tekrar_adet || 0} mükerrer okutma`;
 
-            document.getElementById('chart1-subtitle').textContent = currentYear === 'tum' ? 'Tüm zamanların aylık toplam çıkışları' : `${currentYear} yılının 12 aylık çıkış dağılımı`;
+            const elSub = document.getElementById('chart1-subtitle');
+            if (elSub) elSub.textContent = currentYear === 'tum' ? 'Tüm zamanların aylık toplam çıkışları' : `${currentYear} yılının 12 aylık çıkış dağılımı`;
         }
 
         // Render Charts using Chart.js
         function renderCharts(d) {
-            // Destroy existing instances
-            if (chartMonthly) chartMonthly.destroy();
-            if (chartYearly) chartYearly.destroy();
-            if (chartTopProducts) chartTopProducts.destroy();
-            if (chartWeekday) chartWeekday.destroy();
+            if (!d) return;
+            if (typeof Chart === 'undefined') {
+                console.warn('Chart.js kütüphanesi henüz hazır değil, grafik çizimi ertelendi.');
+                if (window.ensureChartJs) {
+                    window.ensureChartJs(() => renderCharts(d));
+                }
+                return;
+            }
+
+            // Destroy existing instances safely
+            if (chartMonthly) { try { chartMonthly.destroy(); } catch(e){} chartMonthly = null; }
+            if (chartYearly) { try { chartYearly.destroy(); } catch(e){} chartYearly = null; }
+            if (chartTopProducts) { try { chartTopProducts.destroy(); } catch(e){} chartTopProducts = null; }
+            if (chartWeekday) { try { chartWeekday.destroy(); } catch(e){} chartWeekday = null; }
 
             const chartFont = { family: "'Inter', sans-serif", size: 11 };
             const chartGrid = { color: 'rgba(255, 255, 255, 0.05)', borderColor: 'rgba(255, 255, 255, 0.1)' };
             const chartTicks = { color: '#94a3b8', font: chartFont };
 
             // 1. Monthly Chart (Bar)
-            const ctxMonthly = document.getElementById('canvas-monthly').getContext('2d');
-            const monthlyGrad = ctxMonthly.createLinearGradient(0, 0, 0, 260);
-            monthlyGrad.addColorStop(0, 'rgba(16, 185, 129, 0.85)');
-            monthlyGrad.addColorStop(1, 'rgba(16, 185, 129, 0.15)');
+            const cMonthlyEl = document.getElementById('canvas-monthly');
+            if (cMonthlyEl && d.aylik_grafik) {
+                const ctxMonthly = cMonthlyEl.getContext('2d');
+                const monthlyGrad = ctxMonthly.createLinearGradient(0, 0, 0, 260);
+                monthlyGrad.addColorStop(0, 'rgba(16, 185, 129, 0.85)');
+                monthlyGrad.addColorStop(1, 'rgba(16, 185, 129, 0.15)');
 
-            chartMonthly = new Chart(ctxMonthly, {
-                type: 'bar',
-                data: {
-                    labels: d.aylik_grafik.etiketler,
-                    datasets: [{
-                        label: 'Çıkış Adedi (Kutu)',
-                        data: d.aylik_grafik.veriler,
-                        backgroundColor: monthlyGrad,
-                        borderColor: '#10b981',
-                        borderWidth: 1.5,
-                        borderRadius: 6,
-                        maxBarThickness: 32
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: { backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#cbd5e1', padding: 10, cornerRadius: 8 }
+                chartMonthly = new Chart(ctxMonthly, {
+                    type: 'bar',
+                    data: {
+                        labels: d.aylik_grafik.etiketler || [],
+                        datasets: [{
+                            label: 'Çıkış Adedi (Kutu)',
+                            data: d.aylik_grafik.veriler || [],
+                            backgroundColor: monthlyGrad,
+                            borderColor: '#10b981',
+                            borderWidth: 1.5,
+                            borderRadius: 6,
+                            maxBarThickness: 32
+                        }]
                     },
-                    scales: {
-                        x: { grid: { display: false }, ticks: chartTicks },
-                        y: { grid: chartGrid, ticks: chartTicks, beginAtZero: true }
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#cbd5e1', padding: 10, cornerRadius: 8 }
+                        },
+                        scales: {
+                            x: { grid: { display: false }, ticks: chartTicks },
+                            y: { grid: chartGrid, ticks: chartTicks, beginAtZero: true }
+                        }
                     }
-                }
-            });
-
-            // 2. Yearly Comparison Chart (Bar)
-            const ctxYearly = document.getElementById('canvas-yearly').getContext('2d');
-            const yearlyGrad = ctxYearly.createLinearGradient(0, 0, 0, 260);
-            yearlyGrad.addColorStop(0, 'rgba(6, 182, 212, 0.85)');
-            yearlyGrad.addColorStop(1, 'rgba(6, 182, 212, 0.15)');
-
-            chartYearly = new Chart(ctxYearly, {
-                type: 'bar',
-                data: {
-                    labels: d.yillik_grafik.etiketler,
-                    datasets: [{
-                        label: 'Yıllık Satış (Kutu)',
-                        data: d.yillik_grafik.veriler,
-                        backgroundColor: yearlyGrad,
-                        borderColor: '#06b6d4',
-                        borderWidth: 1.5,
-                        borderRadius: 8,
-                        maxBarThickness: 44
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: { backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#cbd5e1', padding: 10, cornerRadius: 8 }
-                    },
-                    scales: {
-                        x: { grid: { display: false }, ticks: chartTicks },
-                        y: { grid: chartGrid, ticks: chartTicks, beginAtZero: true }
-                    }
-                }
-            });
-
-            // 3. Top Products (Doughnut)
-            const top5 = (d.en_cok_satanlar || []).slice(0, 5);
-            const otherSum = (d.en_cok_satanlar || []).slice(5).reduce((acc, p) => acc + (p.adet || 0), 0);
-            const pieLabels = top5.map(p => p.urun_adi.length > 18 ? p.urun_adi.substring(0, 18) + '...' : p.urun_adi);
-            const pieData = top5.map(p => p.adet);
-            if (otherSum > 0) {
-                pieLabels.push('Diğerleri');
-                pieData.push(otherSum);
+                });
             }
 
-            const ctxPie = document.getElementById('canvas-top-products').getContext('2d');
-            chartTopProducts = new Chart(ctxPie, {
-                type: 'doughnut',
-                data: {
-                    labels: pieLabels.length ? pieLabels : ['Veri Yok'],
-                    datasets: [{
-                        data: pieData.length ? pieData : [1],
-                        backgroundColor: [
-                            '#10b981', '#06b6d4', '#f59e0b', '#8b5cf6', '#ec4899', '#64748b'
-                        ],
-                        borderWidth: 2,
-                        borderColor: '#0f172a'
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { position: 'right', labels: { color: '#cbd5e1', font: chartFont, boxWidth: 12, padding: 12 } },
-                        tooltip: { backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#cbd5e1', padding: 10, cornerRadius: 8 }
+            // 2. Yearly Comparison Chart (Bar)
+            const cYearlyEl = document.getElementById('canvas-yearly');
+            if (cYearlyEl && d.yillik_grafik) {
+                const ctxYearly = cYearlyEl.getContext('2d');
+                const yearlyGrad = ctxYearly.createLinearGradient(0, 0, 0, 260);
+                yearlyGrad.addColorStop(0, 'rgba(6, 182, 212, 0.85)');
+                yearlyGrad.addColorStop(1, 'rgba(6, 182, 212, 0.15)');
+
+                chartYearly = new Chart(ctxYearly, {
+                    type: 'bar',
+                    data: {
+                        labels: d.yillik_grafik.etiketler || [],
+                        datasets: [{
+                            label: 'Yıllık Satış (Kutu)',
+                            data: d.yillik_grafik.veriler || [],
+                            backgroundColor: yearlyGrad,
+                            borderColor: '#06b6d4',
+                            borderWidth: 1.5,
+                            borderRadius: 8,
+                            maxBarThickness: 44
+                        }]
                     },
-                    cutout: '65%'
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#cbd5e1', padding: 10, cornerRadius: 8 }
+                        },
+                        scales: {
+                            x: { grid: { display: false }, ticks: chartTicks },
+                            y: { grid: chartGrid, ticks: chartTicks, beginAtZero: true }
+                        }
+                    }
+                });
+            }
+
+            // 3. Top Products (Doughnut)
+            const cTopEl = document.getElementById('canvas-top-products');
+            if (cTopEl) {
+                const top5 = (d.en_cok_satanlar || []).slice(0, 5);
+                const otherSum = (d.en_cok_satanlar || []).slice(5).reduce((acc, p) => acc + (p.adet || 0), 0);
+                const pieLabels = top5.map(p => {
+                    const name = String((p && p.urun_adi) || 'Tanımsız Ürün');
+                    return name.length > 18 ? name.substring(0, 18) + '...' : name;
+                });
+                const pieData = top5.map(p => (p && p.adet) || 0);
+                if (otherSum > 0) {
+                    pieLabels.push('Diğerleri');
+                    pieData.push(otherSum);
                 }
-            });
+
+                const ctxPie = cTopEl.getContext('2d');
+                chartTopProducts = new Chart(ctxPie, {
+                    type: 'doughnut',
+                    data: {
+                        labels: pieLabels.length ? pieLabels : ['Veri Yok'],
+                        datasets: [{
+                            data: pieData.length ? pieData : [1],
+                            backgroundColor: [
+                                '#10b981', '#06b6d4', '#f59e0b', '#8b5cf6', '#ec4899', '#64748b'
+                            ],
+                            borderWidth: 2,
+                            borderColor: '#0f172a'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { position: 'right', labels: { color: '#cbd5e1', font: chartFont, boxWidth: 12, padding: 12 } },
+                            tooltip: { backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#cbd5e1', padding: 10, cornerRadius: 8 }
+                        },
+                        cutout: '65%'
+                    }
+                });
+            }
 
             // 4. Weekday Distribution (Bar)
-            const ctxWeekday = document.getElementById('canvas-weekday').getContext('2d');
-            const weekdayGrad = ctxWeekday.createLinearGradient(0, 0, 0, 260);
-            weekdayGrad.addColorStop(0, 'rgba(139, 92, 246, 0.85)');
-            weekdayGrad.addColorStop(1, 'rgba(139, 92, 246, 0.15)');
+            const cWeekdayEl = document.getElementById('canvas-weekday');
+            if (cWeekdayEl && d.haftalik_grafik) {
+                const ctxWeekday = cWeekdayEl.getContext('2d');
+                const weekdayGrad = ctxWeekday.createLinearGradient(0, 0, 0, 260);
+                weekdayGrad.addColorStop(0, 'rgba(139, 92, 246, 0.85)');
+                weekdayGrad.addColorStop(1, 'rgba(139, 92, 246, 0.15)');
 
-            chartWeekday = new Chart(ctxWeekday, {
-                type: 'bar',
-                data: {
-                    labels: d.haftalik_grafik.etiketler,
-                    datasets: [{
-                        label: 'Çıkış Adedi',
-                        data: d.haftalik_grafik.veriler,
-                        backgroundColor: weekdayGrad,
-                        borderColor: '#8b5cf6',
-                        borderWidth: 1.5,
-                        borderRadius: 6,
-                        maxBarThickness: 30
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: { backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#cbd5e1', padding: 10, cornerRadius: 8 }
+                chartWeekday = new Chart(ctxWeekday, {
+                    type: 'bar',
+                    data: {
+                        labels: d.haftalik_grafik.etiketler || [],
+                        datasets: [{
+                            label: 'Çıkış Adedi',
+                            data: d.haftalik_grafik.veriler || [],
+                            backgroundColor: weekdayGrad,
+                            borderColor: '#8b5cf6',
+                            borderWidth: 1.5,
+                            borderRadius: 6,
+                            maxBarThickness: 30
+                        }]
                     },
-                    scales: {
-                        x: { grid: { display: false }, ticks: chartTicks },
-                        y: { grid: chartGrid, ticks: chartTicks, beginAtZero: true }
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#cbd5e1', padding: 10, cornerRadius: 8 }
+                        },
+                        scales: {
+                            x: { grid: { display: false }, ticks: chartTicks },
+                            y: { grid: chartGrid, ticks: chartTicks, beginAtZero: true }
+                        }
                     }
-                }
-            });
+                });
+            }
         }
 
         // Render Top Products Table
         function renderTopProductsTable(list) {
             const tbody = document.getElementById('tbody-top-products');
-            document.getElementById('lbl-product-count').textContent = `${list.length} ürün listeleniyor`;
+            const countEl = document.getElementById('lbl-product-count');
+            if (countEl) countEl.textContent = `${list.length} ürün listeleniyor`;
 
+            if (!tbody) return;
             if (!list || list.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#64748b; padding:2rem;">Bu döneme ait çıkış kaydı bulunamadı.</td></tr>';
                 return;
@@ -12367,13 +12686,13 @@ function esc(str) {
             tbody.innerHTML = list.map((p, idx) => `
                 <tr>
                     <td style="color:#64748b; font-weight:600;">${idx + 1}</td>
-                    <td><b style="color:#fff;">${esc(p.urun_adi)}</b></td>
+                    <td><b style="color:#fff;">${esc(p.urun_adi || 'Tanımsız Ürün')}</b></td>
                     <td style="font-family:monospace; color:#94a3b8; font-size:0.82rem;">${esc(p.barkod || '-')}</td>
-                    <td style="text-align:right; font-family:var(--font-outfit); font-weight:700; color:#10b981; font-size:0.95rem;">${Number(p.adet).toLocaleString('tr-TR')}</td>
+                    <td style="text-align:right; font-family:var(--font-outfit); font-weight:700; color:#10b981; font-size:0.95rem;">${Number(p.adet || 0).toLocaleString('tr-TR')}</td>
                     <td style="text-align:center;"><span style="background:rgba(255,255,255,0.06); padding:0.2rem 0.5rem; border-radius:6px; font-size:0.75rem;">${p.koli_sayisi || 0} Koli</span></td>
                     <td>
-                        <div class="progress-bar-wrap"><div class="progress-bar-fill" style="width: ${Math.min(100, p.yuzde)}%;"></div></div>
-                        <span style="font-size:0.78rem; color:#94a3b8;">%${p.yuzde}</span>
+                        <div class="progress-bar-wrap"><div class="progress-bar-fill" style="width: ${Math.min(100, p.yuzde || 0)}%;"></div></div>
+                        <span style="font-size:0.78rem; color:#94a3b8;">%${p.yuzde || 0}</span>
                     </td>
                     <td style="font-size:0.8rem; color:#64748b;">${esc(p.son_cikis || '-')}</td>
                 </tr>
@@ -12383,6 +12702,7 @@ function esc(str) {
         // Render Batches Table
         function renderBatchesTable(list) {
             const tbody = document.getElementById('tbody-batches');
+            if (!tbody) return;
             if (!list || list.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#64748b; padding:2rem;">Parti verisi bulunamadı.</td></tr>';
                 return;
@@ -12391,9 +12711,9 @@ function esc(str) {
             tbody.innerHTML = list.map((b, idx) => `
                 <tr>
                     <td style="color:#64748b;">${idx + 1}</td>
-                    <td><span style="font-family:monospace; background:rgba(245,158,11,0.12); color:#fbbf24; padding:0.2rem 0.5rem; border-radius:6px; font-size:0.82rem; font-weight:600;">${esc(b.parti)}</span></td>
-                    <td><b style="color:#fff;">${esc(b.urun_adi)}</b></td>
-                    <td style="text-align:right; font-weight:700; color:#10b981;">${Number(b.adet).toLocaleString('tr-TR')}</td>
+                    <td><span style="font-family:monospace; background:rgba(245,158,11,0.12); color:#fbbf24; padding:0.2rem 0.5rem; border-radius:6px; font-size:0.82rem; font-weight:600;">${esc(b.parti || 'Belirtilmemiş')}</span></td>
+                    <td><b style="color:#fff;">${esc(b.urun_adi || 'Tanımsız Ürün')}</b></td>
+                    <td style="text-align:right; font-weight:700; color:#10b981;">${Number(b.adet || 0).toLocaleString('tr-TR')}</td>
                     <td style="color:#94a3b8; font-size:0.82rem;">${esc(b.skt || '-')}</td>
                 </tr>
             `).join('');

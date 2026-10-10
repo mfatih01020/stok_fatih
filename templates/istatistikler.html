@@ -16,8 +16,19 @@
     <link rel="stylesheet" href="/static/style.css">
     <script src="/static/chart.umd.min.js"></script>
     <script>
+        window.ensureChartJs = function(callback) {
+            if (typeof Chart !== 'undefined') {
+                if (callback) callback();
+                return;
+            }
+            const s = document.createElement('script');
+            s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js';
+            s.onload = () => { if (callback) callback(); };
+            s.onerror = () => { console.warn('Chart.js CDN yüklenemedi.'); };
+            document.head.appendChild(s);
+        };
         if (typeof Chart === 'undefined') {
-            document.write('<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"><\\/script>');
+            window.ensureChartJs();
         }
     </script>
 
@@ -853,12 +864,18 @@
         const uploadStatusMsg = document.getElementById('upload-status-msg');
 
         // Initialize
-        document.addEventListener('DOMContentLoaded', () => {
+        function initStatistics() {
             setupYearFilters();
             setupTabs();
             setupSearch();
             loadStatistics();
-        });
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initStatistics);
+        } else {
+            initStatistics();
+        }
 
         // Setup Year Filter Buttons
         function setupYearFilters() {
@@ -1043,6 +1060,16 @@
             });
         }
 
+        function showTableError(msg) {
+            const errHtml = `<tr><td colspan="7" style="text-align:center; color:#f87171; padding:2rem;"><i class="fa-solid fa-triangle-exclamation"></i> Veri yüklenemedi: ${esc(msg)}</td></tr>`;
+            const tb1 = document.getElementById('tbody-top-products');
+            if (tb1) tb1.innerHTML = errHtml;
+            const tb2 = document.getElementById('tbody-batches');
+            if (tb2) tb2.innerHTML = `<tr><td colspan="5" style="text-align:center; color:#f87171; padding:2rem;"><i class="fa-solid fa-triangle-exclamation"></i> Veri yüklenemedi: ${esc(msg)}</td></tr>`;
+            const tb3 = document.getElementById('tbody-monthly-detail');
+            if (tb3) tb3.innerHTML = `<tr><td colspan="4" style="text-align:center; color:#f87171; padding:2rem;"><i class="fa-solid fa-triangle-exclamation"></i> Veri yüklenemedi: ${esc(msg)}</td></tr>`;
+        }
+
         // Load Statistics from API
         async function loadStatistics() {
             let url = `/api/istatistikler/ozet?yil=${encodeURIComponent(currentYear)}`;
@@ -1050,28 +1077,31 @@
             if (customEnd) url += `&bitis=${encodeURIComponent(customEnd)}`;
 
             try {
-                const res = await fetch(url, { headers: getAuthHeaders() });
+                const res = await (window.apiFetch || fetch)(url, { headers: getAuthHeaders() });
                 const d = await res.json();
 
                 if (d.success) {
                     statsData = d;
-                    renderKpiCards(d.kpi);
-                    renderCharts(d);
-                    renderTopProductsTable(d.en_cok_satanlar || []);
-                    renderBatchesTable(d.parti_dagilimi || []);
-                    renderMonthlyTable(d.aylik_grafik);
-                    updateDynamicYearPills(d.mevcut_yillar || []);
+                    // Tabloları ve kartları önce yükle (grafik hatası olsa bile tablolar aksamaz)
+                    try { renderKpiCards(d.kpi); } catch(e) { console.error('renderKpiCards error:', e); }
+                    try { renderTopProductsTable(d.en_cok_satanlar || []); } catch(e) { console.error('renderTopProductsTable error:', e); }
+                    try { renderBatchesTable(d.parti_dagilimi || []); } catch(e) { console.error('renderBatchesTable error:', e); }
+                    try { renderMonthlyTable(d.aylik_grafik); } catch(e) { console.error('renderMonthlyTable error:', e); }
+                    try { updateDynamicYearPills(d.mevcut_yillar || []); } catch(e) { console.error('updateDynamicYearPills error:', e); }
+                    try { renderCharts(d); } catch(e) { console.error('renderCharts error:', e); }
                 } else {
                     console.error('İstatistik yükleme hatası:', d.error);
+                    showTableError(d.error || 'İstatistikler sunucudan alınamadı.');
                 }
             } catch (err) {
                 console.error('API hatası:', err);
+                showTableError(err.message || 'Sunucuya bağlanılamadı.');
             }
         }
 
         // Update Dynamic Year Pills if new years exist
         function updateDynamicYearPills(years) {
-            // Keep "tum", add any newly discovered years if not present
+            if (!years || !yearPillsContainer) return;
             years.forEach(yr => {
                 const existing = document.querySelector(`.year-btn[data-year="${yr}"]`);
                 if (!existing && yr) {
@@ -1080,7 +1110,11 @@
                     btn.dataset.year = yr;
                     btn.textContent = yr;
                     const customBtn = document.querySelector('.year-btn[data-year="custom"]');
-                    yearPillsContainer.insertBefore(btn, customBtn);
+                    if (customBtn) {
+                        yearPillsContainer.insertBefore(btn, customBtn);
+                    } else {
+                        yearPillsContainer.appendChild(btn);
+                    }
                 }
             });
         }
@@ -1088,180 +1122,217 @@
         // Render KPI Cards
         function renderKpiCards(kpi) {
             if (!kpi) return;
-            document.getElementById('kpi-total-exits').textContent = Number(kpi.toplam_cikis || 0).toLocaleString('tr-TR');
-            document.getElementById('kpi-unique-products').textContent = Number(kpi.tekil_urun_sayisi || 0).toLocaleString('tr-TR') + ' Çeşit';
+            const elTotal = document.getElementById('kpi-total-exits');
+            if (elTotal) elTotal.textContent = Number(kpi.toplam_cikis || 0).toLocaleString('tr-TR');
+            const elUnique = document.getElementById('kpi-unique-products');
+            if (elUnique) elUnique.textContent = Number(kpi.tekil_urun_sayisi || 0).toLocaleString('tr-TR') + ' Çeşit';
             
             const topName = kpi.lider_urun || '-';
             const topEl = document.getElementById('kpi-top-product');
-            topEl.textContent = topName;
-            topEl.title = topName;
-            document.getElementById('kpi-top-product-count').textContent = (kpi.lider_adet || 0) + ' Kutu';
+            if (topEl) {
+                topEl.textContent = topName;
+                topEl.title = topName;
+            }
+            const elTopCount = document.getElementById('kpi-top-product-count');
+            if (elTopCount) elTopCount.textContent = (kpi.lider_adet || 0) + ' Kutu';
 
-            document.getElementById('kpi-carton-ratio').textContent = `%${kpi.koli_orani || 0} Koli`;
-            document.getElementById('kpi-carton-detail').textContent = `${kpi.koli_adet || 0} Koli / ${kpi.tekil_adet || 0} Tekil`;
+            const elCarton = document.getElementById('kpi-carton-ratio');
+            if (elCarton) elCarton.textContent = `%${kpi.koli_orani || 0} Koli`;
+            const elCartonDetail = document.getElementById('kpi-carton-detail');
+            if (elCartonDetail) elCartonDetail.textContent = `${kpi.koli_adet || 0} Koli / ${kpi.tekil_adet || 0} Tekil`;
 
-            document.getElementById('kpi-daily-avg').textContent = Number(kpi.gunluk_ortalama || 0).toLocaleString('tr-TR');
-            document.getElementById('kpi-repeat-ratio').textContent = `%${kpi.tekrar_orani || 0}`;
-            document.getElementById('kpi-repeat-count').textContent = `${kpi.tekrar_adet || 0} mükerrer okutma`;
+            const elDailyAvg = document.getElementById('kpi-daily-avg');
+            if (elDailyAvg) elDailyAvg.textContent = Number(kpi.gunluk_ortalama || 0).toLocaleString('tr-TR');
+            const elRepeat = document.getElementById('kpi-repeat-ratio');
+            if (elRepeat) elRepeat.textContent = `%${kpi.tekrar_orani || 0}`;
+            const elRepeatCount = document.getElementById('kpi-repeat-count');
+            if (elRepeatCount) elRepeatCount.textContent = `${kpi.tekrar_adet || 0} mükerrer okutma`;
 
-            document.getElementById('chart1-subtitle').textContent = currentYear === 'tum' ? 'Tüm zamanların aylık toplam çıkışları' : `${currentYear} yılının 12 aylık çıkış dağılımı`;
+            const elSub = document.getElementById('chart1-subtitle');
+            if (elSub) elSub.textContent = currentYear === 'tum' ? 'Tüm zamanların aylık toplam çıkışları' : `${currentYear} yılının 12 aylık çıkış dağılımı`;
         }
 
         // Render Charts using Chart.js
         function renderCharts(d) {
-            // Destroy existing instances
-            if (chartMonthly) chartMonthly.destroy();
-            if (chartYearly) chartYearly.destroy();
-            if (chartTopProducts) chartTopProducts.destroy();
-            if (chartWeekday) chartWeekday.destroy();
+            if (!d) return;
+            if (typeof Chart === 'undefined') {
+                console.warn('Chart.js kütüphanesi henüz hazır değil, grafik çizimi ertelendi.');
+                if (window.ensureChartJs) {
+                    window.ensureChartJs(() => renderCharts(d));
+                }
+                return;
+            }
+
+            // Destroy existing instances safely
+            if (chartMonthly) { try { chartMonthly.destroy(); } catch(e){} chartMonthly = null; }
+            if (chartYearly) { try { chartYearly.destroy(); } catch(e){} chartYearly = null; }
+            if (chartTopProducts) { try { chartTopProducts.destroy(); } catch(e){} chartTopProducts = null; }
+            if (chartWeekday) { try { chartWeekday.destroy(); } catch(e){} chartWeekday = null; }
 
             const chartFont = { family: "'Inter', sans-serif", size: 11 };
             const chartGrid = { color: 'rgba(255, 255, 255, 0.05)', borderColor: 'rgba(255, 255, 255, 0.1)' };
             const chartTicks = { color: '#94a3b8', font: chartFont };
 
             // 1. Monthly Chart (Bar)
-            const ctxMonthly = document.getElementById('canvas-monthly').getContext('2d');
-            const monthlyGrad = ctxMonthly.createLinearGradient(0, 0, 0, 260);
-            monthlyGrad.addColorStop(0, 'rgba(16, 185, 129, 0.85)');
-            monthlyGrad.addColorStop(1, 'rgba(16, 185, 129, 0.15)');
+            const cMonthlyEl = document.getElementById('canvas-monthly');
+            if (cMonthlyEl && d.aylik_grafik) {
+                const ctxMonthly = cMonthlyEl.getContext('2d');
+                const monthlyGrad = ctxMonthly.createLinearGradient(0, 0, 0, 260);
+                monthlyGrad.addColorStop(0, 'rgba(16, 185, 129, 0.85)');
+                monthlyGrad.addColorStop(1, 'rgba(16, 185, 129, 0.15)');
 
-            chartMonthly = new Chart(ctxMonthly, {
-                type: 'bar',
-                data: {
-                    labels: d.aylik_grafik.etiketler,
-                    datasets: [{
-                        label: 'Çıkış Adedi (Kutu)',
-                        data: d.aylik_grafik.veriler,
-                        backgroundColor: monthlyGrad,
-                        borderColor: '#10b981',
-                        borderWidth: 1.5,
-                        borderRadius: 6,
-                        maxBarThickness: 32
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: { backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#cbd5e1', padding: 10, cornerRadius: 8 }
+                chartMonthly = new Chart(ctxMonthly, {
+                    type: 'bar',
+                    data: {
+                        labels: d.aylik_grafik.etiketler || [],
+                        datasets: [{
+                            label: 'Çıkış Adedi (Kutu)',
+                            data: d.aylik_grafik.veriler || [],
+                            backgroundColor: monthlyGrad,
+                            borderColor: '#10b981',
+                            borderWidth: 1.5,
+                            borderRadius: 6,
+                            maxBarThickness: 32
+                        }]
                     },
-                    scales: {
-                        x: { grid: { display: false }, ticks: chartTicks },
-                        y: { grid: chartGrid, ticks: chartTicks, beginAtZero: true }
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#cbd5e1', padding: 10, cornerRadius: 8 }
+                        },
+                        scales: {
+                            x: { grid: { display: false }, ticks: chartTicks },
+                            y: { grid: chartGrid, ticks: chartTicks, beginAtZero: true }
+                        }
                     }
-                }
-            });
-
-            // 2. Yearly Comparison Chart (Bar)
-            const ctxYearly = document.getElementById('canvas-yearly').getContext('2d');
-            const yearlyGrad = ctxYearly.createLinearGradient(0, 0, 0, 260);
-            yearlyGrad.addColorStop(0, 'rgba(6, 182, 212, 0.85)');
-            yearlyGrad.addColorStop(1, 'rgba(6, 182, 212, 0.15)');
-
-            chartYearly = new Chart(ctxYearly, {
-                type: 'bar',
-                data: {
-                    labels: d.yillik_grafik.etiketler,
-                    datasets: [{
-                        label: 'Yıllık Satış (Kutu)',
-                        data: d.yillik_grafik.veriler,
-                        backgroundColor: yearlyGrad,
-                        borderColor: '#06b6d4',
-                        borderWidth: 1.5,
-                        borderRadius: 8,
-                        maxBarThickness: 44
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: { backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#cbd5e1', padding: 10, cornerRadius: 8 }
-                    },
-                    scales: {
-                        x: { grid: { display: false }, ticks: chartTicks },
-                        y: { grid: chartGrid, ticks: chartTicks, beginAtZero: true }
-                    }
-                }
-            });
-
-            // 3. Top Products (Doughnut)
-            const top5 = (d.en_cok_satanlar || []).slice(0, 5);
-            const otherSum = (d.en_cok_satanlar || []).slice(5).reduce((acc, p) => acc + (p.adet || 0), 0);
-            const pieLabels = top5.map(p => p.urun_adi.length > 18 ? p.urun_adi.substring(0, 18) + '...' : p.urun_adi);
-            const pieData = top5.map(p => p.adet);
-            if (otherSum > 0) {
-                pieLabels.push('Diğerleri');
-                pieData.push(otherSum);
+                });
             }
 
-            const ctxPie = document.getElementById('canvas-top-products').getContext('2d');
-            chartTopProducts = new Chart(ctxPie, {
-                type: 'doughnut',
-                data: {
-                    labels: pieLabels.length ? pieLabels : ['Veri Yok'],
-                    datasets: [{
-                        data: pieData.length ? pieData : [1],
-                        backgroundColor: [
-                            '#10b981', '#06b6d4', '#f59e0b', '#8b5cf6', '#ec4899', '#64748b'
-                        ],
-                        borderWidth: 2,
-                        borderColor: '#0f172a'
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { position: 'right', labels: { color: '#cbd5e1', font: chartFont, boxWidth: 12, padding: 12 } },
-                        tooltip: { backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#cbd5e1', padding: 10, cornerRadius: 8 }
+            // 2. Yearly Comparison Chart (Bar)
+            const cYearlyEl = document.getElementById('canvas-yearly');
+            if (cYearlyEl && d.yillik_grafik) {
+                const ctxYearly = cYearlyEl.getContext('2d');
+                const yearlyGrad = ctxYearly.createLinearGradient(0, 0, 0, 260);
+                yearlyGrad.addColorStop(0, 'rgba(6, 182, 212, 0.85)');
+                yearlyGrad.addColorStop(1, 'rgba(6, 182, 212, 0.15)');
+
+                chartYearly = new Chart(ctxYearly, {
+                    type: 'bar',
+                    data: {
+                        labels: d.yillik_grafik.etiketler || [],
+                        datasets: [{
+                            label: 'Yıllık Satış (Kutu)',
+                            data: d.yillik_grafik.veriler || [],
+                            backgroundColor: yearlyGrad,
+                            borderColor: '#06b6d4',
+                            borderWidth: 1.5,
+                            borderRadius: 8,
+                            maxBarThickness: 44
+                        }]
                     },
-                    cutout: '65%'
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#cbd5e1', padding: 10, cornerRadius: 8 }
+                        },
+                        scales: {
+                            x: { grid: { display: false }, ticks: chartTicks },
+                            y: { grid: chartGrid, ticks: chartTicks, beginAtZero: true }
+                        }
+                    }
+                });
+            }
+
+            // 3. Top Products (Doughnut)
+            const cTopEl = document.getElementById('canvas-top-products');
+            if (cTopEl) {
+                const top5 = (d.en_cok_satanlar || []).slice(0, 5);
+                const otherSum = (d.en_cok_satanlar || []).slice(5).reduce((acc, p) => acc + (p.adet || 0), 0);
+                const pieLabels = top5.map(p => {
+                    const name = String((p && p.urun_adi) || 'Tanımsız Ürün');
+                    return name.length > 18 ? name.substring(0, 18) + '...' : name;
+                });
+                const pieData = top5.map(p => (p && p.adet) || 0);
+                if (otherSum > 0) {
+                    pieLabels.push('Diğerleri');
+                    pieData.push(otherSum);
                 }
-            });
+
+                const ctxPie = cTopEl.getContext('2d');
+                chartTopProducts = new Chart(ctxPie, {
+                    type: 'doughnut',
+                    data: {
+                        labels: pieLabels.length ? pieLabels : ['Veri Yok'],
+                        datasets: [{
+                            data: pieData.length ? pieData : [1],
+                            backgroundColor: [
+                                '#10b981', '#06b6d4', '#f59e0b', '#8b5cf6', '#ec4899', '#64748b'
+                            ],
+                            borderWidth: 2,
+                            borderColor: '#0f172a'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { position: 'right', labels: { color: '#cbd5e1', font: chartFont, boxWidth: 12, padding: 12 } },
+                            tooltip: { backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#cbd5e1', padding: 10, cornerRadius: 8 }
+                        },
+                        cutout: '65%'
+                    }
+                });
+            }
 
             // 4. Weekday Distribution (Bar)
-            const ctxWeekday = document.getElementById('canvas-weekday').getContext('2d');
-            const weekdayGrad = ctxWeekday.createLinearGradient(0, 0, 0, 260);
-            weekdayGrad.addColorStop(0, 'rgba(139, 92, 246, 0.85)');
-            weekdayGrad.addColorStop(1, 'rgba(139, 92, 246, 0.15)');
+            const cWeekdayEl = document.getElementById('canvas-weekday');
+            if (cWeekdayEl && d.haftalik_grafik) {
+                const ctxWeekday = cWeekdayEl.getContext('2d');
+                const weekdayGrad = ctxWeekday.createLinearGradient(0, 0, 0, 260);
+                weekdayGrad.addColorStop(0, 'rgba(139, 92, 246, 0.85)');
+                weekdayGrad.addColorStop(1, 'rgba(139, 92, 246, 0.15)');
 
-            chartWeekday = new Chart(ctxWeekday, {
-                type: 'bar',
-                data: {
-                    labels: d.haftalik_grafik.etiketler,
-                    datasets: [{
-                        label: 'Çıkış Adedi',
-                        data: d.haftalik_grafik.veriler,
-                        backgroundColor: weekdayGrad,
-                        borderColor: '#8b5cf6',
-                        borderWidth: 1.5,
-                        borderRadius: 6,
-                        maxBarThickness: 30
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: { backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#cbd5e1', padding: 10, cornerRadius: 8 }
+                chartWeekday = new Chart(ctxWeekday, {
+                    type: 'bar',
+                    data: {
+                        labels: d.haftalik_grafik.etiketler || [],
+                        datasets: [{
+                            label: 'Çıkış Adedi',
+                            data: d.haftalik_grafik.veriler || [],
+                            backgroundColor: weekdayGrad,
+                            borderColor: '#8b5cf6',
+                            borderWidth: 1.5,
+                            borderRadius: 6,
+                            maxBarThickness: 30
+                        }]
                     },
-                    scales: {
-                        x: { grid: { display: false }, ticks: chartTicks },
-                        y: { grid: chartGrid, ticks: chartTicks, beginAtZero: true }
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#cbd5e1', padding: 10, cornerRadius: 8 }
+                        },
+                        scales: {
+                            x: { grid: { display: false }, ticks: chartTicks },
+                            y: { grid: chartGrid, ticks: chartTicks, beginAtZero: true }
+                        }
                     }
-                }
-            });
+                });
+            }
         }
 
         // Render Top Products Table
         function renderTopProductsTable(list) {
             const tbody = document.getElementById('tbody-top-products');
-            document.getElementById('lbl-product-count').textContent = `${list.length} ürün listeleniyor`;
+            const countEl = document.getElementById('lbl-product-count');
+            if (countEl) countEl.textContent = `${list.length} ürün listeleniyor`;
 
+            if (!tbody) return;
             if (!list || list.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#64748b; padding:2rem;">Bu döneme ait çıkış kaydı bulunamadı.</td></tr>';
                 return;
@@ -1270,13 +1341,13 @@
             tbody.innerHTML = list.map((p, idx) => `
                 <tr>
                     <td style="color:#64748b; font-weight:600;">${idx + 1}</td>
-                    <td><b style="color:#fff;">${esc(p.urun_adi)}</b></td>
+                    <td><b style="color:#fff;">${esc(p.urun_adi || 'Tanımsız Ürün')}</b></td>
                     <td style="font-family:monospace; color:#94a3b8; font-size:0.82rem;">${esc(p.barkod || '-')}</td>
-                    <td style="text-align:right; font-family:var(--font-outfit); font-weight:700; color:#10b981; font-size:0.95rem;">${Number(p.adet).toLocaleString('tr-TR')}</td>
+                    <td style="text-align:right; font-family:var(--font-outfit); font-weight:700; color:#10b981; font-size:0.95rem;">${Number(p.adet || 0).toLocaleString('tr-TR')}</td>
                     <td style="text-align:center;"><span style="background:rgba(255,255,255,0.06); padding:0.2rem 0.5rem; border-radius:6px; font-size:0.75rem;">${p.koli_sayisi || 0} Koli</span></td>
                     <td>
-                        <div class="progress-bar-wrap"><div class="progress-bar-fill" style="width: ${Math.min(100, p.yuzde)}%;"></div></div>
-                        <span style="font-size:0.78rem; color:#94a3b8;">%${p.yuzde}</span>
+                        <div class="progress-bar-wrap"><div class="progress-bar-fill" style="width: ${Math.min(100, p.yuzde || 0)}%;"></div></div>
+                        <span style="font-size:0.78rem; color:#94a3b8;">%${p.yuzde || 0}</span>
                     </td>
                     <td style="font-size:0.8rem; color:#64748b;">${esc(p.son_cikis || '-')}</td>
                 </tr>
@@ -1286,6 +1357,7 @@
         // Render Batches Table
         function renderBatchesTable(list) {
             const tbody = document.getElementById('tbody-batches');
+            if (!tbody) return;
             if (!list || list.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#64748b; padding:2rem;">Parti verisi bulunamadı.</td></tr>';
                 return;
@@ -1294,9 +1366,9 @@
             tbody.innerHTML = list.map((b, idx) => `
                 <tr>
                     <td style="color:#64748b;">${idx + 1}</td>
-                    <td><span style="font-family:monospace; background:rgba(245,158,11,0.12); color:#fbbf24; padding:0.2rem 0.5rem; border-radius:6px; font-size:0.82rem; font-weight:600;">${esc(b.parti)}</span></td>
-                    <td><b style="color:#fff;">${esc(b.urun_adi)}</b></td>
-                    <td style="text-align:right; font-weight:700; color:#10b981;">${Number(b.adet).toLocaleString('tr-TR')}</td>
+                    <td><span style="font-family:monospace; background:rgba(245,158,11,0.12); color:#fbbf24; padding:0.2rem 0.5rem; border-radius:6px; font-size:0.82rem; font-weight:600;">${esc(b.parti || 'Belirtilmemiş')}</span></td>
+                    <td><b style="color:#fff;">${esc(b.urun_adi || 'Tanımsız Ürün')}</b></td>
+                    <td style="text-align:right; font-weight:700; color:#10b981;">${Number(b.adet || 0).toLocaleString('tr-TR')}</td>
                     <td style="color:#94a3b8; font-size:0.82rem;">${esc(b.skt || '-')}</td>
                 </tr>
             `).join('');

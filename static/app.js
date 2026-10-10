@@ -236,11 +236,11 @@ function isItemScanned(item) {
         const sClean = (scanned || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
         if (!sClean) continue;
 
-        if (itemQrClean && (sClean === itemQrClean || sClean.includes(itemQrClean) || itemQrClean.includes(sClean))) {
+        if (itemQrClean && (sClean === itemQrClean || (sClean.length >= 20 && itemQrClean.length >= 20 && (sClean.includes(itemQrClean) || itemQrClean.includes(sClean))))) {
             return true;
         }
 
-        if (itemSeriClean && itemSeriClean.length >= 3 && sClean.includes(itemSeriClean)) {
+        if (itemSeriClean && itemSeriClean.length >= 4 && (sClean === itemSeriClean || (sClean.length >= 20 && sClean.includes(itemSeriClean)))) {
             return true;
         }
     }
@@ -380,6 +380,53 @@ function rebuildShelfItems() {
     });
 }
 
+function saveAuditState() {
+    try {
+        const state = {
+            koliEntries: Array.from(window.shelfKoliMap.entries()),
+            scannedQRs: Array.from(window.scannedQRsInShelf),
+            isAuditAllMode: !!window.isAuditAllMode,
+            allWarehouseItems: window.allWarehouseItems || []
+        };
+        sessionStorage.setItem('qr_audit_shelf_state', JSON.stringify(state));
+        try { localStorage.removeItem('qr_audit_shelf_state'); } catch (_) {}
+    } catch (e) {
+        console.warn("Audit state save error:", e);
+    }
+}
+
+function loadAuditState() {
+    try {
+        try { localStorage.removeItem('qr_audit_shelf_state'); } catch (_) {}
+        const raw = sessionStorage.getItem('qr_audit_shelf_state');
+        if (!raw) return;
+        const state = JSON.parse(raw);
+        if (!state || !state.koliEntries || state.koliEntries.length === 0) return;
+
+        window.shelfKoliMap = new Map(state.koliEntries);
+        window.scannedQRsInShelf = new Set(state.scannedQRs || []);
+        window.isAuditAllMode = !!state.isAuditAllMode;
+        window.allWarehouseItems = state.allWarehouseItems || [];
+
+        rebuildShelfItems();
+        renderAuditTable();
+
+        const wrapper = document.getElementById('audit-results-wrapper');
+        if (wrapper && window.shelfItems.length > 0) {
+            wrapper.classList.remove('hidden');
+        }
+    } catch (e) {
+        console.warn("Audit state restore error:", e);
+    }
+}
+
+function clearAuditState() {
+    try {
+        sessionStorage.removeItem('qr_audit_shelf_state');
+        localStorage.removeItem('qr_audit_shelf_state');
+    } catch (e) {}
+}
+
 window.toggleAuditMode = async function() {
     console.log("toggleAuditMode called. Current mode:", window.isAuditAllMode);
     if (window.shelfItems.length === 0) {
@@ -418,22 +465,26 @@ window.toggleAuditMode = async function() {
             if (data.success) {
                 window.allWarehouseItems = data.items || [];
                 renderAuditTable();
+                saveAuditState();
                 const missingCnt = window.allWarehouseItems.filter(i => !isItemScanned(i)).length;
                 showAuditMsg(`📊 Okutulan Kalem Karşılaştırma Modu AÇILDI! Bakanlık depodaki toplam ${window.allWarehouseItems.length} kutunun ${missingCnt} adeti tereğinizde EKSİK (Kırmızı renkte listenin en üstünde sıralandı).`, false);
             } else {
                 window.isAuditAllMode = false;
                 renderAuditTable();
+                saveAuditState();
                 showAuditMsg('Hata: ' + data.error, true);
                 return;
             }
         } catch (err) {
             window.isAuditAllMode = false;
             renderAuditTable();
+            saveAuditState();
             showAuditMsg('Sunucu hatası: ' + err.message, true);
             return;
         }
     } else {
         renderAuditTable();
+        saveAuditState();
         showAuditMsg('📦 Okutulan Koliler Sayım Moduna Dönüldü.', false);
     }
 
@@ -566,7 +617,7 @@ async function handleScanSubmit(rawCode) {
         const matchedItem = window.shelfItems.find(i => {
             const iQr = (i.qr || '').replace(/\s+/g, '').toUpperCase();
             const iSeri = (i.seri_no || '').replace(/\s+/g, '').toUpperCase();
-            return iQr === normCode || normCode.includes(iQr) || iQr.includes(normCode) || (iSeri && iSeri === normCode);
+            return iQr === normCode || (normCode.length >= 20 && (normCode.includes(iQr) || iQr.includes(normCode))) || (iSeri && iSeri === normCode);
         });
 
         if (matchedItem) {
@@ -575,6 +626,7 @@ async function handleScanSubmit(rawCode) {
             } else {
                 window.scannedQRsInShelf.add(matchedItem.qr);
                 renderAuditTable();
+                saveAuditState();
                 showAuditMsg(`🟢 Ürün tereğinizde doğrulandı (Tereğimde VAR): ${matchedItem.product_name} (Koli: ${matchedItem.koli_no})`, false);
             }
             const mainInput = document.getElementById('audit-input-main');
@@ -603,13 +655,14 @@ async function handleScanSubmit(rawCode) {
                     if (item.qr) window.scannedQRsInShelf.add(item.qr);
                 });
                 renderAuditTable();
+                saveAuditState();
                 showAuditMsg(`📦 Koli (${newKoliNo}) barkodu okutuldu! Kolideki ${newItems.length} adet ürünün TAMAMI tereğümde VAR olarak işaretlendi.`, false);
             } else {
                 if (scannedQr) window.scannedQRsInShelf.add(scannedQr);
                 const targetMatch = window.shelfItems.find(i => {
                     const iQr = (i.qr || '').replace(/\s+/g, '').toUpperCase();
                     const iSeri = (i.seri_no || '').replace(/\s+/g, '').toUpperCase();
-                    return iQr === normCode || normCode.includes(iQr) || iQr.includes(normCode) || (iSeri && iSeri === normCode) || (scannedQr && iQr === scannedQr.replace(/\s+/g, '').toUpperCase());
+                    return iQr === normCode || (normCode.length >= 20 && (normCode.includes(iQr) || iQr.includes(normCode))) || (iSeri && iSeri === normCode) || (scannedQr && iQr === scannedQr.replace(/\s+/g, '').toUpperCase());
                 });
 
                 if (targetMatch) {
@@ -617,6 +670,7 @@ async function handleScanSubmit(rawCode) {
                 }
 
                 renderAuditTable();
+                saveAuditState();
                 if (targetMatch) {
                     showAuditMsg(`🟢 Ürün okundu (Tereğimde VAR): ${targetMatch.product_name} (Koli: ${newKoliNo}).`, false);
                 } else {
@@ -684,6 +738,7 @@ window.resetAudit = function() {
     window.scannedQRsInShelf.clear();
     window.allWarehouseItems = [];
     window.isAuditAllMode = false;
+    clearAuditState();
 
     renderAuditTable();
     hideAuditMsg();
@@ -795,6 +850,7 @@ window.transferMissingToCikis = async function() {
         });
         const data = await res.json();
         if (data.success) {
+            saveAuditState();
             alert(`✅ BAŞARILI!\n\n${data.added_count} adet eksik ürün Çıkış Listesine aktarıldı.${data.already_count > 0 ? ` (${data.already_count} ürün zaten listedeydi)` : ''}`);
         } else {
             alert(`❌ Hata: ${data.error || 'Aktarım gerçekleştirilemedi.'}`);
@@ -821,6 +877,7 @@ function formatBytes(bytes, decimals = 2) {
 // Direct DOM Event Binding
 document.addEventListener('DOMContentLoaded', () => {
     console.log("DOM loaded, binding event listeners...");
+    loadAuditState();
 
     const btnFetch = document.getElementById('btn-bkst-fetch');
     if (btnFetch) {

@@ -1,8 +1,8 @@
 {
-  "version": "v3.2.1",
-  "commit": "3.2.1",
-  "date": "09.10.2026",
-  "message": "v3.2.1: CSRF & X-Requested-With istemci/sunucu tam uyumluluğu, Reçetesiz Satış SMS doğrulama ve QR okutma düzeltmeleri, regresyon temizlikleri",
+  "version": "v3.3.0",
+  "commit": "3.3.0",
+  "date": "11.10.2026",
+  "message": "v3.3.0: Çiftçiye reçetesiz hızlı ilaç çıkartmak amacıyla otomatikleştirilmiş ürün, tarla, hedef zararlı seçimi ve fatura numarası tayini konularında geliştirmeler.",
   "files": [
     ".gitignore",
     "Calistir.bat",

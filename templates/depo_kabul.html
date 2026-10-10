@@ -141,6 +141,30 @@
             font-size: 0.75rem;
             font-weight: 600;
         }
+
+        .btn-period-pill {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: var(--text-muted);
+            padding: 0.35rem 0.85rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .btn-period-pill:hover {
+            background: rgba(88, 101, 242, 0.2);
+            color: var(--text-main);
+            border-color: rgba(88, 101, 242, 0.4);
+        }
+        .btn-period-pill.active {
+            background: #2563eb;
+            color: #fff;
+            border-color: #3b82f6;
+            font-weight: 600;
+            box-shadow: 0 2px 8px rgba(37, 99, 235, 0.4);
+        }
     </style>
 </head>
 <body class="sidebar-layout">
@@ -238,6 +262,22 @@
                     <i class="fa-solid fa-shield-halved" style="font-size:1.2rem; color:#10b981;"></i>
                     <div>
                         <b>Güvenlik Filtresi Aktif:</b> Sadece tedarikçilerden size kesilen <b>"MAL ALIM" (Gelen)</b> bildirimleri listelenir. Satış veya çıkış bildirimleriniz buraya düşmez.
+                    </div>
+                </div>
+
+                <div class="period-filter-wrapper margin-top-sm" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.6rem; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); padding:0.6rem 0.9rem; border-radius:10px;">
+                    <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                        <span style="font-size:0.8rem; color:var(--text-muted); font-weight:600;"><i class="fa-regular fa-calendar-days" style="color:#38bdf8;"></i> Dönem:</span>
+                        <div class="period-pills" id="period-pill-group" style="display:inline-flex; gap:0.4rem; flex-wrap:wrap;">
+                            <button type="button" class="btn-period-pill" data-period="son_30" title="Son 30 gün içinde kesilen faturalar">Son 30 Gün</button>
+                            <button type="button" class="btn-period-pill" data-period="son_90" title="Son 3 ay içinde kesilen faturalar">Son 90 Gün</button>
+                            <button type="button" class="btn-period-pill active" data-period="son_180" title="Son 6 ay (Sezon) - Yıl devirlerinden etkilenmez">Son 6 Ay (Sezon)</button>
+                            <button type="button" class="btn-period-pill" data-period="son_365" title="Son 1 yıl içindeki faturalar">Son 1 Yıl</button>
+                            <button type="button" class="btn-period-pill" data-period="tum" title="Tüm zamanlar (Filtresiz)">Tüm Zamanlar</button>
+                        </div>
+                    </div>
+                    <div id="period-range-indicator" style="font-size:0.75rem; color:#38bdf8; font-weight:600;">
+                        <i class="fa-solid fa-clock-rotate-left"></i> <span id="lbl-range-info">Son 6 Ay / Sezon</span>
                     </div>
                 </div>
 
@@ -378,6 +418,27 @@
         }
 
         let selectedNotificationData = null;
+        let currentPeriod = localStorage.getItem('depo_kabul_period') || 'son_180';
+
+        function updatePeriodPillsUI(activePeriod) {
+            document.querySelectorAll('.btn-period-pill').forEach(b => {
+                const isAct = (b.getAttribute('data-period') === activePeriod);
+                b.classList.toggle('active', isAct);
+            });
+        }
+        updatePeriodPillsUI(currentPeriod);
+
+        // Dönem butonuna tıklandığında anında Bakanlık sorgusunu çalıştır
+        document.querySelectorAll('.btn-period-pill').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                const p = btn.getAttribute('data-period') || 'son_180';
+                currentPeriod = p;
+                localStorage.setItem('depo_kabul_period', p);
+                updatePeriodPillsUI(p);
+                fetchIncomingNotifications(p);
+            });
+        });
 
         const btnFetchIncoming = document.getElementById('btn-fetch-incoming');
         const btnAcceptWarehouse = document.getElementById('btn-accept-warehouse');
@@ -388,22 +449,37 @@
         const lblSelectedDoc = document.getElementById('lbl-selected-doc');
         const lblSelectedCount = document.getElementById('lbl-selected-count');
 
-        // Gelen Bildirimleri Çek
-        btnFetchIncoming.addEventListener('click', async () => {
+        // Gelen Bildirimleri Çeken Ana Fonksiyon
+        async function fetchIncomingNotifications(periodToFetch) {
+            const period = periodToFetch || currentPeriod || 'son_180';
             btnFetchIncoming.disabled = true;
-            btnFetchIncoming.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> BKST Sunucusuna Bağlanılıyor...';
+            btnFetchIncoming.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> BKST Sunucusundan Bildirimler Çekiliyor...';
             showMsg(incomingMsgBox, 'loading', 'Bakanlık gelen bildirim listesi sorgulanıyor, lütfen bekleyin...');
 
             try {
                 const res = await fetch('/api/depo_kabul/gelen_listesi', {
                     method: 'POST',
-                    headers: getAuthHeaders({ 'Content-Type': 'application/json' })
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({ period: period })
                 });
                 const data = await res.json();
 
                 if (data.success) {
                     showMsg(incomingMsgBox, 'success', data.message || 'Gelen bildirimler başarıyla çekildi.');
+                    const rangeLbl = document.getElementById('lbl-range-info');
+                    if (rangeLbl && data.range_label) {
+                        rangeLbl.textContent = data.range_label;
+                    }
                     renderIncomingTable(data.notifications || []);
+                    try {
+                        sessionStorage.setItem('bkst_incoming_cache', JSON.stringify({
+                            notifications: data.notifications || [],
+                            message: data.message || '',
+                            period: period,
+                            range_label: data.range_label || '',
+                            timestamp: Date.now()
+                        }));
+                    } catch (e) {}
                 } else {
                     showMsg(incomingMsgBox, 'error', data.error || 'Gelen bildirimler çekilemedi.');
                 }
@@ -413,7 +489,33 @@
                 btnFetchIncoming.disabled = false;
                 btnFetchIncoming.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> 📥 1. Gelen Mal Alım Bildirimlerini Çek (BKST)';
             }
+        }
+
+        btnFetchIncoming.addEventListener('click', () => {
+            fetchIncomingNotifications(currentPeriod);
         });
+
+        // Sayfa ilk açıldığında veya sekmeler arası geçişte önceki çekilen bildirimleri geri yükle
+        try {
+            const cachedRaw = sessionStorage.getItem('bkst_incoming_cache');
+            if (cachedRaw) {
+                const cached = JSON.parse(cachedRaw);
+                if (cached && cached.notifications && cached.notifications.length > 0) {
+                    if (cached.period) {
+                        currentPeriod = cached.period;
+                        updatePeriodPillsUI(currentPeriod);
+                    }
+                    const rangeLbl = document.getElementById('lbl-range-info');
+                    if (rangeLbl && cached.range_label) {
+                        rangeLbl.textContent = cached.range_label;
+                    }
+                    renderIncomingTable(cached.notifications);
+                    showMsg(incomingMsgBox, 'success', cached.message || `Önceki sorgu sonuçları yüklendi (${cached.notifications.length} bildirim).`);
+                }
+            }
+        } catch (e) {
+            console.warn("Önbellek geri yükleme hatası:", e);
+        }
 
         // Bildirim Tablosunu Bas
         function renderIncomingTable(items) {
@@ -561,6 +663,26 @@
                     showMsg(acceptMsgBox, 'success', data.message || '🟢 Bildirim deponuza başarıyla kabul edildi!');
                     btnAcceptWarehouse.innerHTML = '<i class="fa-solid fa-check-double"></i> 🟢 Depoya Kabul Edildi!';
                     btnAcceptWarehouse.style.background = '#059669';
+
+                    if (selectedNotificationData) {
+                        selectedNotificationData.HEADERSTATE = 'Stoğa Alınmış';
+                        selectedNotificationData.WAITINGCOUNT = 0;
+                        if (selectedNotificationData.products) {
+                            selectedNotificationData.products.forEach(p => p.durum = 'Stoğa Alınmış');
+                            renderDetailsTable(selectedNotificationData.products);
+                        }
+                    }
+                    if (window.incomingItems) {
+                        renderIncomingTable(window.incomingItems);
+                        try {
+                            sessionStorage.setItem('bkst_incoming_cache', JSON.stringify({
+                                notifications: window.incomingItems,
+                                message: 'Bildirimler güncellendi.',
+                                period: currentPeriod,
+                                timestamp: Date.now()
+                            }));
+                        } catch (e) {}
+                    }
                 } else {
                     showMsg(acceptMsgBox, 'error', data.error || 'Depoya kabul edilemedi.');
                     btnAcceptWarehouse.disabled = false;
@@ -580,6 +702,6 @@
         }
 
     </script>
-    <script src="/static/app.js?v=20261005_v3000"></script>
+    <script src="/static/app.js?v=20261009_v322"></script>
 </body>
 </html>
