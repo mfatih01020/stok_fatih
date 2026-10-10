@@ -16,6 +16,7 @@ terek_eksik_urunler_bakanlik_cikis.xlsx
 *.csv
 
 # Özel Kullanıcı Notları ve Şifreler
+PROJE_KODLARI_VE_MIMARI.md
 bakanlik_giris_bilgileri.txt
 günlük satışlar.txt
 .session_token
