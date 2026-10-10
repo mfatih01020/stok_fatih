@@ -456,6 +456,13 @@ def ensure_db_schema(conn=None):
             except Exception as e:
                 logger.warning(f"Could not add column {col} to ciftciler: {e}")
 
+    # 6. sistem_ayarlari tablosu (Güvenli Giriş & Sistem Yapılandırması)
+    c.execute('''CREATE TABLE IF NOT EXISTS sistem_ayarlari (
+        anahtar           TEXT PRIMARY KEY,
+        deger             TEXT DEFAULT '',
+        guncelleme_tarihi TEXT DEFAULT ''
+    )''')
+
     # İndeksler
     try:
         c.execute("CREATE INDEX IF NOT EXISTS idx_ham_karekod ON cikis_kayitlari(ham_karekod)")
@@ -562,33 +569,101 @@ def init_db():
         except Exception as e:
             logger.error(f"Migration error: {e}")
 
+def get_system_setting(key, default=""):
+    try:
+        ensure_db_schema()
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        c = conn.cursor()
+        c.execute("SELECT deger FROM sistem_ayarlari WHERE anahtar = ?", (key,))
+        row = c.fetchone()
+        conn.close()
+        if row and row[0] is not None:
+            return str(row[0]).strip()
+    except Exception as e:
+        logger.warning(f"get_system_setting error ({key}): {e}")
+    return default
+
+def set_system_setting(key, value):
+    try:
+        ensure_db_schema()
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        c = conn.cursor()
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        c.execute("""
+            INSERT INTO sistem_ayarlari (anahtar, deger, guncelleme_tarihi)
+            VALUES (?, ?, ?)
+            ON CONFLICT(anahtar) DO UPDATE SET
+            deger = excluded.deger,
+            guncelleme_tarihi = excluded.guncelleme_tarihi
+        """, (key, str(value or ''), now_str))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"set_system_setting error ({key}): {e}")
+        return False
+
+def delete_system_setting(key):
+    try:
+        ensure_db_schema()
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        c = conn.cursor()
+        c.execute("DELETE FROM sistem_ayarlari WHERE anahtar = ?", (key,))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"delete_system_setting error ({key}): {e}")
+        return False
+
 def read_bkst_credentials():
-    cred_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bakanlik_giris_bilgileri.txt")
-    username = ""
-    password = ""
-    address_id = ""
-    api_key = ""
+    # 1. Veritabanından (sistem_ayarlari) oku
+    username = get_system_setting("bkst_kullanici_adi", "")
+    password = get_system_setting("bkst_sifre", "")
+    address_id = get_system_setting("bkst_adres_id", "")
+    api_key = get_system_setting("bkst_api_key", "")
+    user_name = get_system_setting("bkst_kullanici_isim", "")
     
+    # 2. Geriye dönük uyumluluk ve otomatik veritabanına taşıma (Txt dosyasından DB'ye geçiş)
+    cred_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bakanlik_giris_bilgileri.txt")
     if os.path.exists(cred_file):
-        with open(cred_file, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("KULLANICI_ADI="):
-                    username = line.split("=", 1)[1].strip()
-                elif line.startswith("SIFRE="):
-                    password = line.split("=", 1)[1].strip()
-                elif line.startswith("ADRES_ID="):
-                    raw_id = line.split("=", 1)[1].strip()
-                    guid_match = re.search(r'([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})', raw_id)
-                    if guid_match:
-                        address_id = guid_match.group(1).strip()
-                    elif " - " in raw_id:
-                        address_id = raw_id.split(" - ")[0].strip()
-                    else:
-                        address_id = raw_id
-                elif line.startswith("KEY=") or line.startswith("API_KEY="):
-                    api_key = line.split("=", 1)[1].strip()
-                    
+        try:
+            with open(cred_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("KULLANICI_ADI=") and not username:
+                        username = line.split("=", 1)[1].strip()
+                    elif line.startswith("SIFRE=") and not password:
+                        password = line.split("=", 1)[1].strip()
+                    elif line.startswith("ADRES_ID=") and not address_id:
+                        raw_id = line.split("=", 1)[1].strip()
+                        guid_match = re.search(r'([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})', raw_id)
+                        if guid_match:
+                            address_id = guid_match.group(1).strip()
+                        elif " - " in raw_id:
+                            address_id = raw_id.split(" - ")[0].strip()
+                        else:
+                            address_id = raw_id
+                    elif (line.startswith("KEY=") or line.startswith("API_KEY=")) and not api_key:
+                        api_key = line.split("=", 1)[1].strip()
+                    elif line.startswith("KULLANICI_ISIM=") and not user_name:
+                        user_name = line.split("=", 1)[1].strip()
+
+            # Txt dosyasında bilgi varsa veritabanına yaz ve güvenlik için txt'yi temizle/sil
+            if username or password:
+                if username: set_system_setting("bkst_kullanici_adi", username)
+                if password: set_system_setting("bkst_sifre", password)
+                if address_id: set_system_setting("bkst_adres_id", address_id)
+                if api_key: set_system_setting("bkst_api_key", api_key)
+                if user_name: set_system_setting("bkst_kullanici_isim", user_name)
+                try:
+                    os.remove(cred_file)
+                    logger.info("bakanlik_giris_bilgileri.txt veritabanına aktarıldı ve güvenli şekilde silindi.")
+                except Exception:
+                    pass
+        except Exception as e_txt:
+            logger.warning(f"cred_file migration error: {e_txt}")
+
     return username, password, address_id, api_key
 
 def clean_user_name(name):
@@ -607,20 +682,8 @@ def inject_global_template_vars():
             username, password, address_id, api_key = read_bkst_credentials()
             user_name = "Giriş Yapılmadı"
             if username:
-                user_name = username
-                cred_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bakanlik_giris_bilgileri.txt")
-                if os.path.exists(cred_file):
-                    try:
-                        with open(cred_file, 'r', encoding='utf-8') as f:
-                            for line in f:
-                                if line.strip().startswith("KULLANICI_ISIM="):
-                                    val = line.strip().split("=", 1)[1].strip()
-                                    if val:
-                                        user_name = val
-                                        break
-                    except Exception:
-                        pass
-                user_name = clean_user_name(user_name or username)
+                db_name = get_system_setting("bkst_kullanici_isim", "")
+                user_name = clean_user_name(db_name or username)
 
             v_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.json")
             v_code = "v1.0"
@@ -5270,20 +5333,7 @@ def api_system_login():
     if not username or not password:
         return jsonify({'success': False, 'error': 'Kullanıcı adı ve şifre giriniz.'})
 
-    cred_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bakanlik_giris_bilgileri.txt")
-    user_name = username
-
-    if os.path.exists(cred_file):
-        try:
-            with open(cred_file, 'r', encoding='utf-8') as f:
-                for line in f:
-                    if line.strip().startswith("KULLANICI_ISIM="):
-                        val = line.strip().split("=", 1)[1].strip()
-                        if val:
-                            user_name = val
-                            break
-        except Exception:
-            pass
+    user_name = get_system_setting("bkst_kullanici_isim", username)
 
     try:
         import requests
@@ -5337,25 +5387,26 @@ def api_system_login():
 
         user_name = clean_user_name(user_name)
 
-        lines = [
-            "# ==============================================================================",
-            "# BAKANLIK BKST GİRİŞ BİLGİLERİ",
-            "# ==============================================================================",
-            f"KULLANICI_ADI={username}",
-            f"SIFRE={password}",
-            f"ADRES_ID={address_id}",
-            f"KULLANICI_ISIM={user_name}",
-            ""
-        ]
-        with open(cred_file, 'w', encoding='utf-8') as f:
-            f.write("\n".join(lines))
+        # 🔒 Güvenli Veritabanı Kaydı (sistem_ayarlari tablosu)
+        set_system_setting("bkst_kullanici_adi", username)
+        set_system_setting("bkst_sifre", password)
+        set_system_setting("bkst_adres_id", address_id)
+        set_system_setting("bkst_kullanici_isim", user_name)
+
+        # Güvenlik amacıyla eski plain text txt dosyasını temizle/sil
+        cred_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bakanlik_giris_bilgileri.txt")
+        if os.path.exists(cred_file):
+            try:
+                os.remove(cred_file)
+            except Exception:
+                pass
 
         with _bkst_session_lock:
             _bkst_session_cache.update({"session": None, "gln": None, "token2": None, "ts": 0})
         with _template_vars_lock:
             _template_vars_cache['expires_at'] = 0
 
-        return jsonify({'success': True, 'message': 'Giriş başarılı ve kaydedildi.', 'user_name': user_name, 'token': LOCAL_SESSION_TOKEN})
+        return jsonify({'success': True, 'message': 'Giriş başarılı ve güvenli veritabanına kaydedildi.', 'user_name': user_name, 'token': LOCAL_SESSION_TOKEN})
 
     except Exception as e:
         logger.warning(f"api_system_login offline fallback check: {e}")
@@ -5365,7 +5416,8 @@ def api_system_login():
         if not is_net_error:
             return jsonify({'success': False, 'error': f'Giriş hatası: {str(e)}'})
 
-        saved_u, saved_p, saved_name, saved_a = read_bkst_credentials()
+        saved_u, saved_p, saved_a, _ = read_bkst_credentials()
+        saved_name = get_system_setting("bkst_kullanici_isim", saved_u)
         if saved_u == username and saved_p == password:
             return jsonify({
                 'success': True,
@@ -5378,25 +5430,12 @@ def api_system_login():
 
 @app.route('/api/system/user_info', methods=['GET'])
 def api_system_user_info():
-    cred_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bakanlik_giris_bilgileri.txt")
     username, password, address_id, api_key = read_bkst_credentials()
     if not username:
         return jsonify({'success': True, 'username': '', 'user_name': 'Giriş Yapılmadı'})
 
-    user_name = username
-    if os.path.exists(cred_file):
-        try:
-            with open(cred_file, 'r', encoding='utf-8') as f:
-                for line in f:
-                    if line.strip().startswith("KULLANICI_ISIM="):
-                        val = line.strip().split("=", 1)[1].strip()
-                        if val:
-                            user_name = val
-                            break
-        except Exception:
-            pass
-
-    display_name = clean_user_name(user_name or username)
+    db_name = get_system_setting("bkst_kullanici_isim", "")
+    display_name = clean_user_name(db_name or username)
     return jsonify({
         'success': True,
         'username': username,
@@ -5514,18 +5553,18 @@ def api_system_logout():
         global _app_bkst_synced
         _app_bkst_synced = False
 
+    # 🔒 Güvenli Veritabanı Oturum Kapatma (Giriş bilgilerini sıfırla)
+    set_system_setting("bkst_kullanici_adi", "")
+    set_system_setting("bkst_sifre", "")
+    set_system_setting("bkst_adres_id", "")
+    set_system_setting("bkst_kullanici_isim", "")
+
     cred_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bakanlik_giris_bilgileri.txt")
-    lines = [
-        "# ==============================================================================",
-        "# BAKANLIK BKST GİRİŞ BİLGİLERİ",
-        "# ==============================================================================",
-        "KULLANICI_ADI=",
-        "SIFRE=",
-        "ADRES_ID=",
-        ""
-    ]
-    with open(cred_file, 'w', encoding='utf-8') as f:
-        f.write("\n".join(lines))
+    if os.path.exists(cred_file):
+        try:
+            os.remove(cred_file)
+        except Exception:
+            pass
 
     with _bkst_session_lock:
         _bkst_session_cache.update({"session": None, "gln": None, "token2": None, "ts": 0})

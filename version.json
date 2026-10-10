@@ -1,8 +1,8 @@
 {
-  "version": "v3.3.0",
-  "commit": "3.3.0",
+  "version": "v3.3.1",
+  "commit": "3.3.1",
   "date": "11.10.2026",
-  "message": "v3.3.0: Çiftçiye reçetesiz hızlı ilaç çıkartmak amacıyla otomatikleştirilmiş ürün, tarla, hedef zararlı seçimi ve fatura numarası tayini konularında geliştirmeler.",
+  "message": "v3.3.1: Bakanlık giriş ve kullanıcı bilgileri düz metin (txt) yerine SQLite veritabanında (sistem_ayarlari) güvenli olarak saklanacak şekilde güncellendi.",
   "files": [
     ".gitignore",
     "Calistir.bat",
