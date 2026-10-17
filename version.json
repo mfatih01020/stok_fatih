@@ -1,6 +1,6 @@
 {
-    "commit": "v3.8.4-offline-first-and-tunnel-manager",
-    "message": "Tam bağımsız çevrimdışı çalışma modu ve admin panelinden tek tıkla Cloudflare tünel başlatıcı eklendi",
-    "version": "v3.8.4",
-    "date": "17.10.2026 22:00"
+    "commit": "v3.8.5-firebase-heartbeat-and-cache-busting",
+    "message": "Firebase canlı tünel senkronizasyonunda önbellek kilitlenmesi önlendi, 45 saniyelik otomatik canlılık nabzı ve mobil APK iyileştirildi",
+    "version": "v3.8.5",
+    "date": "17.10.2026 22:10"
 }

@@ -345,8 +345,9 @@ def get_merkez_sunucu_url(force_refresh=False):
     # Aday URL ölü veya boş -> Firebase'den canlı tüneli çek!
     try:
         import urllib.request, json
-        req = urllib.request.Request(FIREBASE_RELAY_URL, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=3.5) as resp:
+        fb_endpoint = f"{FIREBASE_RELAY_URL}?ts={int(time.time())}"
+        req = urllib.request.Request(fb_endpoint, headers={'User-Agent': 'Mozilla/5.0', 'Cache-Control': 'no-cache', 'Pragma': 'no-cache'})
+        with urllib.request.urlopen(req, timeout=4.0) as resp:
             data = json.loads(resp.read().decode('utf-8'))
             if data and data.get('tunnel_url'):
                 fb_url = str(data['tunnel_url']).strip().rstrip('/')
@@ -12774,15 +12775,31 @@ def publish_tunnel_to_firebase(tunnel_url):
             payload = json.dumps({
                 'tunnel_url': tunnel_url,
                 'updated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'status': 'ONLINE'
+                'status': 'ONLINE' if tunnel_url else 'OFFLINE'
             }).encode('utf-8')
             req = urllib.request.Request(FIREBASE_RELAY_URL, data=payload, method='PUT', headers={'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0'})
             with urllib.request.urlopen(req, timeout=4.0) as resp:
                 if resp.status == 200:
-                    logger.info(f"🔥 Canlı tünel adresi Firebase'e başarıyla iletildi: {tunnel_url}")
+                    if tunnel_url:
+                        logger.info(f"🔥 Canlı tünel adresi Firebase'e başarıyla iletildi: {tunnel_url}")
+                    else:
+                        logger.info("ℹ️ Firebase tünel durumu OFFLINE olarak güncellendi.")
         except Exception as ex:
             logger.warning(f"Firebase publish error: {ex}")
     threading.Thread(target=_pub, daemon=True).start()
+
+def _start_tunnel_heartbeat():
+    def _hb():
+        while True:
+            try:
+                time.sleep(45)
+                if _is_server_host() and PUBLIC_TUNNEL_URL:
+                    publish_tunnel_to_firebase(PUBLIC_TUNNEL_URL)
+            except Exception as e_hb:
+                logger.debug(f"Heartbeat notice: {e_hb}")
+    threading.Thread(target=_hb, name="TunnelHeartbeatThread", daemon=True).start()
+
+_start_tunnel_heartbeat()
 
 def _is_server_host():
     """Yalnızca klasöründe SUNUCU_CIHAZ.txt dosyası bulunan makine ana sunucudur."""

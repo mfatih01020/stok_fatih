@@ -73,11 +73,11 @@ function getOfflineHtml() {
     function checkLiveServer() {
       document.getElementById('spin').style.display = 'block';
       document.getElementById('title').textContent = "Canlı Sunucu Aranıyor...";
-      fetch(FB_RELAY)
+      fetch(FB_RELAY + "?ts=" + Date.now(), { cache: "no-store", headers: { "Cache-Control": "no-cache", "Pragma": "no-cache" } })
         .then(r => r.json())
         .then(data => {
           document.getElementById('spin').style.display = 'none';
-          if (data && data.tunnel_url && data.tunnel_url.startsWith('http')) {
+          if (data && data.status !== 'OFFLINE' && data.tunnel_url && data.tunnel_url.startsWith('http')) {
             const liveUrl = data.tunnel_url.replace(/\/+$/, '');
             const target = liveUrl + (window.location.pathname.startsWith('/static') ? '/cikis' : window.location.pathname) + window.location.search;
             
