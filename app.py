@@ -429,6 +429,12 @@ def _get_or_create_master_key() -> bytes:
         return hashlib.sha256(f"QR_COMPARE_{uuid.getnode()}".encode('utf-8')).digest()
 
 _SHARED_KEY_32 = hashlib.sha256(b"QR_COMPARE_SHARED_APP_SECRET_2026").digest()
+_KEY_32 = _SHARED_KEY_32
+try:
+    _MASTER_KEY_32 = _get_or_create_master_key()
+except Exception:
+    _MASTER_KEY_32 = _SHARED_KEY_32
+
 try:
     import uuid
     _NODE_KEY_32 = hashlib.sha256(f"QR_COMPARE_{uuid.getnode()}".encode('utf-8')).digest()
@@ -472,6 +478,8 @@ def decrypt_credential(cipher_text: str) -> str:
         candidate_keys = [_KEY_32]
         if _SHARED_KEY_32 not in candidate_keys:
             candidate_keys.append(_SHARED_KEY_32)
+        if _MASTER_KEY_32 and _MASTER_KEY_32 not in candidate_keys:
+            candidate_keys.append(_MASTER_KEY_32)
         if _NODE_KEY_32 and _NODE_KEY_32 not in candidate_keys:
             candidate_keys.append(_NODE_KEY_32)
 
@@ -9230,6 +9238,34 @@ def api_system_login():
                     guncelleme_tarihi = excluded.guncelleme_tarihi
                 """, (k, str(v or ''), now_dt_b))
 
+            if not b_row and address_id:
+                b_row = find_dealer_by_credential(username, address_id)
+                if not b_row:
+                    row_chk = c_b.execute("""
+                        SELECT id, bayi_kodu, durum, bayi_adi, bkst_sifre, gln_no, bkst_kullanici, COALESCE(test_modu, 0)
+                        FROM bayiler 
+                        WHERE gln_no = ? AND gln_no != ''
+                        ORDER BY (CASE WHEN UPPER(COALESCE(durum, '')) = 'AKTIF' THEN 0 ELSE 1 END) ASC
+                        LIMIT 1
+                    """, (address_id,)).fetchone()
+                    if row_chk:
+                        b_row = (row_chk[0], row_chk[1], row_chk[2], row_chk[3], row_chk[4], row_chk[5], row_chk[7])
+
+            if b_row and str(b_row[2] or '').upper().strip() != 'AKTIF':
+                b_durum_norm = str(b_row[2] or '').upper().strip()
+                if b_durum_norm in ('ASKIYA_ALINDI', 'PASIF'):
+                    return jsonify({
+                        'success': False,
+                        'unauthorized': True,
+                        'error': '⛔ Uygulama yetkiniz bulunmamaktadır! Yetkiniz sonlandırılmıştır. Yetki verilene kadar bu bilgilerle giriş yapılamaz. Lütfen sistem yöneticisiyle iletişime geçiniz.'
+                    })
+                else:
+                    return jsonify({
+                        'success': False,
+                        'unauthorized': True,
+                        'error': '⏳ Uygulama yetkiniz henüz onaylanmamıştır! Yetki verilene kadar bu bilgilerle giriş yapılamaz. Lütfen sistem yöneticisiyle iletişime geçiniz.'
+                    })
+
             if not b_row:
                 new_kodu = f"bayi_{int(time.time())}"
                 c_b.execute("""
@@ -10442,6 +10478,11 @@ def api_admin_save_bayi():
                 r_bk = c.fetchone()
                 if r_bk:
                     bayi_kodu = r_bk[0]
+            if not bkst_kullanici:
+                c.execute("SELECT bkst_kullanici FROM bayiler WHERE id=?", (dealer_id,))
+                r_u = c.fetchone()
+                if r_u and r_u[0]:
+                    enc_user = r_u[0]
             if bkst_sifre and bkst_sifre != '***' and not bkst_sifre.startswith('••••'):
                 c.execute("""
                     UPDATE bayiler SET bayi_adi=?, il=?, ilce=?, gln_no=?, bkst_kullanici=?, bkst_sifre=?, remote_url=?, notlar=?, test_modu=?
