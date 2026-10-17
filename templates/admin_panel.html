@@ -707,10 +707,16 @@
                         </div>
                     </div>
                 </div>
-                <div style="display:flex; align-items:center; gap:8px;">
-                    <code id="lbl-public-url" style="background:#0f172a; padding:7px 12px; border-radius:8px; color:#4ade80; font-family:var(--font-mono); font-size:0.85rem; font-weight:700; border:1px solid rgba(34, 197, 94, 0.25); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ public_tunnel_url if public_tunnel_url else 'Tünel hazırlanıyor...' }}</code>
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <code id="lbl-public-url" style="background:#0f172a; padding:7px 12px; border-radius:8px; color:#4ade80; font-family:var(--font-mono); font-size:0.85rem; font-weight:700; border:1px solid rgba(34, 197, 94, 0.25); flex:1; min-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ public_tunnel_url if public_tunnel_url else 'Tünel kapalı veya hazırlanıyor...' }}</code>
                     <button class="btn btn-outline" style="padding:0.45rem 0.85rem; font-size:0.8rem; border-color:rgba(34, 197, 94, 0.4); color:#4ade80;" onclick="copyPublicUrl()">
                         <i class="fa-regular fa-copy"></i> Kopyala
+                    </button>
+                    <button class="btn btn-outline" style="padding:0.45rem 0.85rem; font-size:0.8rem; border-color:rgba(56, 189, 248, 0.5); color:#38bdf8;" onclick="startTunnelNow()" id="btn-start-tunnel">
+                        <i class="fa-solid fa-play"></i> Tüneli Başlat
+                    </button>
+                    <button class="btn btn-outline" style="padding:0.45rem 0.85rem; font-size:0.8rem; border-color:rgba(239, 68, 68, 0.4); color:#f87171;" onclick="stopTunnelNow()" id="btn-stop-tunnel">
+                        <i class="fa-solid fa-stop"></i> Durdur
                     </button>
                 </div>
             </div>
@@ -1327,6 +1333,72 @@
                     prompt("Uzaktan bağlantı adresi:", url);
                 });
             }
+        }
+
+        function startTunnelNow() {
+            const btn = document.getElementById('btn-start-tunnel');
+            const pLbl = document.getElementById('lbl-public-url');
+            if (btn) btn.disabled = true;
+            if (pLbl) pLbl.textContent = '🚀 Tünel başlatılıyor, lütfen bekleyiniz...';
+            showToast('Cloudflare tüneli bu cihazda başlatılıyor...');
+            fetch('/api/system/tunnel/start', { method: 'POST' })
+                .then(r => r.json())
+                .then(d => {
+                    if (d.success) {
+                        showToast(d.message);
+                        let pollCount = 0;
+                        const pollTun = () => {
+                            fetch('/api/system/tunnel/status')
+                                .then(res => res.json())
+                                .then(st => {
+                                    if (st && st.public_tunnel_url && st.public_tunnel_url.startsWith('http')) {
+                                        if (pLbl) {
+                                            pLbl.textContent = st.public_tunnel_url;
+                                            pLbl.style.color = '#4ade80';
+                                        }
+                                        if (btn) btn.disabled = false;
+                                        showToast('✅ Tünel başarıyla açıldı ve bağlandı!');
+                                    } else if (pollCount < 25) {
+                                        pollCount++;
+                                        setTimeout(pollTun, 2000);
+                                    } else {
+                                        if (btn) btn.disabled = false;
+                                        if (pLbl) pLbl.textContent = 'Tünel bağlantısı bekleniyor...';
+                                    }
+                                }).catch(() => {
+                                    if (btn) btn.disabled = false;
+                                });
+                        };
+                        setTimeout(pollTun, 2000);
+                    } else {
+                        if (btn) btn.disabled = false;
+                        showToast('Hata: ' + (d.error || 'Tünel başlatılamadı'), 'error');
+                    }
+                }).catch(e => {
+                    if (btn) btn.disabled = false;
+                    showToast('Sunucu hatası: ' + e.message, 'error');
+                });
+        }
+
+        function stopTunnelNow() {
+            const btn = document.getElementById('btn-stop-tunnel');
+            const pLbl = document.getElementById('lbl-public-url');
+            if (btn) btn.disabled = true;
+            fetch('/api/system/tunnel/stop', { method: 'POST' })
+                .then(r => r.json())
+                .then(d => {
+                    if (btn) btn.disabled = false;
+                    if (d.success) {
+                        if (pLbl) {
+                            pLbl.textContent = 'Tünel durduruldu (Kapalı)';
+                            pLbl.style.color = '#94a3b8';
+                        }
+                        showToast(d.message);
+                    }
+                }).catch(e => {
+                    if (btn) btn.disabled = false;
+                    showToast('Hata: ' + e.message, 'error');
+                });
         }
 
         function copyNetworkUrl() {

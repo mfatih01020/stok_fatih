@@ -1,6 +1,6 @@
 {
-    "commit": "v3.8.3-encryption-and-gln-login-fix",
-    "message": "Bayi kimlik şifreleme motoru ve GLN üzerinden otomatik bayi eşleşmesi tamir edildi",
-    "version": "v3.8.3",
-    "date": "17.10.2026 21:51"
+    "commit": "v3.8.4-offline-first-and-tunnel-manager",
+    "message": "Tam bağımsız çevrimdışı çalışma modu ve admin panelinden tek tıkla Cloudflare tünel başlatıcı eklendi",
+    "version": "v3.8.4",
+    "date": "17.10.2026 22:00"
 }

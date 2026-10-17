@@ -78,8 +78,18 @@ function getOfflineHtml() {
         .then(data => {
           document.getElementById('spin').style.display = 'none';
           if (data && data.tunnel_url && data.tunnel_url.startsWith('http')) {
-            const liveUrl = data.tunnel_url.replace(/\\/+$/, '');
+            const liveUrl = data.tunnel_url.replace(/\/+$/, '');
             const target = liveUrl + (window.location.pathname.startsWith('/static') ? '/cikis' : window.location.pathname) + window.location.search;
+            
+            // Eğer sayfa zaten bu URL ise tekrar kendine yönlendirip sonsuz döngüye girme!
+            if (window.location.origin === liveUrl) {
+              document.getElementById('title').textContent = "Sunucu Çevrimdışı (502 / Kapalı)";
+              document.getElementById('desc').textContent = "Uzak tünel sunucusu şu an aktif yanıt vermiyor. Sunucu bilgisayarı açıldığında otomatik bağlanabilirsiniz.";
+              document.getElementById('live-url').textContent = liveUrl + " (Bağlantı Yok)";
+              document.getElementById('live-url').style.display = 'block';
+              return;
+            }
+
             document.getElementById('title').textContent = "Yeni Sunucu Adresi Bulundu!";
             document.getElementById('desc').textContent = "Yeni tünel adresine otomatik yönlendiriliyorsunuz...";
             document.getElementById('live-url').textContent = liveUrl;
@@ -110,6 +120,23 @@ function getOfflineHtml() {
 self.addEventListener('fetch', event => {
     const req = event.request;
     const url = new URL(req.url);
+
+    // Yerel makine veya yerel ağ üzerinden bağlanırken ASLA uzak tünele yönlendirme yapma!
+    const isLocal = ['localhost', '127.0.0.1'].includes(url.hostname) || 
+                    url.hostname.startsWith('192.168.') || 
+                    url.hostname.startsWith('10.') || 
+                    url.hostname.endsWith('.local');
+
+    if (isLocal) {
+        event.respondWith(
+            fetch(req).catch(async () => {
+                const cached = await caches.match(req);
+                if (cached) return cached;
+                return new Response('Yerel Çevrimdışı Mod Devrede', { status: 200, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+            })
+        );
+        return;
+    }
 
     // API istekleri doğrudan yerel sunucuya gitsin
     if (url.pathname.startsWith('/api/') || req.method !== 'GET') {

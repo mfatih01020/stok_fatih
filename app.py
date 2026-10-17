@@ -353,20 +353,33 @@ def get_merkez_sunucu_url(force_refresh=False):
                 # Güvenlik Doğrulaması: Yalnızca Cloudflare tünel veya yerel ağ adreslerini kabul et
                 if fb_url and (fb_url.startswith("https://") or fb_url.startswith("http://")):
                     if "trycloudflare.com" in fb_url or "localhost" in fb_url or "127.0.0.1" in fb_url:
+                        # Tünel gerçekten canlı mı doğrula!
+                        fb_alive = False
                         try:
-                            with open(cfg_file, "w", encoding="utf-8") as f_out:
-                                f_out.write(fb_url)
-                        except Exception as _ignored_err:
-                            logger.debug(f"Suppressed notice: {_ignored_err}")
-                        try:
-                            set_system_setting("merkez_sunucu_url", fb_url)
-                        except Exception as _ignored_err:
-                            logger.debug(f"Suppressed notice: {_ignored_err}")
-                        with _merkez_url_lock:
-                            _merkez_url_cache["url"] = fb_url
-                            _merkez_url_cache["ts"] = now
-                        logger.info(f"🌐 Canlı Merkez Sunucu Tüneli Firebase'den Alındı ve Güncellendi: {fb_url}")
-                        return fb_url
+                            chk_req = urllib.request.Request(f"{fb_url}/api/system/version", headers={'User-Agent': 'Mozilla/5.0'})
+                            with urllib.request.urlopen(chk_req, timeout=2.0) as chk_r:
+                                if chk_r.status in (200, 302, 401, 403):
+                                    fb_alive = True
+                        except Exception:
+                            fb_alive = False
+
+                        if fb_alive:
+                            try:
+                                with open(cfg_file, "w", encoding="utf-8") as f_out:
+                                    f_out.write(fb_url)
+                            except Exception as _ignored_err:
+                                logger.debug(f"Suppressed notice: {_ignored_err}")
+                            try:
+                                set_system_setting("merkez_sunucu_url", fb_url)
+                            except Exception as _ignored_err:
+                                logger.debug(f"Suppressed notice: {_ignored_err}")
+                            with _merkez_url_lock:
+                                _merkez_url_cache["url"] = fb_url
+                                _merkez_url_cache["ts"] = now
+                            logger.info(f"🌐 Canlı Merkez Sunucu Tüneli Firebase'den Alındı ve Güncellendi: {fb_url}")
+                            return fb_url
+                        else:
+                            logger.debug(f"Firebase'deki tünel ({fb_url}) çevrimdışı, bağımsız yerel moda geçildi.")
                     else:
                         logger.warning(f"⚠️ Güvenlik Uyarısı: Firebase'den bilinmeyen/güvensiz tünel adresi reddedildi: {fb_url}")
     except Exception as e_fb:
@@ -377,7 +390,11 @@ def get_merkez_sunucu_url(force_refresh=False):
         else:
             logger.warning(f"Firebase canlı tünel sorgulama hatası: {e_fb}")
 
-    return candidate
+    # Sunucu çevrimdışı: Önbelleğe boş dize kaydet ve 15 saniye yerel bağımsız modda çalış
+    with _merkez_url_lock:
+        _merkez_url_cache["url"] = ""
+        _merkez_url_cache["ts"] = now
+    return ""
 
 def get_or_create_session_token():
     if os.path.exists(SESSION_TOKEN_PATH):
@@ -10194,10 +10211,6 @@ def get_current_tunnel_url():
 
 @app.route('/admin')
 def admin_panel_page():
-    if not _is_server_host():
-        merkez_url = get_merkez_sunucu_url()
-        if merkez_url:
-            return redirect(f"{merkez_url.rstrip('/')}/login")
     from flask import session as flask_session
     if not flask_session.get('is_admin'):
         return redirect('/login')
@@ -12266,6 +12279,46 @@ def api_system_tunnel_debug():
         'files_in_base': os.listdir(base)[:40]
     })
 
+@app.route('/api/system/tunnel/status', methods=['GET'])
+def api_system_tunnel_status():
+    global PUBLIC_TUNNEL_URL
+    return jsonify({
+        'success': True,
+        'public_tunnel_url': PUBLIC_TUNNEL_URL or get_current_tunnel_url(),
+        'is_server_host': _is_server_host(),
+        'local_ip': get_local_ip()
+    })
+
+@app.route('/api/system/tunnel/start', methods=['POST'])
+def api_system_start_tunnel():
+    from flask import session as flask_session
+    if not flask_session.get('is_admin'):
+        return jsonify({'success': False, 'error': 'Yetkisiz erişim. Lütfen admin olarak giriş yapınız.'}), 403
+    try:
+        marker = os.path.join(os.path.dirname(os.path.abspath(__file__)), "SUNUCU_CIHAZ.txt")
+        if not os.path.exists(marker):
+            with open(marker, "w", encoding="utf-8") as f_m:
+                f_m.write("SUNUCU\n")
+        _start_cloudflare_tunnel(force=True)
+        return jsonify({'success': True, 'message': '🚀 Cloudflare tüneli bu cihazda başlatılıyor. Birkaç saniye içinde aktifleşecektir.'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/system/tunnel/stop', methods=['POST'])
+def api_system_stop_tunnel():
+    from flask import session as flask_session
+    if not flask_session.get('is_admin'):
+        return jsonify({'success': False, 'error': 'Yetkisiz erişim. Lütfen admin olarak giriş yapınız.'}), 403
+    try:
+        global PUBLIC_TUNNEL_URL, _tunnel_proc
+        if os.name == 'nt':
+            subprocess.run(["taskkill", "/F", "/IM", "cloudflared.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=0x08000000)
+        PUBLIC_TUNNEL_URL = ""
+        publish_tunnel_to_firebase("")
+        return jsonify({'success': True, 'message': '🛑 Tünel durduruldu ve Firebase çevrimdışı yapıldı.'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
 @app.route('/api/admin/debug_logs', methods=['GET'])
 def api_admin_get_debug_logs():
     from flask import session as flask_session
@@ -12732,10 +12785,18 @@ def _is_server_host():
     """Yalnızca klasöründe SUNUCU_CIHAZ.txt dosyası bulunan makine ana sunucudur."""
     return os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), "SUNUCU_CIHAZ.txt"))
 
-def _start_cloudflare_tunnel():
-    if not _is_server_host():
-        logger.info("ℹ️ Bu cihaz ana sunucu (SUNUCU_CIHAZ.txt yok) olmadığı için Cloudflare tünel başlatılmadı.")
-        return
+_tunnel_thread_started = False
+_tunnel_lock = threading.Lock()
+
+def _start_cloudflare_tunnel(force=False):
+    global _tunnel_thread_started
+    with _tunnel_lock:
+        if _tunnel_thread_started and not force:
+            return
+        if not _is_server_host() and not force:
+            logger.info("ℹ️ Bu cihaz ana sunucu (SUNUCU_CIHAZ.txt yok) olmadığı için Cloudflare tünel başlatılmadı.")
+            return
+        _tunnel_thread_started = True
 
     def _tun_worker():
         global PUBLIC_TUNNEL_URL, _tunnel_proc
