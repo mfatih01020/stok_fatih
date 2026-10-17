@@ -7,6 +7,12 @@
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
     <link rel="shortcut icon" href="/static/favicon.ico">
+    <link rel="apple-touch-icon" href="/static/favicon.png">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="QR Compare">
+    <meta name="theme-color" content="#0f172a">
     <!-- Google Fonts Outfit & Inter -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -15,6 +21,11 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/static/style.css">
     <style>
+        @media (max-width: 900px) {
+            .mobile-top-user-wrap {
+                display: flex !important;
+            }
+        }
         /* Satış Ekranı Akış Sıralaması: 1. SMS -> 2. İlaç Seçimi -> 3. Tarla/Mahsul -> 4. Zararlı/Dozaj -> Detaylar */
         .main-content {
             display: flex !important;
@@ -735,10 +746,20 @@
         <!-- SOL SIDEBAR NAVİGASYON -->
         <aside class="sidebar">
             <div class="sidebar-brand">
-                <i class="fa-solid fa-qrcode logo-icon"></i>
-                <div>
-                    <h2>QR Compare</h2>
-                    <p>Akıllı Stok Sistemi</p>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <i class="fa-solid fa-qrcode logo-icon"></i>
+                    <div>
+                        <h2>QR Compare</h2>
+                        <p>Akıllı Stok Sistemi</p>
+                    </div>
+                </div>
+                <div class="mobile-top-user-wrap" style="display:none; align-items:center; gap:8px;">
+                    <span style="font-size:0.75rem; color:#cbd5e1; background:rgba(255,255,255,0.08); padding:5px 9px; border-radius:8px; font-weight:600; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                        <i class="fa-solid fa-user-circle" style="color:#38bdf8;"></i> {{ current_user_name }}
+                    </span>
+                    <a href="/logout" onclick="return confirm('Oturumu kapatmak istediğinize emin misiniz?')" style="background:rgba(239,68,68,0.2); border:1px solid rgba(239,68,68,0.4); color:#fca5a5; font-size:0.78rem; font-weight:700; padding:5px 11px; border-radius:8px; text-decoration:none; display:inline-flex; align-items:center; gap:5px;" title="Oturumu Kapat">
+                        <i class="fa-solid fa-power-off"></i> Çıkış
+                    </a>
                 </div>
             </div>
 
@@ -774,10 +795,6 @@
             </nav>
 
             <div class="sidebar-footer">
-                <div class="system-status-pill {{ 'offline' if not is_system_active else '' }}">
-                    <span class="status-indicator {{ system_status_cls | default('online') }}"></span>
-                    <span>{{ system_status_text | default('Sistem Aktif') }}</span>
-                </div>
                 <div class="user-profile-card">
                     <div class="user-profile-info">
                         <i class="fa-solid fa-user-circle user-avatar-icon"></i>
@@ -786,6 +803,15 @@
                     <button type="button" class="btn-logout-icon" onclick="logoutUser()" title="Oturumdan Çıkış Yap">
                         <i class="fa-solid fa-power-off"></i>
                     </button>
+                </div>
+                <!-- 🌐 TEK VE SABİT MERKEZ SUNUCU CANLI ROZETİ -->
+                <div id="global-network-badge" class="network-badge online sidebar-net-badge system-status-pill" onclick="handleNetworkBadgeClick()" title="Merkez Sunucu ve Canlı Senkronizasyon Durumu (Tıklayarak Şimdi Eşitleyin)">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span class="net-pulse-dot status-indicator online"></span>
+                        <i class="fa-solid fa-wifi net-icon"></i>
+                        <span id="network-status-text" class="net-text">Merkez Sunucu Canlı</span>
+                    </div>
+                    <span id="pending-sync-badge" class="pending-count-pill" style="display:none;">0</span>
                 </div>
                 <div class="version-pill" onclick="showVersionModal()" title="Sürüm Bilgisi">
                     <i class="fa-solid fa-code-branch" style="color: #38bdf8;"></i>
@@ -796,6 +822,22 @@
 
         <!-- SAĞ ANA İÇERİK ALANI -->
         <main class="main-content">
+            {% if session.get('is_admin') %}
+            <div style="background: linear-gradient(90deg, #1e1b4b, #312e81); border: 1.5px solid #6366f1; border-radius: 12px; padding: 10px 18px; margin-bottom: 1.2rem; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 4px 20px rgba(99, 102, 241, 0.25);">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <i class="fa-solid fa-crown" style="color:#fbbf24; font-size:1.2rem;"></i>
+                    <div>
+                        <div style="font-weight:800; color:#fff; font-size:0.95rem;">👑 SÜPER YÖNETİCİ MODU: <span style="color:#38bdf8;">{{ session.get('active_bayi_adi', 'Bayi') }}</span> Adına İşlem Yapıyorsunuz</div>
+                        <div style="font-size:0.75rem; color:#cbd5e1;">Bu ekrandan yapacağınız tüm satışlar ve kayıtlar seçili bayinin hesabına kaydedilecektir.</div>
+                    </div>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <a href="/admin" class="btn btn-outline" style="font-size:0.82rem; background:rgba(255,255,255,0.1); border-color:rgba(255,255,255,0.25); color:#fff; font-weight:700;">
+                        <i class="fa-solid fa-arrow-left"></i> 🔙 Admin Paneline Dön
+                    </a>
+                </div>
+            </div>
+            {% endif %}
             <!-- HEADER BAR -->
             <header class="content-header">
                 <div>
@@ -811,6 +853,65 @@
                     </a>
                 </div>
             </header>
+
+            <!-- 4 SATIŞ TÜRÜ SEÇİM BAR (REÇETESİZ AKTİF, DİĞERLERİ DEMO / PASİF) -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem; margin-bottom: 1.15rem;">
+                <!-- 1. Reçetesiz Satış (AKTİF) -->
+                <button type="button" class="btn-mode-tab active" style="min-width: unset; text-align: left;">
+                    <div class="mode-tab-icon">
+                        <i class="fa-solid fa-basket-shopping"></i>
+                    </div>
+                    <div class="mode-tab-content" style="flex:1;">
+                        <div style="display:flex; align-items:center; justify-content:space-between; gap:6px;">
+                            <h3>Reçetesiz Satış</h3>
+                            <span style="background:rgba(16,185,129,0.22); border:1px solid rgba(16,185,129,0.5); color:#34d399; font-size:0.65rem; font-weight:800; padding:2px 7px; border-radius:99px; letter-spacing:0.3px;">AKTİF</span>
+                        </div>
+                        <p>ÇKS/TÜKAS parsel ve doz kontrollü üretici satışı</p>
+                    </div>
+                </button>
+
+                <!-- 2. Reçeteli Satış (DEMO / PASİF) -->
+                <button type="button" class="btn-mode-tab" disabled style="min-width: unset; text-align: left; opacity: 0.58; cursor: not-allowed; border-style: dashed;" title="Reçeteli Satış modülü yakında aktif edilecektir (Demo Modu)">
+                    <div class="mode-tab-icon" style="background: rgba(148, 163, 184, 0.12); color: #94a3b8;">
+                        <i class="fa-solid fa-file-prescription"></i>
+                    </div>
+                    <div class="mode-tab-content" style="flex:1;">
+                        <div style="display:flex; align-items:center; justify-content:space-between; gap:6px;">
+                            <h3 style="color:#cbd5e1;">Reçeteli Satış</h3>
+                            <span style="background:rgba(245,158,11,0.18); border:1px solid rgba(245,158,11,0.45); color:#fbbf24; font-size:0.63rem; font-weight:800; padding:2px 7px; border-radius:99px;">DEMO MODU</span>
+                        </div>
+                        <p>E-Reçete / Ziraat Mühendisi reçete kodu ile satış</p>
+                    </div>
+                </button>
+
+                <!-- 3. Taahhütlü Satış (DEMO / PASİF) -->
+                <button type="button" class="btn-mode-tab" disabled style="min-width: unset; text-align: left; opacity: 0.58; cursor: not-allowed; border-style: dashed;" title="Taahhütlü Satış modülü yakında aktif edilecektir (Demo Modu)">
+                    <div class="mode-tab-icon" style="background: rgba(148, 163, 184, 0.12); color: #94a3b8;">
+                        <i class="fa-solid fa-file-signature"></i>
+                    </div>
+                    <div class="mode-tab-content" style="flex:1;">
+                        <div style="display:flex; align-items:center; justify-content:space-between; gap:6px;">
+                            <h3 style="color:#cbd5e1;">Taahhütlü Satış</h3>
+                            <span style="background:rgba(245,158,11,0.18); border:1px solid rgba(245,158,11,0.45); color:#fbbf24; font-size:0.63rem; font-weight:800; padding:2px 7px; border-radius:99px;">DEMO MODU</span>
+                        </div>
+                        <p>Üretici taahhütnamesi ile kayıtlı parsel satışı</p>
+                    </div>
+                </button>
+
+                <!-- 4. Kapsam Dışı Satış (DEMO / PASİF) -->
+                <button type="button" class="btn-mode-tab" disabled style="min-width: unset; text-align: left; opacity: 0.58; cursor: not-allowed; border-style: dashed;" title="Kapsam Dışı Satış modülü yakında aktif edilecektir (Demo Modu)">
+                    <div class="mode-tab-icon" style="background: rgba(148, 163, 184, 0.12); color: #94a3b8;">
+                        <i class="fa-solid fa-layer-group"></i>
+                    </div>
+                    <div class="mode-tab-content" style="flex:1;">
+                        <div style="display:flex; align-items:center; justify-content:space-between; gap:6px;">
+                            <h3 style="color:#cbd5e1;">Kapsam Dışı Satış</h3>
+                            <span style="background:rgba(245,158,11,0.18); border:1px solid rgba(245,158,11,0.45); color:#fbbf24; font-size:0.63rem; font-weight:800; padding:2px 7px; border-radius:99px;">DEMO MODU</span>
+                        </div>
+                        <p>BKST parsel kapsamı dışındaki alanlar için satış</p>
+                    </div>
+                </button>
+            </div>
 
             <!-- ADIM 1: MÜŞTERİ T.C. & SMS DOĞRULAMA -->
             <section id="section-sms-card" class="sales-panel-card">
@@ -2319,6 +2420,9 @@
             if (currentSelectedGroup) {
                 renderMode1ItemsTable();
             }
+
+            // 🌾 Çıkış listesini seçilen bu mahsul için ruhsatlı ilaçlara göre anında filtrele
+            loadGroupedProducts();
         }
 
         function populateParcelFilterSelect(parcels) {
@@ -2499,6 +2603,7 @@
             document.getElementById('parcel-rule-alert').style.display = 'none';
             clearPlantChain();
             updateSelectedParcelSummary();
+            loadGroupedProducts();
         }
 
         function updateSelectedParcelSummary() {
@@ -2895,9 +3000,18 @@
                 targetRuhsat = (currentSelectedGroup.ruhsat_no || '').toString().trim();
             }
 
+            // Bilinen ilaçlar için garantili ruhsat no tespiti
+            if (!targetRuhsat && targetName) {
+                if (targetName.includes('kortac')) targetRuhsat = '387';
+                else if (targetName.includes('kung')) targetRuhsat = '2507';
+                else if (targetName.includes('korfosat')) targetRuhsat = '3120';
+                else if (targetName.includes('gezal')) targetRuhsat = '4033';
+                else if (targetName.includes('agnoround')) targetRuhsat = '2275';
+            }
+
             let matchedIdx = -1;
 
-            // 1. Ruhsat no ile eşleşme
+            // 1. Ruhsat no ile kesin eşleşme
             if (targetRuhsat) {
                 for (let i = 1; i < bkuSelect.options.length; i++) {
                     if (bkuSelect.options[i].value === targetRuhsat) {
@@ -2907,9 +3021,9 @@
                 }
             }
 
-            // 2. İsim / Marka kökü ile eşleşme (Örn: "Korfosat 5L" -> "korfosat")
+            // 2. İsim / Marka kökü ile eşleşme (Örn: "Kortac 100 EC" -> "kortac")
             if (matchedIdx === -1 && targetName) {
-                const brand = targetName.replace(/\b\d+(\.\d+)?\s*(l|lt|ml|gr|kg)\b/gi, '').trim().split(' ')[0] || targetName;
+                const brand = targetName.replace(/\b\d+(\.\d+)?\s*(l|lt|ml|gr|kg|ec|sc|sl|wp)\b/gi, '').trim().split(' ')[0] || targetName;
                 for (let i = 1; i < bkuSelect.options.length; i++) {
                     const optText = bkuSelect.options[i].text.toLocaleLowerCase('tr-TR');
                     if (optText.includes(brand) || brand.includes(optText)) {
@@ -2923,9 +3037,21 @@
             if (matchedIdx !== -1) {
                 bkuSelect.selectedIndex = matchedIdx;
                 onChainBkuChange();
-            } else if (bkuSelect.options.length > 1) {
-                bkuSelect.selectedIndex = 1; // İlk geçerli ilacı bağla
-                onChainBkuChange();
+            } else {
+                // Eşleşme bulunamadıysa (örneğin zararlı yanlış seçilmiş ve listede sadece alakasız ot ilaçları varsa)
+                // Rastgele 1. ilacı ASLA SEÇME! Aksi takdirde Bakanlık "Sadece seçilen BKÜ'ye ait ürünler satılabilir" hatası verir!
+                const pestSelect = document.getElementById('select-chain-pest');
+                if (targetName && targetName.includes('kortac') && pestSelect) {
+                    // KORTAC için fındık kurdunu bulmaya çalış
+                    for (let p = 1; p < pestSelect.options.length; p++) {
+                        if (pestSelect.options[p].text.toLocaleLowerCase('tr-TR').includes('kurt')) {
+                            pestSelect.selectedIndex = p;
+                            onChainPestChange();
+                            return;
+                        }
+                    }
+                }
+                console.warn('BKU listesinde seçili ürün için doğrudan ruhsat eşleşmesi bulunamadı:', targetName);
             }
         }
 
@@ -2994,18 +3120,37 @@
             }
         }
 
-        // MOD 1: Çıkış Listesinden Ürün Çekme
+        function getSelectedOrFarmerCrops() {
+            let crops = [];
+            if (typeof selectedParcelIds !== 'undefined' && selectedParcelIds.size > 0 && typeof farmerParcels !== 'undefined') {
+                crops = farmerParcels
+                    .filter(p => selectedParcelIds.has(p.FieldProductId || p.Id))
+                    .map(p => (p.Product || '').trim().toLocaleUpperCase('tr-TR'))
+                    .filter(Boolean);
+            }
+            if (crops.length === 0 && typeof farmerParcels !== 'undefined' && farmerParcels.length > 0) {
+                crops = farmerParcels
+                    .map(p => (p.Product || '').trim().toLocaleUpperCase('tr-TR'))
+                    .filter(Boolean);
+            }
+            return Array.from(new Set(crops));
+        }
+
+        // MOD 1: Çıkış Listesinden Ürün Çekme (Çiftçinin ekili mahsullerine göre ruhsatlı ürünleri listeler)
         async function loadGroupedProducts(showNotice = false) {
             const selectEl = document.getElementById('select-mode1-product');
+            const crops = getSelectedOrFarmerCrops();
+            const cropParam = crops.length > 0 ? `?mahsuller=${encodeURIComponent(crops.join(','))}` : '';
             try {
-                const res = await (window.apiFetch || fetch)('/api/cikis/gruplanmis_urunler');
+                const res = await (window.apiFetch || fetch)(`/api/cikis/gruplanmis_urunler${cropParam}`);
                 const data = await res.json();
                 if (data.success) {
                     groupedProducts = data.gruplar || [];
-                    selectEl.innerHTML = '<option value="">-- Çıkış Listesinden Ürün Seçiniz --</option>';
+                    const cropInfo = crops.length > 0 ? ` (${crops.join(', ')} İçin Ruhsatlı)` : '';
+                    selectEl.innerHTML = `<option value="">-- Çıkış Listesinden Ürün Seçiniz${cropInfo} --</option>`;
 
                     if (groupedProducts.length === 0) {
-                        selectEl.innerHTML += '<option value="" disabled>Çıkış listesinde ürün yok (Önce Barkod Okut & Çıkış yapınız)</option>';
+                        selectEl.innerHTML += `<option value="" disabled>Seçili mahsul${crops.length > 0 ? ' (' + crops.join(', ') + ')' : ''} için depoda hazır ruhsatlı ürün bulunamadı</option>`;
                     } else {
                         groupedProducts.forEach((grp, idx) => {
                             const opt = document.createElement('option');
@@ -3044,26 +3189,56 @@
             if (!data) return;
 
             const bitkiSelect = document.getElementById('select-chain-plant');
-            const bitkiNo = bitkiSelect?.value || '271';
-            const bitkiName = bitkiSelect?.options[bitkiSelect.selectedIndex]?.text || window.selectedProductName || 'BUĞDAY';
+            const bitkiNo = (bitkiSelect && bitkiSelect.value && bitkiSelect.value !== '0') ? bitkiSelect.value : (farmerParcels[0]?.Product === 'FINDIK' ? '71' : '71');
+            const bitkiName = bitkiSelect?.options[bitkiSelect.selectedIndex]?.text || window.selectedProductName || (farmerParcels[0]?.Product || 'FINDIK');
+
+            const pNorm = (productName || '').toUpperCase();
+            let bkuNum = currentSelectedGroup?.ruhsat_no || '0';
+            let harmNo = '0';
+            let harmName = data.en_yuksek_doz_zararli || '';
+            let formName = 'SL';
+            let actName = data.etken_madde || '';
+
+            if (pNorm.includes('KORTAC')) {
+                bkuNum = '387';
+                harmNo = '326';
+                harmName = 'Fındık kurdu (Curculio nucum)';
+                formName = 'EC';
+                actName = 'Alpha-cypermethrin';
+            } else if (pNorm.includes('KUNG')) {
+                bkuNum = '2507';
+                harmNo = '326';
+                harmName = 'Fındık kurdu (Curculio nucum)';
+                formName = 'EC';
+                actName = 'Lambda-cyhalothrin';
+            } else if (pNorm.includes('KORFOSAT')) {
+                bkuNum = '3120';
+                harmNo = '921';
+                harmName = 'Kanyaş (Sorghum halepense)';
+                formName = 'SL';
+            } else if (pNorm.includes('GEZAL')) {
+                bkuNum = '4033';
+                harmNo = '921';
+                formName = 'SL';
+            }
 
             currentHarmfulChoice = {
                 cksProductName: window.selectedProductName || bitkiName,
                 productNo: bitkiNo,
                 productName: bitkiName,
-                harmfulOrganismNo: '0',
-                harmfulOrganismName: data.en_yuksek_doz_zararli || 'Çok Yıllık Köklü Yabancı Otlar',
+                harmfulOrganismNo: harmNo,
+                harmfulOrganismName: harmName,
                 activeMaterialGroupNo: '0',
-                activeMaterialGroupName: data.etken_madde || '',
+                activeMaterialGroupName: actName,
                 formulationNo: '0',
-                formulationName: 'SL',
-                bkuNo: currentSelectedGroup?.ruhsat_no || '0',
+                formulationName: formName,
+                bkuNo: bkuNum,
                 bkuName: data.urun_adi || productName
             };
 
             // Arka planda BKST zincirindeki eşleşmeyi tamamla
-            if (data.en_yuksek_doz_zararli) {
-                attemptAutoMatchRecommendedPest(data.en_yuksek_doz_zararli);
+            if (harmName || data.en_yuksek_doz_zararli) {
+                attemptAutoMatchRecommendedPest(harmName || data.en_yuksek_doz_zararli);
             }
         }
 
@@ -3378,11 +3553,16 @@
 
         // Sabit yapışkan bardan tek tıkla satışı tamamlama
         function submitActiveModeSales() {
-            const isScanActive = document.getElementById('tab-mode-scan')?.classList.contains('active');
-            if (isScanActive) {
-                submitMode2Satis();
-            } else {
-                submitMode1Satis();
+            try {
+                const isScanActive = document.getElementById('tab-mode-scan')?.classList.contains('active');
+                if (isScanActive) {
+                    submitMode2Satis();
+                } else {
+                    submitMode1Satis();
+                }
+            } catch (err) {
+                console.error('submitActiveModeSales error:', err);
+                alert('⚠️ Satış işlemi başlatılırken hata oluştu: ' + (err.message || err));
             }
         }
 
@@ -3418,9 +3598,19 @@
                 renderMode2Table();
 
                 try {
-                    const res = await (window.apiFetch || fetch)(`/api/urun/dozaj_bilgisi?karekod=${encodeURIComponent(code)}`);
+                    const crops = getSelectedOrFarmerCrops();
+                    const cropParam = crops.length > 0 ? `&mahsuller=${encodeURIComponent(crops.join(','))}` : '';
+                    const res = await (window.apiFetch || fetch)(`/api/urun/dozaj_bilgisi?karekod=${encodeURIComponent(code)}${cropParam}`);
                     const data = await res.json();
                     if (data.success) {
+                        if (data.ruhsat_uygun === false) {
+                            // Çiftçinin mahsulünde ruhsatlı olmayan ürün engeli: anında listeden çıkar ve uyar
+                            mode2ScannedQRs = mode2ScannedQRs.filter(it => it.code !== code);
+                            renderMode2Table();
+                            alert(`❌ MAHSUL RUHSAT UYUMSUZLUĞU!\n\n` + (data.ruhsat_hata_mesaji || `Bu ürün çiftçinin arazisindeki mahsul için ruhsatlı değildir!`));
+                            return;
+                        }
+
                         if (data.daha_once_satildi) {
                             // Mükerrer satış engeli: Listeden anında çıkar ve uyar
                             mode2ScannedQRs = mode2ScannedQRs.filter(it => it.code !== code);
@@ -3881,6 +4071,15 @@
                                 break;
                             }
                         }
+                    } else {
+                        // Böcek/Kurt ilacı ise böcek zararlısı eşleştir:
+                        for (let i = 1; i < pestSelect.options.length; i++) {
+                            const optText = pestSelect.options[i].text.toLocaleLowerCase('tr-TR');
+                            if (optText.includes('kurt') || optText.includes('böcek') || optText.includes('kokarca') || optText.includes('güve') || optText.includes('koşnil')) {
+                                bestMatchIdx = i;
+                                break;
+                            }
+                        }
                     }
                 }
 
@@ -3953,19 +4152,25 @@
         // ==============================================================
         function validateCommonRequirements() {
             const generalAlert = document.getElementById('general-submit-alert');
-            generalAlert.style.display = 'none';
+            if (generalAlert) generalAlert.style.display = 'none';
 
             if (!isSmsVerified) {
-                generalAlert.style.display = 'flex';
-                generalAlert.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Lütfen önce yukarıdaki alandan Müşteri T.C. girerek SMS Doğrulamasını tamamlayınız!';
-                document.getElementById('api-tc-no').focus();
+                if (generalAlert) {
+                    generalAlert.style.display = 'flex';
+                    generalAlert.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Lütfen önce yukarıdaki alandan Müşteri T.C. girerek SMS Doğrulamasını tamamlayınız!';
+                }
+                alert('⚠️ Lütfen önce yukarıdaki alandan Müşteri T.C. girerek SMS Doğrulamasını tamamlayınız!');
+                document.getElementById('api-tc-no')?.focus();
                 return false;
             }
 
             if (selectedParcelIds.size === 0) {
-                generalAlert.style.display = 'flex';
-                generalAlert.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Parsel seçimi yapılması zorunludur! Lütfen tarlalar tablosundan en az 1 adet parsel seçiniz.';
-                document.getElementById('section-parcels').scrollIntoView({ behavior: 'smooth' });
+                if (generalAlert) {
+                    generalAlert.style.display = 'flex';
+                    generalAlert.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Parsel seçimi yapılması zorunludur! Lütfen tarlalar tablosundan en az 1 adet parsel seçiniz.';
+                }
+                alert('⚠️ Parsel seçimi yapılması zorunludur! Lütfen tarlalar tablosundan en az 1 adet parsel seçiniz.');
+                document.getElementById('section-parcels')?.scrollIntoView({ behavior: 'smooth' });
                 return false;
             }
 
@@ -3997,13 +4202,13 @@
                 productNo: String(plantNo),
                 productName: plantName,
                 harmfulOrganismNo: String(harmNo || '0'),
-                harmfulOrganismName: String(harmName || 'Kanyaş (Sorghum halepense)'),
-                activeMaterialGroupNo: String(actNo || '176'),
-                activeMaterialGroupName: String(actName || 'Glyphosate isopropylamine tuzu'),
-                formulationNo: String(formNo || '37'),
-                formulationName: String(formName || 'SL'),
-                bkuNo: String(bkuId || '3120'),
-                bkuName: String(bkuTitle || 'KORFOSAT 48 SL (İMAL)')
+                harmfulOrganismName: String(harmName || ''),
+                activeMaterialGroupNo: String(actNo || '0'),
+                activeMaterialGroupName: String(actName || ''),
+                formulationNo: String(formNo || '0'),
+                formulationName: String(formName || ''),
+                bkuNo: String(bkuId || '0'),
+                bkuName: String(bkuTitle || currentSelectedGroup?.urun_adi || '')
             };
         }
 
@@ -4013,8 +4218,11 @@
             const generalAlert = document.getElementById('general-submit-alert');
 
             if (!currentSelectedGroup || mode1SelectedIds.size === 0) {
-                generalAlert.style.display = 'flex';
-                generalAlert.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Lütfen çıkışı yapılacak en az 1 adet kutu seçiniz!';
+                if (generalAlert) {
+                    generalAlert.style.display = 'flex';
+                    generalAlert.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Lütfen çıkışı yapılacak ürünü ve en az 1 adet kutuyu seçiniz!';
+                }
+                alert('⚠️ Lütfen çıkışı yapılacak ürünü ve en az 1 adet kutuyu seçiniz!');
                 return;
             }
 
@@ -4371,6 +4579,7 @@
 
             const selM1 = document.getElementById('select-mode1-product');
             if (selM1) selM1.value = '';
+            loadGroupedProducts();
 
             // Yeni müşteri için otomatik 8 haneli rastgele yeni irsaliye no üret
             generateNewRandomWaybill();
@@ -4402,5 +4611,34 @@
             await restoreCurrentState();
         });
     </script>
+
+    <nav class="global-mobile-nav">
+        <a href="/cikis" class="global-nav-item">
+            <i class="fa-solid fa-box-open"></i>
+            <span>Çıkış Okut</span>
+        </a>
+        <a href="/cikis-listesi" class="global-nav-item">
+            <i class="fa-solid fa-list-check"></i>
+            <span>Çıkış Listesi</span>
+        </a>
+        <a href="/stok-esitleme" class="global-nav-item">
+            <i class="fa-solid fa-boxes-stacked"></i>
+            <span>Terek Eşitle</span>
+        </a>
+        <a href="/depo_stoklari" class="global-nav-item">
+            <i class="fa-solid fa-warehouse"></i>
+            <span>Depo Stokları</span>
+        </a>
+        <a href="/kullaniciya-satis" class="global-nav-item active">
+            <i class="fa-solid fa-user-tag"></i>
+            <span>Satış Yap</span>
+        </a>
+        <a href="/logout" class="global-nav-item" onclick="return confirm('Oturumu kapatmak istediğinize emin misiniz?')" style="color: #f87171;">
+            <i class="fa-solid fa-power-off"></i>
+            <span>Çıkış</span>
+        </a>
+    </nav>
+
+    <script src="/static/device_tracker.js"></script>
 </body>
 </html>

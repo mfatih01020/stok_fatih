@@ -1,0 +1,2850 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>👑 Zirai İlaç Yönetim Merkezi - Admin Hub</title>
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg-base: #090d16;
+            --bg-card: rgba(17, 24, 39, 0.75);
+            --bg-card-hover: rgba(30, 41, 59, 0.85);
+            --border-card: rgba(255, 255, 255, 0.08);
+            --border-active: rgba(56, 189, 248, 0.4);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --color-blue: #38bdf8;
+            --color-indigo: #6366f1;
+            --color-green: #10b981;
+            --color-amber: #f59e0b;
+            --color-red: #ef4444;
+            --color-purple: #a855f7;
+            --font-head: 'Outfit', sans-serif;
+            --font-body: 'Plus Jakarta Sans', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            font-family: var(--font-body);
+            min-height: 100vh;
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(56, 189, 248, 0.12) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(99, 102, 241, 0.1) 0px, transparent 50%);
+            background-attachment: fixed;
+            padding-bottom: 60px;
+        }
+
+        /* Top Navbar */
+        .admin-nav {
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--border-card);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            padding: 0.85rem 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .brand-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-logo-icon {
+            width: 42px;
+            height: 42px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #0284c7, #6366f1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.3rem;
+            color: #fff;
+            box-shadow: 0 0 20px rgba(56, 189, 248, 0.35);
+        }
+
+        .brand-text h1 {
+            font-family: var(--font-head);
+            font-size: 1.25rem;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .brand-badge {
+            background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(99, 102, 241, 0.2));
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            color: #38bdf8;
+            font-size: 0.72rem;
+            font-weight: 800;
+            padding: 2px 8px;
+            border-radius: 999px;
+            text-transform: uppercase;
+        }
+
+        .brand-sub {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin-top: 1px;
+        }
+
+        .nav-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        /* Buttons */
+        .btn {
+            font-family: var(--font-head);
+            font-weight: 700;
+            font-size: 0.88rem;
+            padding: 0.55rem 1.1rem;
+            border-radius: 10px;
+            border: 1px solid transparent;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s ease;
+            text-decoration: none;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #0284c7, #2563eb);
+            color: #fff;
+            box-shadow: 0 4px 15px rgba(2, 132, 199, 0.3);
+        }
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(2, 132, 199, 0.45);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #059669, #10b981);
+            color: #fff;
+            box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+        }
+        .btn-success:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.45);
+        }
+
+        .btn-outline {
+            background: rgba(15, 23, 42, 0.6);
+            border-color: rgba(255, 255, 255, 0.15);
+            color: var(--text-muted);
+        }
+        .btn-outline:hover {
+            border-color: #38bdf8;
+            color: #fff;
+            transform: translateY(-1px);
+        }
+
+        .btn-danger-outline {
+            background: rgba(239, 68, 68, 0.1);
+            border-color: rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+        }
+        .btn-danger-outline:hover {
+            background: rgba(239, 68, 68, 0.2);
+            color: #fff;
+        }
+
+        /* Container */
+        .main-container {
+            max-width: 1350px;
+            margin: 1.5rem auto;
+            padding: 0 1.25rem;
+        }
+
+        /* KPI Dashboard Stats */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .kpi-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 16px;
+            padding: 1.25rem 1.4rem;
+            backdrop-filter: blur(12px);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.2s ease;
+        }
+        .kpi-card:hover {
+            border-color: rgba(255, 255, 255, 0.18);
+            transform: translateY(-2px);
+        }
+
+        .kpi-info-title {
+            font-size: 0.82rem;
+            font-weight: 700;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .kpi-info-value {
+            font-family: var(--font-head);
+            font-size: 1.85rem;
+            font-weight: 800;
+            color: #fff;
+            margin-top: 4px;
+        }
+        .kpi-info-sub {
+            font-size: 0.76rem;
+            color: #64748b;
+            margin-top: 2px;
+        }
+
+        .kpi-icon-wrap {
+            width: 48px;
+            height: 48px;
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.4rem;
+        }
+        .kpi-blue { background: rgba(56, 189, 248, 0.15); color: #38bdf8; }
+        .kpi-green { background: rgba(16, 185, 129, 0.15); color: #10b981; }
+        .kpi-amber { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+        .kpi-red { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+
+        /* Section Headers */
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1.2rem;
+            flex-wrap: wrap;
+            gap: 0.8rem;
+        }
+        .section-title {
+            font-family: var(--font-head);
+            font-size: 1.35rem;
+            font-weight: 800;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* Dealer Cards Grid */
+        .dealers-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(460px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2.5rem;
+        }
+        @media (max-width: 640px) {
+            .dealers-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .dealer-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 18px;
+            padding: 1.4rem;
+            backdrop-filter: blur(12px);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            gap: 1.2rem;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+        }
+        .dealer-card:hover {
+            border-color: var(--border-active);
+            box-shadow: 0 10px 30px -10px rgba(56, 189, 248, 0.15);
+            transform: translateY(-2px);
+        }
+
+        .dealer-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .dealer-name {
+            font-family: var(--font-head);
+            font-size: 1.15rem;
+            font-weight: 800;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            word-break: break-word;
+        }
+        .dealer-location {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: 3px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            flex-shrink: 0;
+            white-space: nowrap;
+        }
+        .status-online {
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid rgba(16, 185, 129, 0.4);
+            color: #34d399;
+        }
+        .status-offline {
+            background: rgba(148, 163, 184, 0.15);
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            color: #94a3b8;
+        }
+
+        @keyframes pulseDot {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
+            70% { transform: scale(1.15); box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+        }
+        @keyframes slideInRight {
+            from { opacity: 0; transform: translateX(60px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+        .live-pulse-dot {
+            width: 8px;
+            height: 8px;
+            background: #22c55e;
+            border-radius: 50%;
+            display: inline-block;
+            animation: pulseDot 1.5s infinite;
+        }
+        .device-row-card {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 12px 14px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            transition: all 0.2s ease;
+        }
+        .device-row-card:hover {
+            border-color: rgba(56, 189, 248, 0.35);
+            background: rgba(15, 23, 42, 0.95);
+        }
+
+        /* Dealer Stats Row */
+        .dealer-metrics {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            background: rgba(15, 23, 42, 0.5);
+            padding: 10px 12px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .metric-box {
+            text-align: center;
+        }
+        .metric-lbl {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            font-weight: 600;
+        }
+        .metric-val {
+            font-family: var(--font-head);
+            font-size: 1.1rem;
+            font-weight: 800;
+            color: #fff;
+            margin-top: 2px;
+        }
+
+        .dealer-meta-list {
+            font-size: 0.82rem;
+            color: #94a3b8;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .dealer-meta-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .meta-tag {
+            font-family: var(--font-mono);
+            background: rgba(0, 0, 0, 0.3);
+            padding: 2px 6px;
+            border-radius: 6px;
+            color: #cbd5e1;
+            font-size: 0.76rem;
+        }
+
+        /* Action Buttons Grid */
+        .dealer-actions-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            padding-top: 12px;
+        }
+        .btn-card-action {
+            width: 100%;
+            padding: 0.55rem;
+            font-size: 0.82rem;
+            justify-content: center;
+        }
+
+        /* Modals */
+        .modal {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(8px);
+            z-index: 9999;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 1.5rem;
+            overflow-y: auto;
+        }
+        .modal-box {
+            background: #111827;
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            border-radius: 20px;
+            width: 100%;
+            max-width: 780px;
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.8);
+            overflow: hidden;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .modal-header {
+            padding: 1.2rem 1.5rem;
+            background: rgba(15, 23, 42, 0.8);
+            border-bottom: 1px solid var(--border-card);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .modal-title {
+            font-family: var(--font-head);
+            font-size: 1.25rem;
+            font-weight: 800;
+            color: #38bdf8;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .modal-close {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 1.4rem;
+            cursor: pointer;
+        }
+        .modal-body {
+            padding: 1.5rem;
+            overflow-y: auto;
+            flex: 1;
+        }
+        .modal-footer {
+            padding: 1rem 1.5rem;
+            background: rgba(15, 23, 42, 0.8);
+            border-top: 1px solid var(--border-card);
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+
+        /* Form elements */
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        .form-label {
+            display: block;
+            font-size: 0.82rem;
+            font-weight: 700;
+            color: var(--text-muted);
+            margin-bottom: 5px;
+        }
+        .form-input {
+            width: 100%;
+            padding: 0.65rem 0.9rem;
+            background: #0f172a;
+            border: 1.5px solid #334155;
+            border-radius: 10px;
+            color: #fff;
+            font-family: inherit;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+        }
+        .form-input:focus {
+            outline: none;
+            border-color: #38bdf8;
+            box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
+        }
+
+        /* Data table */
+        .admin-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+        .admin-table th {
+            background: #0f172a;
+            color: var(--text-muted);
+            font-weight: 700;
+            text-align: left;
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border-card);
+        }
+        .admin-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            color: #cbd5e1;
+        }
+        .admin-table tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        /* Log Accordion */
+        .log-item {
+            background: #0f172a;
+            border: 1px solid var(--border-card);
+            border-radius: 12px;
+            margin-bottom: 8px;
+            overflow: hidden;
+        }
+        .log-item-header {
+            padding: 10px 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            gap: 8px;
+        }
+        .log-item-header:hover {
+            background: rgba(255, 255, 255, 0.03);
+        }
+        .log-badge {
+            font-size: 0.7rem;
+            font-weight: 800;
+            padding: 2px 8px;
+            border-radius: 6px;
+            text-transform: uppercase;
+        }
+        .badge-error { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+        .badge-warn { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
+        .badge-info { background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); }
+
+        .log-details {
+            display: none;
+            padding: 12px 14px;
+            background: #020617;
+            border-top: 1px solid var(--border-card);
+            font-size: 0.8rem;
+        }
+        .json-box {
+            background: #0a0f1d;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 10px;
+            font-family: var(--font-mono);
+            font-size: 0.76rem;
+            color: #93c5fd;
+            overflow-x: auto;
+            max-height: 220px;
+            white-space: pre-wrap;
+            margin-top: 6px;
+        }
+
+        /* Toast notification */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: #1e293b;
+            color: #fff;
+            padding: 12px 20px;
+            border-radius: 12px;
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            z-index: 100000;
+            display: none;
+            align-items: center;
+            gap: 10px;
+            font-weight: 700;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- TOP NAVIGATION -->
+    <nav class="admin-nav">
+        <div class="brand-container">
+            <div class="brand-logo-icon">
+                <i class="fa-solid fa-shield-halved"></i>
+            </div>
+            <div class="brand-text">
+                <h1>Zirai İlaç Yönetim Merkezi <span class="brand-badge">Süper Admin</span></h1>
+                <div class="brand-sub">Tüm bayilerin merkezi kontrolü, canlı senkronizasyon ve hata denetimi</div>
+            </div>
+        </div>
+
+        <div class="nav-actions">
+            <!-- 🌐 CANLI AĞ, İNTERNET & SUNUCU DURUMU -->
+            <div id="global-network-badge" class="network-badge online" onclick="handleNetworkBadgeClick()" title="Canlı Ağ Durumu: İnternet Bağlantısı ve Sunucu Eşitlemesi (Tıklayarak Şimdi Eşitleyin)">
+                <span class="net-pulse-dot"></span>
+                <i class="fa-solid fa-wifi net-icon"></i>
+                <span id="network-status-text" class="net-text">İnternet Bağlı</span>
+                <span id="pending-sync-badge" class="pending-count-pill" style="display:none;">0 Bekleyen</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px; background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); padding:6px 12px; border-radius:10px; font-size:0.8rem; color:#34d399; font-weight:700;">
+                <i class="fa-solid fa-circle-dot fa-beat" style="font-size:0.6rem;"></i> Sunucu Canlı • Otomatik Senkron: 1 Saat
+            </div>
+            <button class="btn btn-primary" onclick="syncAllDealers()">
+                <i class="fa-solid fa-arrows-rotate"></i> 🔄 Tüm Bayileri Şimdi Eşitle
+            </button>
+            <button class="btn btn-outline" onclick="openAddDealerModal()">
+                <i class="fa-solid fa-plus"></i> ➕ Yeni Bayi Ekle
+            </button>
+            <button class="btn btn-outline" onclick="openAdminSecurityModal()" style="border-color:#38bdf8; color:#38bdf8;" title="Admin kullanıcı adı ve parolasını güvenle değiştir">
+                <i class="fa-solid fa-key"></i> 🔑 Admin Şifresi
+            </button>
+            <button class="btn btn-outline" id="btn-notifications" onclick="openNotificationsModal()" style="border-color:#f59e0b; color:#fbbf24; position:relative;" title="Yeni bayi üyelik talepleri ve sistem bildirimleri">
+                <i class="fa-solid fa-bell"></i> 🔔 Bildirimler <span id="badge-unread-count" style="display:none; background:#ef4444; color:#fff; font-size:0.7rem; font-weight:800; padding:1px 6px; border-radius:10px; margin-left:4px;">0</span>
+            </button>
+            <button class="btn btn-danger-outline" onclick="adminLogout()">
+                <i class="fa-solid fa-right-from-bracket"></i> Çıkış
+            </button>
+        </div>
+    </nav>
+
+    <!-- MAIN CONTAINER -->
+    <main class="main-container">
+
+        <!-- 🔔 YENİ ÜYELİK TALEPLERİ & SİSTEM BİLDİRİMLERİ BANNERI -->
+        <div id="banner-membership-requests" style="display:none; margin-bottom:1.5rem; background:linear-gradient(135deg, rgba(239, 68, 68, 0.16), rgba(245, 158, 11, 0.16)); border:1px solid rgba(239, 68, 68, 0.45); border-radius:16px; padding:16px 20px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <div style="background:rgba(239, 68, 68, 0.25); width:42px; height:42px; border-radius:12px; display:flex; align-items:center; justify-content:center; color:#f87171; font-size:1.3rem;">
+                        <i class="fa-solid fa-bell fa-shake"></i>
+                    </div>
+                    <div>
+                        <div style="font-size:0.95rem; font-weight:800; color:#f87171; display:flex; align-items:center; gap:8px;">
+                            YENİ BAYİ ÜYELİK TALEBİ BULUNMAKTADIR!
+                            <span id="banner-request-count" style="background:#ef4444; color:#fff; font-size:0.75rem; padding:1px 8px; border-radius:8px;">1</span>
+                        </div>
+                        <div id="banner-request-text" style="font-size:0.84rem; color:#e2e8f0; margin-top:3px;">
+                            Sistemde kayıtlı olmayan bir bayi giriş yapmayı denedi ve üyelik talebi oluşturuldu.
+                        </div>
+                    </div>
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <button class="btn btn-primary" onclick="openNotificationsModal()" style="font-size:0.82rem; padding:6px 14px;">
+                        <i class="fa-solid fa-eye"></i> Talepleri İncele & Onayla
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- NETWORK & REMOTE ACCESS HELPER BANNERS -->
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap:14px; margin-bottom:1.5rem;">
+            <!-- 1. DÜKKAN / İNTERNET UZAKTAN ERİŞİM (WIFI GEREKMEZ) -->
+            <div style="background:linear-gradient(135deg, rgba(34, 197, 94, 0.12), rgba(14, 165, 233, 0.12)); border:1px solid rgba(34, 197, 94, 0.35); border-radius:16px; padding:14px 18px; display:flex; flex-direction:column; justify-content:space-between; gap:10px;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <div style="background:rgba(34, 197, 94, 0.2); width:36px; height:36px; border-radius:10px; display:flex; align-items:center; justify-content:center; color:#4ade80; font-size:1.1rem;">
+                        <i class="fa-solid fa-earth-americas"></i>
+                    </div>
+                    <div>
+                        <div style="font-size:0.92rem; font-weight:800; color:#fff; display:flex; align-items:center; gap:6px;">
+                            <span>🌍 Uzaktan Erişim Adresi (Dükkan / Cep Telefonu)</span>
+                            <span class="live-pulse-dot" style="background:#4ade80;" title="İnternete Açık"></span>
+                        </div>
+                        <div style="font-size:0.75rem; color:#94a3b8;">
+                            <strong>Aynı Wi-Fi gerekmez!</strong> Babanız dükkandan veya siz telefonunuzdan bu linkle her yerden bağlanabilirsiniz:
+                        </div>
+                    </div>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <code id="lbl-public-url" style="background:#0f172a; padding:7px 12px; border-radius:8px; color:#4ade80; font-family:var(--font-mono); font-size:0.85rem; font-weight:700; border:1px solid rgba(34, 197, 94, 0.25); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ public_tunnel_url if public_tunnel_url else 'Tünel hazırlanıyor...' }}</code>
+                    <button class="btn btn-outline" style="padding:0.45rem 0.85rem; font-size:0.8rem; border-color:rgba(34, 197, 94, 0.4); color:#4ade80;" onclick="copyPublicUrl()">
+                        <i class="fa-regular fa-copy"></i> Kopyala
+                    </button>
+                </div>
+            </div>
+
+            <!-- 2. YEREL AĞ (SADECE EVDEKİ AYNI WI-FI) -->
+            <div style="background:linear-gradient(135deg, rgba(14, 165, 233, 0.08), rgba(99, 102, 241, 0.08)); border:1px solid rgba(56, 189, 248, 0.25); border-radius:16px; padding:14px 18px; display:flex; flex-direction:column; justify-content:space-between; gap:10px;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <div style="background:rgba(56, 189, 248, 0.2); width:36px; height:36px; border-radius:10px; display:flex; align-items:center; justify-content:center; color:#38bdf8; font-size:1.1rem;">
+                        <i class="fa-solid fa-wifi"></i>
+                    </div>
+                    <div>
+                        <div style="font-size:0.92rem; font-weight:800; color:#fff; display:flex; align-items:center; gap:6px;">
+                            <span>🏠 Yerel Ağ Adresi (Sadece Evdeki Aynı Wi-Fi)</span>
+                        </div>
+                        <div style="font-size:0.75rem; color:#94a3b8;">
+                            Sadece sunucu ile <strong>aynı ev modemi/Wi-Fi'sine</strong> bağlı cihazlar için geçerlidir:
+                        </div>
+                    </div>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <code id="lbl-network-url" style="background:#0f172a; padding:7px 12px; border-radius:8px; color:#38bdf8; font-family:var(--font-mono); font-size:0.85rem; font-weight:700; border:1px solid rgba(255,255,255,0.1); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ local_url if local_url else 'http://127.0.0.1:5000' }}</code>
+                    <button class="btn btn-outline" style="padding:0.45rem 0.85rem; font-size:0.8rem;" onclick="copyNetworkUrl()">
+                        <i class="fa-regular fa-copy"></i> Kopyala
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- KPI SUMMARY CARDS -->
+        <section class="kpi-grid">
+            <div class="kpi-card">
+                <div>
+                    <div class="kpi-info-title">Kayıtlı Bayiler</div>
+                    <div class="kpi-info-value" id="kpi-total-dealers">0</div>
+                    <div class="kpi-info-sub">Merkeze bağlı kayıtlı bayi</div>
+                </div>
+                <div class="kpi-icon-wrap kpi-blue">
+                    <i class="fa-solid fa-store"></i>
+                </div>
+            </div>
+
+            <div class="kpi-card">
+                <div>
+                    <div class="kpi-info-title">Canlı Kullanımda</div>
+                    <div class="kpi-info-value" id="kpi-active-dealers" style="color:#4ade80;">0</div>
+                    <div class="kpi-info-sub">Şu an açık olan bayiler</div>
+                </div>
+                <div class="kpi-icon-wrap" style="background:rgba(34, 197, 94, 0.15); color:#22c55e;">
+                    <i class="fa-solid fa-signal"></i>
+                </div>
+            </div>
+
+            <div class="kpi-card">
+                <div>
+                    <div class="kpi-info-title">Bağlı Cihazlar</div>
+                    <div class="kpi-info-value" id="kpi-online-devices" style="color:#38bdf8;">0</div>
+                    <div class="kpi-info-sub">PC, barkod terminali, telefon</div>
+                </div>
+                <div class="kpi-icon-wrap" style="background:rgba(56, 189, 248, 0.15); color:#38bdf8;">
+                    <i class="fa-solid fa-laptop-medical"></i>
+                </div>
+            </div>
+
+            <div class="kpi-card">
+                <div>
+                    <div class="kpi-info-title">Bekleyen Çıkışlar</div>
+                    <div class="kpi-info-value" id="kpi-pending-items">0</div>
+                    <div class="kpi-info-sub">Kasada okutulmuş kutu</div>
+                </div>
+                <div class="kpi-icon-wrap kpi-amber">
+                    <i class="fa-solid fa-boxes-stacked"></i>
+                </div>
+            </div>
+
+            <div class="kpi-card">
+                <div>
+                    <div class="kpi-info-title">Bugünkü Satışlar</div>
+                    <div class="kpi-info-value" id="kpi-today-sales">0</div>
+                    <div class="kpi-info-sub">Bakanlığa bildirilen kutu</div>
+                </div>
+                <div class="kpi-icon-wrap kpi-green">
+                    <i class="fa-solid fa-receipt"></i>
+                </div>
+            </div>
+
+            <div class="kpi-card" style="cursor:pointer;" onclick="openGlobalDebugLogs()">
+                <div>
+                    <div class="kpi-info-title">Kritik Hatalar</div>
+                    <div class="kpi-info-value" id="kpi-total-errors" style="color:#ef4444;">0</div>
+                    <div class="kpi-info-sub">Bakanlık / Sistem logları</div>
+                </div>
+                <div class="kpi-icon-wrap kpi-red">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                </div>
+            </div>
+        </section>
+
+        <!-- DEALERS SECTION -->
+        <section>
+            <div class="section-header">
+                <div>
+                    <h2 class="section-title">
+                        <i class="fa-solid fa-network-wired" style="color:#38bdf8;"></i> Bayi Listesi & Canlı Operasyonlar
+                    </h2>
+                    <div style="font-size:0.85rem; color:var(--text-muted);">
+                        Sadece giriş yapmış ve uygulamayı açık tutan aktif bayiler listelenmektedir (Her 15 sn canlılık kontrolü).
+                    </div>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <button class="btn btn-outline" id="btn-filter-toggle" onclick="toggleActiveFilter()" style="font-size:0.82rem; padding:6px 14px;">
+                        <span id="lbl-filter-text"><span class="live-pulse-dot" style="margin-right:4px;"></span> Sadece Açık Bayiler</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="dealers-grid" id="dealers-container">
+                <!-- Dealer cards will be populated dynamically -->
+                <div style="grid-column: 1 / -1; text-align:center; padding:3rem; color:#64748b;">
+                    <i class="fa-solid fa-spinner fa-spin" style="font-size:2rem; margin-bottom:12px; color:#38bdf8;"></i>
+                    <p>Bayi verileri yükleniyor...</p>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- TOAST NOTIFICATION -->
+    <div id="adminToast" class="toast">
+        <i class="fa-solid fa-circle-check" style="color:#4ade80; font-size:1.2rem;"></i>
+        <span id="toastMsg">İşlem başarıyla tamamlandı.</span>
+    </div>
+
+    <!-- SAĞ ALT İŞLEM BİLDİRİM VE TAKİP KARTLARI KAPSAYICISI (FLOATING ACTION DOCK) -->
+    <div id="floating-task-container" style="position:fixed; bottom:24px; right:24px; z-index:999999; display:flex; flex-direction:column; gap:12px; max-width:440px; width:calc(100% - 48px); pointer-events:none;"></div>
+
+    <!-- MODAL: YENİ BAYİ EKLE / DÜZENLE -->
+    <div id="modalDealer" class="modal">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3 class="modal-title" id="dealerModalTitle">
+                    <i class="fa-solid fa-store"></i> Yeni Bayi Ekle
+                </h3>
+                <button class="modal-close" onclick="closeDealerModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit-dealer-id">
+                <div class="form-group">
+                    <label class="form-label">Bayi Adı (Tabela Adı)</label>
+                    <input type="text" id="dealer-name" class="form-input" placeholder="Örn: Asım Tarım Ürünleri" required>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                    <div class="form-group">
+                        <label class="form-label">İl</label>
+                        <input type="text" id="dealer-city" class="form-input" placeholder="Örn: SAMSUN veya ORDU">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">İlçe</label>
+                        <input type="text" id="dealer-town" class="form-input" placeholder="Örn: Çarşamba veya Fatsa">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Bakanlık GLN / Adres ID</label>
+                    <input type="text" id="dealer-gln" class="form-input" placeholder="Örn: 8680001423456 (veya GUID)">
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                    <div class="form-group">
+                        <label class="form-label">Bakanlık Kullanıcı Adı / T.C.</label>
+                        <input type="text" id="dealer-bkst-user" class="form-input" placeholder="T.C. Kimlik No">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Bakanlık Şifresi</label>
+                        <input type="password" id="dealer-bkst-pass" class="form-input" placeholder="BKST Şifresi">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Dükkan Bilgisayarı Bağlantı Adresi (Opsiyonel / İlerisi İçin)</label>
+                    <input type="text" id="dealer-remote-url" class="form-input" placeholder="Örn: http://192.168.1.100:5000">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Notlar</label>
+                    <input type="text" id="dealer-notes" class="form-input" placeholder="Bayi hakkında özel notlar...">
+                </div>
+                <div class="form-group" style="background:rgba(59, 130, 246, 0.08); border:1px solid rgba(59, 130, 246, 0.25); border-radius:8px; padding:10px 14px; margin-top:10px;">
+                    <label style="display:flex; align-items:flex-start; gap:10px; cursor:pointer; margin:0; user-select:none;">
+                        <input type="checkbox" id="dealer-test-mode" style="width:18px; height:18px; margin-top:2px; cursor:pointer; accent-color:#3b82f6;">
+                        <div>
+                            <span style="font-weight:700; color:#60a5fa; font-size:0.9rem;"><i class="fa-solid fa-flask"></i> Test Modu (Bakanlık Kaydı Olmadan Giriş İzni)</span>
+                            <div style="font-size:0.78rem; color:#94a3b8; margin-top:2px; line-height:1.4;">
+                                Bu seçenek açık olduğunda bayi personeli, TC ve şifresi sistemde doğruysa Bakanlıkta kaydı bulunmasa dahi uygulamaya sorunsuz giriş yapabilir. (Varsayılan: Kapalı)
+                            </div>
+                        </div>
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeDealerModal()">İptal</button>
+                <button class="btn btn-primary" onclick="saveDealerForm()">
+                    <i class="fa-solid fa-floppy-disk"></i> Kaydet
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: ADMIN GÜVENLİK & ŞİFRE DEĞİŞTİRME -->
+    <div id="modalAdminSecurity" class="modal">
+        <div class="modal-box" style="max-width:520px;">
+            <div class="modal-header">
+                <h3 class="modal-title">
+                    <i class="fa-solid fa-shield-halved" style="color:#38bdf8;"></i> Yönetici Kimlik & Şifre Değiştir
+                </h3>
+                <button class="modal-close" onclick="closeAdminSecurityModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="background:rgba(56, 189, 248, 0.1); border:1px solid rgba(56, 189, 248, 0.3); padding:10px 14px; border-radius:10px; margin-bottom:14px; font-size:0.84rem; color:#bae6fd;">
+                    <i class="fa-solid fa-lock"></i> <strong>Yüksek Güvenlik Kalkanı:</strong> Şifreniz PBKDF2-HMAC-SHA256 (100.000 döngü) ile kriptolanır. Bayiler bu şifreye kesinlikle erişemez.
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Mevcut Admin Parolası *</label>
+                    <input type="password" id="admin-sec-current-pass" class="form-input" placeholder="Mevcut yönetici şifreniz" required autocomplete="current-password">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Yeni Admin Kullanıcı Adı *</label>
+                    <input type="text" id="admin-sec-new-user" class="form-input" placeholder="Örn: admin veya özel adınız" value="admin" required autocomplete="username">
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                    <div class="form-group">
+                        <label class="form-label">Yeni Parola *</label>
+                        <input type="password" id="admin-sec-new-pass" class="form-input" placeholder="En az 6 karakter" required autocomplete="new-password">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Yeni Parola (Tekrar) *</label>
+                        <input type="password" id="admin-sec-confirm-pass" class="form-input" placeholder="Parolayı onaylayın" required autocomplete="new-password">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeAdminSecurityModal()">İptal</button>
+                <button class="btn btn-primary" onclick="submitAdminSecurity()">
+                    <i class="fa-solid fa-key"></i> Şifreyi Güvenle Güncelle
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: ÇIKIŞ LİSTESİ YÖNETİMİ & GELİŞMİŞ FİLTRELEME -->
+    <div id="modalExitList" class="modal">
+        <div class="modal-box" style="max-width:1150px; width:95%;">
+            <div class="modal-header">
+                <div>
+                    <h3 class="modal-title">
+                        <i class="fa-solid fa-boxes-stacked"></i> <span id="lbl-exit-dealer-name">Bayi</span> - Çıkış Listesi & Ürün Yönetimi
+                    </h3>
+                    <div style="font-size:0.78rem; color:var(--text-muted); margin-top:2px;">
+                        Hangi kutunun hangi cihaz/bilgisayar tarafından okutulduğunu görün, ürün, tarih ve cihaz bazlı filtreleyin veya hatalı kutuları silin.
+                    </div>
+                </div>
+                <button class="modal-close" onclick="closeExitListModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- GELİŞMİŞ FİLTRELEME BARı -->
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px; background:rgba(15, 23, 42, 0.6); padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,0.06); margin-bottom:1rem;">
+                    <div>
+                        <label class="form-label" style="font-size:0.75rem;">Metin Arama (Ürün, Seri, Karekod)</label>
+                        <input type="text" id="exit-search-inp" class="form-input" placeholder="Barkod, seri no veya karekod ara..." oninput="filterExitItems()">
+                    </div>
+                    <div>
+                        <label class="form-label" style="font-size:0.75rem;">Ürün Bazlı Filtre</label>
+                        <select id="exit-filter-product" class="form-input" onchange="filterExitItems()">
+                            <option value="">Tüm Ürünler</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="form-label" style="font-size:0.75rem;">Cihaz / Terminal Filtresi</label>
+                        <select id="exit-filter-device" class="form-input" onchange="filterExitItems()">
+                            <option value="">Tüm Cihazlar</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="form-label" style="font-size:0.75rem;">Tarih Filtresi</label>
+                        <input type="date" id="exit-filter-date" class="form-input" onchange="filterExitItems()">
+                    </div>
+                </div>
+
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem; flex-wrap:wrap; gap:10px;">
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <span id="exit-items-count-badge" style="background:#1e293b; padding:6px 12px; border-radius:8px; font-size:0.82rem; font-weight:700; color:#38bdf8;">0 Kutu</span>
+                        <button class="btn btn-outline" style="padding:5px 10px; font-size:0.75rem;" onclick="resetExitFilters()">
+                            <i class="fa-solid fa-filter-circle-xmark"></i> Filtreleri Temizle
+                        </button>
+                    </div>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                        <button id="tab-exit-active" class="btn btn-outline" style="padding:5px 10px; font-size:0.78rem;" onclick="setExitView('active')">📦 Liste</button>
+                        <button id="tab-exit-deleted" class="btn btn-outline" style="padding:5px 10px; font-size:0.78rem;" onclick="setExitView('deleted')">🗑️ Silinenler (0)</button>
+                        <button id="btn-exit-del-sel" class="btn btn-danger-outline" style="padding:5px 10px; font-size:0.78rem;" onclick="bulkExitSelected('sil')">Seçilenleri Sil (0)</button>
+                        <button id="btn-exit-del-all" class="btn btn-danger-outline" style="padding:5px 10px; font-size:0.78rem;" onclick="bulkExitVisible('sil')">Görünenlerin Tümünü Sil</button>
+                        <button id="btn-exit-res-sel" class="btn btn-outline" style="padding:5px 10px; font-size:0.78rem; display:none;" onclick="bulkExitSelected('geri_al')">Seçilenleri Geri Al (0)</button>
+                        <button id="btn-exit-res-all" class="btn btn-outline" style="padding:5px 10px; font-size:0.78rem; display:none;" onclick="bulkExitVisible('geri_al')">Görünenlerin Tümünü Geri Al</button>
+                        <button class="btn btn-success" onclick="pushExitListChanges()">
+                            <i class="fa-solid fa-cloud-arrow-up"></i> 📤 Değişiklikleri Bayiye İlet (Push)
+                        </button>
+                    </div>
+                </div>
+
+                <div style="max-height:450px; overflow-y:auto; border:1px solid var(--border-card); border-radius:12px;">
+                    <table class="admin-table">
+                        <thead>
+                            <tr>
+                                <th><input type="checkbox" id="exit-select-all" onchange="toggleSelectAllExit(this.checked)"></th>
+                                <th>Ürün Adı</th>
+                                <th>Barkod / GTIN</th>
+                                <th>Seri No</th>
+                                <th>Parti</th>
+                                <th>Koli No</th>
+                                <th>Okutan Cihaz</th>
+                                <th>Okutma Tarihi</th>
+                                <th style="text-align:right;">İşlem</th>
+                            </tr>
+                        </thead>
+                        <tbody id="exit-list-tbody">
+                            <!-- Items -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeExitListModal()">Kapat</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: HATA GÜNLÜĞÜ (DEBUG LOGS) -->
+    <div id="modalLogs" class="modal">
+        <div class="modal-box" style="max-width:1050px; width:95%;">
+            <div class="modal-header">
+                <div>
+                    <h3 class="modal-title">
+                        <i class="fa-solid fa-bug text-danger"></i> <span id="lbl-logs-dealer-name">Tüm Bayiler</span> - Hata Günlüğü & Detaylı İşlem Kayıtları
+                    </h3>
+                    <div style="font-size:0.78rem; color:var(--text-muted); margin-top:2px;">
+                        Bakanlık API hataları, depoda bulunamayan karekodlar, mobil personel oturumları, senkronizasyon ve sistem uyarıları.
+                    </div>
+                </div>
+                <button class="modal-close" onclick="closeLogsModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- Seviye ve İşlem Araçları -->
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem; flex-wrap:wrap; gap:10px;">
+                    <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                        <button class="btn btn-outline" id="log-filter-all" onclick="filterLogsByLevel('')" style="font-size:0.78rem; padding:5px 12px;">Tümü (<span id="lbl-cnt-all">0</span>)</button>
+                        <button class="btn btn-outline" id="log-filter-error" onclick="filterLogsByLevel('ERROR')" style="font-size:0.78rem; padding:5px 12px; color:#f87171; border-color:rgba(239,68,68,0.4);">🚨 Hatalar (<span id="lbl-cnt-error">0</span>)</button>
+                        <button class="btn btn-outline" id="log-filter-warn" onclick="filterLogsByLevel('WARNING')" style="font-size:0.78rem; padding:5px 12px; color:#fbbf24; border-color:rgba(245,158,11,0.4);">⚠️ Uyarılar (<span id="lbl-cnt-warn">0</span>)</button>
+                        <button class="btn btn-outline" id="log-filter-info" onclick="filterLogsByLevel('INFO')" style="font-size:0.78rem; padding:5px 12px; color:#60a5fa; border-color:rgba(59,130,246,0.4);">ℹ️ Bilgi (<span id="lbl-cnt-info">0</span>)</button>
+                    </div>
+                    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                        <input type="text" id="log-search-input" oninput="applyLogFilters()" placeholder="Loglarda ara (barkod, başlık, hata...)" style="background:var(--bg-input, #0f172a); border:1px solid rgba(255,255,255,0.15); color:#fff; font-size:0.8rem; padding:6px 12px; border-radius:8px; width:220px;">
+                        <button class="btn btn-outline" onclick="reloadCurrentLogs()" title="Yenile" style="font-size:0.8rem; padding:6px 10px;">
+                            <i class="fa-solid fa-arrows-rotate"></i> Yenile
+                        </button>
+                        <button class="btn btn-outline" onclick="copyAllLogsToClipboard()" title="JSON Olarak Kopyala" style="font-size:0.8rem; padding:6px 10px;">
+                            <i class="fa-solid fa-copy"></i> Kopyala
+                        </button>
+                        <button class="btn btn-danger-outline" onclick="clearCurrentLogs()" title="Tümünü Temizle" style="font-size:0.8rem; padding:6px 10px;">
+                            <i class="fa-solid fa-trash-can"></i> Temizle
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Kategori Sekmeleri -->
+                <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:1rem; padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.08);">
+                    <button class="btn btn-outline log-cat-btn" id="cat-btn-all" onclick="filterLogsByCategory('')" style="font-size:0.75rem; padding:4px 10px; background:rgba(255,255,255,0.08);">Tüm Kategoriler</button>
+                    <button class="btn btn-outline log-cat-btn" id="cat-btn-applog" onclick="filterLogsByCategory('APP_LOG')" style="font-size:0.75rem; padding:4px 10px; color:#f87171;">🖥️ İstemci app.log (<span id="lbl-cat-applog">0</span>)</button>
+                    <button class="btn btn-outline log-cat-btn" id="cat-btn-bakanlik" onclick="filterLogsByCategory('BAKANLIK_API')" style="font-size:0.75rem; padding:4px 10px; color:#38bdf8;">📡 Bakanlık API (<span id="lbl-cat-bakanlik">0</span>)</button>
+                    <button class="btn btn-outline log-cat-btn" id="cat-btn-karekod" onclick="filterLogsByCategory('KAREKOD_OKUTMA')" style="font-size:0.75rem; padding:4px 10px; color:#a3e635;">📦 Karekod & Okutma (<span id="lbl-cat-karekod">0</span>)</button>
+                    <button class="btn btn-outline log-cat-btn" id="cat-btn-mobil" onclick="filterLogsByCategory('MOBIL_OTURUM')" style="font-size:0.75rem; padding:4px 10px; color:#c084fc;">📱 Mobil & Personel (<span id="lbl-cat-mobil">0</span>)</button>
+                    <button class="btn btn-outline log-cat-btn" id="cat-btn-senkron" onclick="filterLogsByCategory('SENKRON')" style="font-size:0.75rem; padding:4px 10px; color:#2dd4bf;">🔄 Senkronizasyon (<span id="lbl-cat-senkron">0</span>)</button>
+                    <button class="btn btn-outline log-cat-btn" id="cat-btn-sistem" onclick="filterLogsByCategory('SISTEM')" style="font-size:0.75rem; padding:4px 10px; color:#f472b6;">⚙️ Sistem / Yetki (<span id="lbl-cat-sistem">0</span>)</button>
+                </div>
+
+                <div id="logs-container" style="max-height:480px; overflow-y:auto; padding-right:4px;">
+                    <!-- Logs list -->
+                </div>
+            </div>
+            <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:0.75rem; color:var(--text-muted);" id="lbl-logs-footer-info">0 kayıt gösteriliyor</span>
+                <button class="btn btn-outline" onclick="closeLogsModal()">Kapat</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: AKTİF CİHAZLAR & OTURUMLAR -->
+    <div id="modalDevices" class="modal">
+        <div class="modal-box" style="max-width:850px;">
+            <div class="modal-header">
+                <div>
+                    <h3 class="modal-title">
+                        <i class="fa-solid fa-laptop-medical"></i> <span id="lbl-devices-dealer-name">Bayi</span> - Bağlı Cihazlar & Canlı Oturumlar
+                    </h3>
+                    <div style="font-size:0.78rem; color:var(--text-muted); margin-top:2px;">
+                        Bu bayinin dükkanında veya mobil cihazlarında aynı anda açık olan tüm oturumlar canlı olarak izlenmektedir.
+                    </div>
+                </div>
+                <button class="modal-close" onclick="closeDevicesModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.06);">
+                    <div style="font-size:0.85rem; color:#cbd5e1;">
+                        Toplam <strong id="lbl-device-total-cnt" style="color:#38bdf8;">0</strong> cihaz oturumu (<span id="lbl-device-online-cnt" style="color:#4ade80; font-weight:700;">0 Canlı</span>)
+                    </div>
+                    <div style="font-size:0.78rem; color:var(--text-muted);">
+                        <span class="live-pulse-dot" style="margin-right:4px;"></span> 10 saniyede bir otomatik güncellenir
+                    </div>
+                </div>
+
+                <div id="devices-list-container">
+                    <!-- Populated dynamically -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeDevicesModal()">Kapat</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: BAYİ GEÇMİŞİ TEMİZLE SEÇENEKLERİ -->
+    <div id="modalClearHistory" class="modal">
+        <div class="modal-box" style="max-width:560px;">
+            <div class="modal-header">
+                <div>
+                    <h3 class="modal-title" style="color:#f87171;">
+                        <i class="fa-solid fa-triangle-exclamation"></i> Bayi Geçmişini Temizle
+                    </h3>
+                    <div style="font-size:0.8rem; color:#cbd5e1; margin-top:2px;">
+                        Bayi: <strong id="lbl-clear-history-dealer" style="color:#38bdf8;"></strong>
+                    </div>
+                </div>
+                <button class="modal-close" onclick="closeClearHistoryModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="padding:1.2rem;">
+                <div style="background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.3); border-radius:8px; padding:12px; margin-bottom:1rem; font-size:0.82rem; color:#fca5a5; line-height:1.4;">
+                    <i class="fa-solid fa-circle-exclamation"></i> <strong>Uyarı:</strong> Seçilen kayıtlar hem sunucudan hem de bayinin masaüstü uygulamasından kalıcı olarak silinecektir. Lütfen silinmesini istediğiniz verileri işaretleyin:
+                </div>
+
+                <div style="display:flex; flex-direction:column; gap:12px;">
+                    <label style="display:flex; align-items:flex-start; gap:10px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); padding:10px 14px; border-radius:8px; cursor:pointer;">
+                        <input type="checkbox" id="chk-clear-bekleyen" style="margin-top:4px; width:18px; height:18px; cursor:pointer; accent-color:#ef4444;">
+                        <div>
+                            <div style="font-size:0.85rem; font-weight:600; color:#f87171;">
+                                <i class="fa-solid fa-box-open"></i> Bekleyen Kutuları Sil (Çıkış Listesi)
+                            </div>
+                            <div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">
+                                Henüz satışı tamamlanmamış, sepette/çıkış listesinde bekleyen tüm karekodları ve kutuları temizler.
+                            </div>
+                        </div>
+                    </label>
+
+                    <label style="display:flex; align-items:flex-start; gap:10px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); padding:10px 14px; border-radius:8px; cursor:pointer;">
+                        <input type="checkbox" id="chk-clear-bugun" style="margin-top:4px; width:18px; height:18px; cursor:pointer; accent-color:#ef4444;">
+                        <div>
+                            <div style="font-size:0.85rem; font-weight:600; color:#fbbf24;">
+                                <i class="fa-solid fa-calendar-day"></i> Bugün Satılanları Sil
+                            </div>
+                            <div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">
+                                Bugün başarılı şekilde tamamlanmış satış raporunu ve bugün satılan karekod kayıtlarını temizler.
+                            </div>
+                        </div>
+                    </label>
+
+                    <label style="display:flex; align-items:flex-start; gap:10px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); padding:10px 14px; border-radius:8px; cursor:pointer;">
+                        <input type="checkbox" id="chk-clear-gecmis" checked style="margin-top:4px; width:18px; height:18px; cursor:pointer; accent-color:#ef4444;">
+                        <div>
+                            <div style="font-size:0.85rem; font-weight:600; color:#e2e8f0;">
+                                <i class="fa-solid fa-clock-rotate-left"></i> Geçmiş Satış Arşivini Sil
+                            </div>
+                            <div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">
+                                Önceki gün ve aylara ait tüm tamamlanmış satış kayıtlarını ve arşivlerini temizler.
+                            </div>
+                        </div>
+                    </label>
+
+                    <label style="display:flex; align-items:flex-start; gap:10px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); padding:10px 14px; border-radius:8px; cursor:pointer;">
+                        <input type="checkbox" id="chk-clear-oturumlar" checked style="margin-top:4px; width:18px; height:18px; cursor:pointer; accent-color:#ef4444;">
+                        <div>
+                            <div style="font-size:0.85rem; font-weight:600; color:#e2e8f0;">
+                                <i class="fa-solid fa-mobile-screen"></i> Mobil Personel & Oturum Geçmişini Sıfırla
+                            </div>
+                            <div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">
+                                Bağlanan mobil cihaz token'larını ve geçmiş personel giriş oturumlarını sıfırlar.
+                            </div>
+                        </div>
+                    </label>
+
+                    <label style="display:flex; align-items:flex-start; gap:10px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); padding:10px 14px; border-radius:8px; cursor:pointer;">
+                        <input type="checkbox" id="chk-clear-loglar" style="margin-top:4px; width:18px; height:18px; cursor:pointer; accent-color:#ef4444;">
+                        <div>
+                            <div style="font-size:0.85rem; font-weight:600; color:#f87171;">
+                                <i class="fa-solid fa-bug"></i> Hata & Log Kayıtlarını Sil (Hata Günlüğü)
+                            </div>
+                            <div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">
+                                Bu bayiye ait sistem, bakanlık API ve istemci app.log hata kayıtlarını ve günlüğünü temizler.
+                            </div>
+                        </div>
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer" style="display:flex; justify-content:flex-end; gap:8px;">
+                <button class="btn btn-outline" onclick="closeClearHistoryModal()">Vazgeç</button>
+                <button class="btn btn-danger" id="btn-confirm-clear-history" onclick="submitClearDealerHistory()" style="background:#ef4444; border-color:#dc2626; color:#fff;">
+                    <i class="fa-solid fa-trash-can"></i> Seçilenleri Kalıcı Olarak Sil
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        let currentDealers = [];
+        let activeDealerForExit = null;
+        let activeDealerForLogs = null;
+        let cachedExitItems = [];
+        let cachedLogs = [];
+        let selectedLogLevel = '';
+
+        let dashboardTimer = null;
+        function startDashboardTimer() {
+            if (dashboardTimer) return;
+            dashboardTimer = setInterval(loadDashboard, 20000); // 20 saniyede bir canlı otomatik yenile (RAM/CPU tasarruflu)
+        }
+        function stopDashboardTimer() {
+            if (dashboardTimer) {
+                clearInterval(dashboardTimer);
+                dashboardTimer = null;
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadDashboard();
+            startDashboardTimer();
+        });
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                stopDashboardTimer();
+            } else {
+                loadDashboard();
+                startDashboardTimer();
+            }
+        });
+
+        async function loadDashboard() {
+            try {
+                const res = await fetch('/api/admin/bayiler');
+                const data = await res.json();
+                if (data.success) {
+                    currentDealers = data.bayiler || [];
+                    renderKPIs(data.stats || {});
+                    renderDealers(currentDealers);
+                    if (activeDealerForDevices) {
+                        const d = currentDealers.find(x => x.bayi_kodu === activeDealerForDevices);
+                        if (d) renderDeviceList(d.devices || [], activeDealerForDevices);
+                    }
+                    loadNotifications();
+                }
+            } catch (err) {
+                console.error("Dashboard yüklenirken hata:", err);
+            }
+        }
+
+        function renderKPIs(stats) {
+            document.getElementById('kpi-total-dealers').textContent = stats.total_dealers || currentDealers.length;
+            const elActive = document.getElementById('kpi-active-dealers');
+            if (elActive) elActive.textContent = stats.total_active_dealers || 0;
+            const elDev = document.getElementById('kpi-online-devices');
+            if (elDev) elDev.textContent = stats.total_online_devices || 0;
+            document.getElementById('kpi-pending-items').textContent = stats.total_pending_items || 0;
+            document.getElementById('kpi-today-sales').textContent = stats.total_today_sales || 0;
+            document.getElementById('kpi-total-errors').textContent = stats.total_errors || 0;
+            if (stats.local_url) {
+                const lbl = document.getElementById('lbl-network-url');
+                if (lbl) lbl.textContent = stats.local_url;
+            }
+            const pLbl = document.getElementById('lbl-public-url');
+            if (pLbl) {
+                if (stats.public_url && stats.public_url.startsWith('http')) {
+                    pLbl.textContent = stats.public_url;
+                    pLbl.style.color = '#4ade80';
+                } else {
+                    const checkTun = () => {
+                        fetch('/api/system/server_url')
+                            .then(r => r.json())
+                            .then(d => {
+                                const u = (d && (d.public_tunnel_url || d.server_url)) || '';
+                                if (u && u.startsWith('http') && u.includes('trycloudflare.com')) {
+                                    pLbl.textContent = u;
+                                    pLbl.style.color = '#4ade80';
+                                } else if (!pLbl.textContent.startsWith('http')) {
+                                    setTimeout(checkTun, 3000);
+                                }
+                            }).catch(() => {
+                                if (!pLbl.textContent.startsWith('http')) setTimeout(checkTun, 5000);
+                            });
+                    };
+                    checkTun();
+                }
+            }
+        }
+
+        function copyPublicUrl() {
+            const lbl = document.getElementById('lbl-public-url');
+            if (lbl) {
+                const url = lbl.textContent.trim();
+                navigator.clipboard.writeText(url).then(() => {
+                    showToast("🌍 Uzaktan bağlantı adresi panoya kopyalandı!");
+                }).catch(() => {
+                    prompt("Uzaktan bağlantı adresi:", url);
+                });
+            }
+        }
+
+        function copyNetworkUrl() {
+            const lbl = document.getElementById('lbl-network-url');
+            if (lbl) {
+                const url = lbl.textContent.trim();
+                navigator.clipboard.writeText(url).then(() => {
+                    showToast("📋 Yerel bağlantı adresi panoya kopyalandı!");
+                }).catch(() => {
+                    prompt("Bağlantı adresi:", url);
+                });
+            }
+        }
+
+        let filterOnlyActive = true;
+
+        function toggleActiveFilter() {
+            filterOnlyActive = !filterOnlyActive;
+            const btn = document.getElementById('lbl-filter-text');
+            if (btn) {
+                btn.innerHTML = filterOnlyActive 
+                    ? '<span class="live-pulse-dot" style="margin-right:4px;"></span> Sadece Açık Bayiler' 
+                    : '<i class="fa-solid fa-list"></i> Tüm Bayiler Listeleniyor';
+            }
+            renderDealers(currentDealers);
+        }
+
+        function renderDealers(dealers) {
+            const container = document.getElementById('dealers-container');
+            const displayList = filterOnlyActive 
+                ? (dealers || []).filter(d => d.is_active_now && d.bkst_kullanici)
+                : (dealers || []);
+
+            if (!displayList || displayList.length === 0) {
+                if (filterOnlyActive) {
+                    container.innerHTML = `
+                        <div style="grid-column: 1 / -1; text-align:center; padding:3.5rem; background:var(--bg-card); border-radius:18px; border:1px solid var(--border-card);">
+                            <i class="fa-solid fa-store-slash" style="font-size:2.8rem; color:#64748b; margin-bottom:12px;"></i>
+                            <h3 style="font-size:1.15rem; color:#cbd5e1;">Şu Anda Giriş Yapmış / Açık Bayi Bulunmuyor</h3>
+                            <p style="font-size:0.85rem; color:#64748b; margin:6px 0 16px 0;">Bayi kullanıcı adı ile giriş yapıp uygulamayı açtığında burada anında canlı olarak belirecektir (Her 15 sn canlılık kontrolü).</p>
+                            <button class="btn btn-outline" onclick="toggleActiveFilter()">
+                                <i class="fa-solid fa-list"></i> Tüm Kayıtlı Bayileri Göster (${(dealers || []).length})
+                            </button>
+                        </div>
+                    `;
+                } else {
+                    container.innerHTML = `
+                        <div style="grid-column: 1 / -1; text-align:center; padding:3rem; background:var(--bg-card); border-radius:18px; border:1px solid var(--border-card);">
+                            <i class="fa-solid fa-store-slash" style="font-size:2.5rem; color:#64748b; margin-bottom:12px;"></i>
+                            <h3 style="font-size:1.1rem; color:#cbd5e1;">Henüz Kayıtlı Bayi Bulunmuyor</h3>
+                            <p style="font-size:0.85rem; color:#64748b; margin:6px 0 16px 0;">Yeni bir bayiyi hemen ekleyebilirsiniz.</p>
+                            <button class="btn btn-primary" onclick="openAddDealerModal()">
+                                <i class="fa-solid fa-plus"></i> İlk Bayiyi Ekle
+                            </button>
+                        </div>
+                    `;
+                }
+                return;
+            }
+
+            container.innerHTML = displayList.map(d => {
+                const isActive = !!d.is_active_now;
+                const onlineDevCount = d.online_device_count || 0;
+                const totalDevCount = (d.devices && d.devices.length) || 0;
+                const errorCount = d.error_count || 0;
+
+                return `
+                    <div class="dealer-card" style="${isActive ? 'border-color:rgba(34, 197, 94, 0.45); box-shadow:0 8px 25px -8px rgba(34, 197, 94, 0.25);' : ''}">
+                        <div>
+                            <div class="dealer-header" style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:12px;">
+                                <div style="flex:1; min-width:0;">
+                                    <div class="dealer-name" style="font-size:1.15rem; font-weight:800; color:#fff; display:flex; align-items:center; gap:8px; line-height:1.3; word-break:break-word;">
+                                        <i class="fa-solid fa-shop" style="color:#38bdf8; font-size:1.1rem; flex-shrink:0;"></i>
+                                        <span>${esc(d.bayi_adi)}</span>
+                                        ${d.is_test_dealer ? `<span style="background:linear-gradient(135deg, #8b5cf6, #d946ef); color:#fff; font-size:0.68rem; padding:2px 7px; border-radius:6px; font-weight:800; letter-spacing:0.5px;"><i class="fa-solid fa-flask"></i> TEST BAYİSİ</span>` : ''}
+                                    </div>
+                                    <div class="dealer-location" style="margin-top:4px; font-size:0.8rem; color:#94a3b8; display:flex; align-items:center; gap:5px;">
+                                        <i class="fa-solid fa-location-dot" style="color:#64748b;"></i> ${esc(d.il || 'SAMSUN')} / ${esc(d.ilce || 'ÇARŞAMBA')}
+                                    </div>
+                                </div>
+                                <span class="status-pill ${isActive ? 'status-online' : 'status-offline'}" style="flex-shrink:0; white-space:nowrap; padding:4px 10px; font-size:0.75rem; font-weight:700; ${isActive ? 'background:rgba(34, 197, 94, 0.15); border:1px solid #22c55e; color:#4ade80;' : ''}">
+                                    ${isActive ? `<span class="live-pulse-dot"></span> ` + (onlineDevCount > 1 ? `${onlineDevCount} Cihaz Açık` : '🟢 Açık') : '⚪ Kapalı'}
+                                </span>
+                            </div>
+
+                            <!-- GLN NO, LİSANS DURUMU & BAYİ YÖNETİM BUTONLARI -->
+                            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; background:rgba(15, 23, 42, 0.45); padding:8px 10px; border-radius:10px; border:1px solid rgba(255,255,255,0.06); margin-bottom:14px;">
+                                <div style="display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                                    <div style="display:inline-flex; align-items:center; gap:6px; font-size:0.8rem;">
+                                        <span style="color:#94a3b8; font-weight:600;"><i class="fa-solid fa-barcode" style="color:#38bdf8;"></i> GLN:</span>
+                                        <code style="color:#38bdf8; font-family:monospace; font-weight:700; font-size:0.84rem; background:rgba(56, 189, 248, 0.1); padding:2px 6px; border-radius:4px;">${esc(d.gln_no || 'Tanımlanmadı')}</code>
+                                        ${d.gln_no ? `<button onclick="event.stopPropagation(); copyGln('${esc(d.gln_no)}')" title="GLN Kopyala" style="background:transparent; border:none; color:#38bdf8; cursor:pointer; padding:0 3px; font-size:0.82rem;"><i class="fa-regular fa-copy"></i></button>` : ''}
+                                    </div>
+                                    ${d.durum === 'AKTIF' 
+                                        ? `<span style="background:rgba(16,185,129,0.18); border:1px solid #10b981; color:#34d399; font-size:0.72rem; padding:2px 8px; border-radius:6px; font-weight:700;"><i class="fa-solid fa-circle-check"></i> Yetkili</span>`
+                                        : (d.durum === 'ONAY_BEKLIYOR'
+                                            ? `<span style="background:rgba(245,158,11,0.18); border:1px solid #f59e0b; color:#fbbf24; font-size:0.72rem; padding:2px 8px; border-radius:6px; font-weight:700;"><i class="fa-solid fa-hourglass-half"></i> Onay Bekliyor</span>`
+                                            : `<span style="background:rgba(239,68,68,0.18); border:1px solid #ef4444; color:#f87171; font-size:0.72rem; padding:2px 8px; border-radius:6px; font-weight:700;"><i class="fa-solid fa-ban"></i> Erişimi Sonlandırıldı</span>`
+                                        )
+                                    }
+                                </div>
+                                <div style="display:flex; align-items:center; gap:6px;">
+                                    ${d.durum === 'AKTIF'
+                                        ? `<button class="btn btn-outline" style="padding:3px 8px; font-size:0.72rem; border-color:#ef4444; color:#f87171;" onclick="toggleDealerStatus('${d.bayi_kodu}', 'ASKIYA_ALINDI', '${esc(d.bayi_adi)}')" title="Bu bayinin sisteme erişim yetkisini anında sonlandır ve ekranını kilitle">
+                                            <i class="fa-solid fa-lock"></i> Erişimi Kapat
+                                           </button>`
+                                        : `<button class="btn btn-success" style="padding:3px 8px; font-size:0.72rem;" onclick="toggleDealerStatus('${d.bayi_kodu}', 'AKTIF', '${esc(d.bayi_adi)}')" title="Bu bayiyi yetkilendir ve programı kullanmasına izin ver">
+                                            <i class="fa-solid fa-lock-open"></i> Yetkilendir (Aç)
+                                           </button>`
+                                    }
+                                    <button class="btn btn-outline" style="padding:3px 8px; font-size:0.72rem; border-color:rgba(255,255,255,0.18);" onclick="openEditDealerModal('${d.bayi_kodu}')" title="Bayi Bilgilerini Düzenle">
+                                        <i class="fa-solid fa-pen-to-square"></i> Düzenle
+                                    </button>
+                                    <button class="btn btn-danger-outline" style="padding:3px 8px; font-size:0.72rem;" onclick="deleteDealer('${d.bayi_kodu}', '${esc(d.bayi_adi)}')" title="Bu bayiyi sistemden sil">
+                                        <i class="fa-solid fa-trash-can"></i> Sil
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="dealer-metrics" style="margin-top:14px;">
+                                <div class="metric-box">
+                                    <div class="metric-lbl">Bekleyen Kutu</div>
+                                    <div class="metric-val" style="color:#f59e0b;">${d.pending_items_count || 0}</div>
+                                </div>
+                                <div class="metric-box">
+                                    <div class="metric-lbl">Bugün Satılan</div>
+                                    <div class="metric-val" style="color:#10b981;">${d.today_sales_count || 0}</div>
+                                </div>
+                                <div class="metric-box">
+                                    <div class="metric-lbl">Hatalar</div>
+                                    <div class="metric-val" style="color:${errorCount > 0 ? '#ef4444' : '#94a3b8'};">
+                                        ${errorCount}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="dealer-meta-list" style="margin-top:14px; gap:8px;">
+                                <div class="dealer-meta-item" style="background:rgba(15, 23, 42, 0.45); border:1px solid rgba(255,255,255,0.05); padding:8px 10px; border-radius:8px;">
+                                    <span style="font-weight:600; color:#94a3b8;"><i class="fa-solid fa-key" style="color:#f59e0b;"></i> Giriş Bilgileri:</span>
+                                    <span style="font-size:0.82rem; color:#cbd5e1; display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                                        Kullanıcı: <code style="color:#38bdf8; font-weight:700;">${esc(d.bkst_kullanici || '-')}</code> &bull; 
+                                        Şifre: <code style="color:#4ade80; font-weight:700;">${d.bkst_sifre ? '•••••••• (Kayıtlı)' : 'Tanımlanmadı'}</code>
+                                        ${d.test_modu ? '<span style="background:rgba(59, 130, 246, 0.2); color:#60a5fa; border:1px solid rgba(59, 130, 246, 0.4); font-size:0.7rem; font-weight:700; padding:1px 6px; border-radius:4px; margin-left:4px;"><i class="fa-solid fa-flask"></i> Test Modu</span>' : ''}
+                                    </span>
+                                </div>
+                                <div class="dealer-meta-item" style="background:rgba(15, 23, 42, 0.45); padding:6px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.05);">
+                                    <span style="font-weight:600; color:#94a3b8;"><i class="fa-solid fa-clock-rotate-left" style="color:#38bdf8;"></i> Son Senkronizasyon:</span>
+                                    <span style="font-size:0.78rem; color:#cbd5e1; font-family:monospace;">${d.son_senkronizasyon || 'Az önce'}</span>
+                                </div>
+                            </div>
+
+                            <!-- BAĞLI CİHAZLAR & OTURUMLAR BUTONU -->
+                            <button class="btn btn-outline" style="width:100%; margin-top:12px; justify-content:space-between; font-size:0.82rem; background:rgba(15, 23, 42, 0.7); border-color:${isActive ? 'rgba(34, 197, 94, 0.4)' : 'rgba(255,255,255,0.1)'};" onclick="openDevicesModal('${d.bayi_kodu}', '${esc(d.bayi_adi)}')">
+                                <span style="display:flex; align-items:center; gap:8px;">
+                                    <i class="fa-solid fa-laptop-medical" style="color:${isActive ? '#4ade80' : '#94a3b8'};"></i>
+                                    <span><strong>${isActive ? `🟢 Sunucu Açık (${onlineDevCount} Cihaz)` : '⚪ Sunucu Kapalı'}</strong></span>
+                                </span>
+                                <span class="meta-tag" style="background:${isActive ? 'rgba(34, 197, 94, 0.25)' : 'rgba(0,0,0,0.4)'}; color:${isActive ? '#4ade80' : '#cbd5e1'}; font-weight:700;">
+                                    ${onlineDevCount} Canlı / ${totalDevCount} Cihaz &rarr;
+                                </span>
+                            </button>
+                        </div>
+
+                        <div>
+                            <div class="dealer-actions-grid">
+                                <button class="btn btn-primary btn-card-action" onclick="switchToDealer('${d.bayi_kodu}', '${esc(d.bayi_adi)}')" title="Bu bayinin resmi yetkisi ve kullanıcı hesabıyla doğrudan çıkış/satış ekranına geç">
+                                    <i class="fa-solid fa-bolt"></i> Bayi Adına İşlem Yap
+                                </button>
+                                <button class="btn btn-outline btn-card-action" onclick="openExitListForDealer('${d.bayi_kodu}', '${esc(d.bayi_adi)}')" title="Bayinin dükkanında okuttuğu çıkış listesini yönet">
+                                    <i class="fa-solid fa-list-check"></i> Çıkış Listesi
+                                </button>
+                                <button class="btn btn-outline btn-card-action" onclick="openLogsForDealer('${d.bayi_kodu}', '${esc(d.bayi_adi)}')" style="color:${errorCount > 0 ? '#fca5a5' : 'inherit'};">
+                                    <i class="fa-solid fa-bug"></i> Hata Günlüğü
+                                </button>
+                                <button class="btn btn-outline btn-card-action" style="border-color:#38bdf8; color:#38bdf8;" onclick="pushDealerData('${d.bayi_kodu}', '${esc(d.bayi_adi)}')" title="Sunucudaki son değişiklikleri ve listeleri bu bayiye ilet">
+                                    <i class="fa-solid fa-cloud-arrow-up"></i> Güncel Verileri Yolla
+                                </button>
+                                <button class="btn btn-outline btn-card-action" style="border-color:#10b981; color:#34d399;" onclick="pullDealerData('${d.bayi_kodu}', '${esc(d.bayi_adi)}')" title="Bayide okutulan kayıtları ve güncel verileri sunucuya çek">
+                                    <i class="fa-solid fa-cloud-arrow-down"></i> Güncel Verileri Al
+                                </button>
+                                <button class="btn btn-danger-outline btn-card-action" onclick="clearDealerHistory('${d.bayi_kodu}', '${esc(d.bayi_adi)}')" title="Bayinin tüm geçmiş satış arşivini, çıkış listesini ve mobil oturum kayıtlarını sıfırla">
+                                    <i class="fa-solid fa-trash-can"></i> Geçmişi Temizle
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // ==========================================
+        // CİHAZ VE OTURUM TAKİBİ FONKSİYONLARI
+        // ==========================================
+        let activeDealerForDevices = null;
+
+        function openDevicesModal(bayiKodu, bayiAdi) {
+            activeDealerForDevices = bayiKodu;
+            document.getElementById('lbl-devices-dealer-name').textContent = bayiAdi;
+            document.getElementById('modalDevices').style.display = 'flex';
+
+            const dealer = currentDealers.find(d => d.bayi_kodu === bayiKodu);
+            const devices = (dealer && dealer.devices) ? dealer.devices : [];
+            renderDeviceList(devices, bayiKodu);
+        }
+
+        function closeDevicesModal() {
+            document.getElementById('modalDevices').style.display = 'none';
+            activeDealerForDevices = null;
+        }
+
+        function renderDeviceList(devices, bayiKodu) {
+            const container = document.getElementById('devices-list-container');
+            const onlineCount = devices.filter(d => d.is_online).length;
+            document.getElementById('lbl-device-total-cnt').textContent = devices.length;
+            document.getElementById('lbl-device-online-cnt').textContent = `${onlineCount} Canlı`;
+
+            if (!devices || devices.length === 0) {
+                container.innerHTML = `
+                    <div style="text-align:center; padding:2.5rem; color:#64748b; background:rgba(0,0,0,0.2); border-radius:12px;">
+                        <i class="fa-solid fa-laptop-slash" style="font-size:2rem; margin-bottom:8px; color:#475569;"></i>
+                        <p style="font-size:0.9rem;">Bu bayiye ait henüz kayıtlı bir cihaz oturumu bulunmuyor.</p>
+                        <div style="font-size:0.78rem; color:#475569; margin-top:4px;">Bayi herhangi bir bilgisayar veya telefondan giriş yaptığında cihaz otomatik olarak burada listelenecektir.</div>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = devices.map(dev => {
+                let icon = 'fa-desktop';
+                if (dev.cihaz_turu && dev.cihaz_turu.toLowerCase().includes('telefon')) icon = 'fa-mobile-screen-button';
+                else if (dev.cihaz_turu && dev.cihaz_turu.toLowerCase().includes('tablet')) icon = 'fa-tablet-screen-button';
+                else if (dev.cihaz_turu && dev.cihaz_turu.toLowerCase().includes('laptop')) icon = 'fa-laptop';
+
+                const isLive = dev.is_online;
+                const statusBadge = isLive 
+                    ? `<span style="background:rgba(34, 197, 94, 0.15); border:1px solid rgba(34, 197, 94, 0.35); color:#4ade80; font-size:0.75rem; font-weight:700; padding:3px 8px; border-radius:999px; display:inline-flex; align-items:center; gap:5px;"><span class="live-pulse-dot"></span> Çevrimiçi</span>`
+                    : `<span style="background:rgba(148, 163, 184, 0.15); border:1px solid rgba(148, 163, 184, 0.3); color:#94a3b8; font-size:0.75rem; font-weight:600; padding:3px 8px; border-radius:999px;">⚪ ${esc(dev.durum_metni || 'Çevrimdışı')}</span>`;
+
+                const isStaff = (dev.cihaz_turu && dev.cihaz_turu.toLowerCase().includes('personel')) || 
+                              (dev.cihaz_adi && dev.cihaz_adi.toLowerCase().includes('personel')) ||
+                              (dev.aktif_sayfa && dev.aktif_sayfa.toLowerCase().includes('mobil'));
+                const staffBadge = isStaff 
+                    ? `<span style="background:rgba(245, 158, 11, 0.2); border:1px solid rgba(245, 158, 11, 0.5); color:#fbbf24; font-size:0.73rem; font-weight:800; padding:2px 8px; border-radius:6px; display:inline-flex; align-items:center; gap:4px;"><i class="fa-solid fa-user-tag"></i> Personel Girişi</span>`
+                    : `<span style="background:rgba(99, 102, 241, 0.12); border:1px solid rgba(99, 102, 241, 0.3); color:#a5b4fc; font-size:0.73rem; font-weight:600; padding:2px 8px; border-radius:6px; display:inline-flex; align-items:center; gap:4px;"><i class="fa-solid fa-shop"></i> Bayi Ana Girişi</span>`;
+
+                return `
+                    <div class="device-row-card">
+                        <div style="display:flex; align-items:center; gap:12px; flex:1; min-width:0;">
+                            <div style="background:${isLive ? 'rgba(56, 189, 248, 0.2)' : 'rgba(255,255,255,0.05)'}; width:42px; height:42px; border-radius:12px; display:flex; align-items:center; justify-content:center; color:${isLive ? '#38bdf8' : '#64748b'}; font-size:1.25rem; flex-shrink:0;">
+                                <i class="fa-solid ${icon}"></i>
+                            </div>
+                            <div style="min-width:0;">
+                                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                                    <span style="font-weight:700; color:#fff; font-size:0.92rem;">${esc(dev.cihaz_adi || 'Terminal')}</span>
+                                    <button onclick="promptRenameDevice(${dev.id}, '${esc(dev.cihaz_adi)}', '${bayiKodu}')" style="background:transparent; border:none; color:#64748b; cursor:pointer; font-size:0.75rem;" title="Cihaz adını değiştir (Örn: Kasa 1, El Terminali)">
+                                        <i class="fa-solid fa-pen"></i>
+                                    </button>
+                                    ${staffBadge}
+                                    ${statusBadge}
+                                </div>
+                                <div style="display:flex; align-items:center; gap:12px; font-size:0.78rem; color:#94a3b8; margin-top:3px; flex-wrap:wrap;">
+                                    <span><i class="fa-solid fa-network-wired"></i> IP: <code style="color:#cbd5e1;">${esc(dev.ip_adresi || '-')}</code></span>
+                                    <span><i class="fa-solid fa-window-maximize"></i> Ekran: <strong style="color:#38bdf8;">${esc(dev.aktif_sayfa || 'Uygulama Açık')}</strong></span>
+                                    <span><i class="fa-regular fa-clock"></i> Son Görülme: <span style="color:#cbd5e1;">${esc(dev.gecen_sure || dev.son_gorulme)}</span></span>
+                                </div>
+                            </div>
+                        </div>
+                        <div>
+                            <button class="btn btn-danger-outline" style="padding:0.4rem 0.75rem; font-size:0.78rem;" onclick="removeDevice(${dev.id}, '${bayiKodu}')" title="Bu cihaz oturumunu kaldır">
+                                <i class="fa-solid fa-trash-can"></i> Sil
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function promptRenameDevice(deviceId, currentName, bayiKodu) {
+            const newName = prompt("Bu cihaz için özel bir isim girin (Örn: Kasa Bilgisayarı, Barkod Terminali, Telefon):", currentName);
+            if (!newName || !newName.trim()) return;
+
+            try {
+                const res = await fetch(`/api/admin/cihaz/${deviceId}/ad_guncelle`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cihaz_adi: newName.trim() })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast("✏️ Cihaz adı güncellendi!");
+                    await loadDashboard();
+                    if (activeDealerForDevices) {
+                        const dealer = currentDealers.find(d => d.bayi_kodu === activeDealerForDevices);
+                        if (dealer) renderDeviceList(dealer.devices || [], activeDealerForDevices);
+                    }
+                }
+            } catch (e) {
+                alert("Güncelleme hatası: " + e.message);
+            }
+        }
+
+        async function removeDevice(deviceId, bayiKodu) {
+            if (!confirm("Bu cihaz oturumu kaydını silmek istediğinize emin misiniz?")) return;
+            try {
+                const res = await fetch(`/api/admin/cihaz/${deviceId}/sil`, { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    showToast("🗑️ Cihaz kaydı silindi.");
+                    await loadDashboard();
+                    if (activeDealerForDevices) {
+                        const dealer = currentDealers.find(d => d.bayi_kodu === activeDealerForDevices);
+                        if (dealer) renderDeviceList(dealer.devices || [], activeDealerForDevices);
+                    }
+                }
+            } catch (e) {
+                alert("Silme hatası: " + e.message);
+            }
+        }
+
+        // ==========================================
+        // BAYİ ADINA GEÇİŞ YAPMA (GÜVENLİ TEMSİL MODU)
+        // ==========================================
+        async function switchToDealer(bayiKodu, bayiAdi) {
+            if (!confirm(`👑 '${bayiAdi || 'Bayi'}' adına işlem moduna geçmek istiyor musunuz?\n\nBu işlemle bayinin yetkisi ve kullanıcı hesabıyla doğrudan çıkış/satış ekranına geçeceksiniz.\nİstediğiniz an ekranın üstündeki butondan Yönetim Paneline geri dönebilirsiniz.`)) {
+                return;
+            }
+            try {
+                showToast("⚡ Bayi oturumuna geçiliyor...");
+                const res = await fetch(`/api/admin/bayi/${bayiKodu}/switch`, { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    if (data.bkst_warning) { alert("⚠️ Bakanlık bağlantısı kurulamadı:\n" + data.bkst_warning); }
+                    window.location.href = data.redirect || '/cikis';
+                } else {
+                    alert("Geçiş yapılamadı: " + (data.error || 'Bilinmeyen hata'));
+                }
+            } catch (err) {
+                alert("Bağlantı hatası: " + err.message);
+            }
+        }
+
+        // ==========================================
+        // BAYİ SİLME & GLN KOPYALAMA
+        // ==========================================
+        async function deleteDealer(bayiKodu, bayiAdi) {
+            if (!confirm(`⚠️ DİKKAT: '${bayiAdi}' bayisini sistemden silmek istediğinize emin misiniz?\n\nBu işlem bayiye ait kayıtlı cihaz oturumlarını ve canlılık bağlantılarını kaldıracaktır.`)) {
+                return;
+            }
+            try {
+                const res = await fetch(`/api/admin/bayi/${bayiKodu}/sil`, { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    showToast("🗑️ Bayi başarıyla silindi.");
+                    await loadDashboard();
+                } else {
+                    alert("Silme hatası: " + (data.error || 'Bayi silinemedi.'));
+                }
+            } catch (e) {
+                alert("Bağlantı hatası: " + e.message);
+            }
+        }
+
+        function copyGln(gln) {
+            if (!gln) return;
+            navigator.clipboard.writeText(gln).then(() => {
+                showToast("📋 GLN Numarası kopyalandı: " + gln);
+            }).catch(() => {
+                prompt("GLN Numarası:", gln);
+            });
+        }
+
+        // ==========================================
+        // TÜMÜNÜ VEYA TEK BAYİYİ SENKRONİZE ETME
+        // ==========================================
+        async function syncAllDealers() {
+            showToast("🔄 Tüm bayilerle çift yönlü senkronizasyon başlatıldı...");
+            try {
+                const res = await fetch('/api/admin/sync_all', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    showToast("🟢 Tüm bayiler başarıyla güncellendi!");
+                    loadDashboard();
+                } else {
+                    alert("Senkronizasyon hatası: " + data.error);
+                }
+            } catch (err) {
+                alert("Bağlantı hatası: " + err.message);
+            }
+        }
+
+        async function pushDealerData(bayiKodu, bayiAdi) {
+            showToast(`📤 '${bayiAdi || bayiKodu}' bayisine güncel veriler gönderiliyor...`);
+            try {
+                const res = await fetch(`/api/admin/bayi/${bayiKodu}/push`, { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(`✅ ${data.message}`);
+                    await loadDashboard();
+                } else {
+                    alert("Gönderme hatası: " + (data.error || 'Veriler iletilemedi.'));
+                }
+            } catch (err) {
+                alert("Bağlantı hatası: " + err.message);
+            }
+        }
+
+        async function pullDealerData(bayiKodu, bayiAdi) {
+            showToast(`📥 '${bayiAdi || bayiKodu}' bayisinden güncel veriler çekiliyor...`);
+            try {
+                const res = await fetch(`/api/admin/bayi/${bayiKodu}/pull`, { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(`✅ ${data.message}`);
+                    await loadDashboard();
+                } else {
+                    alert("Çekme hatası: " + (data.error || 'Veriler çekilemedi.'));
+                }
+            } catch (err) {
+                alert("Bağlantı hatası: " + err.message);
+            }
+        }
+
+        async function syncSingleDealer(bayiKodu) {
+            return pushDealerData(bayiKodu);
+        }
+
+        // ==========================================
+        // ÇIKIŞ LİSTESİ YÖNETİMİ
+        // ==========================================
+        async function openExitListForDealer(bayiKodu, bayiAdi) {
+            activeDealerForExit = bayiKodu;
+            document.getElementById('lbl-exit-dealer-name').textContent = bayiAdi;
+            document.getElementById('modalExitList').style.display = 'flex';
+            document.getElementById('exit-list-tbody').innerHTML = '<tr><td colspan="9" style="text-align:center; padding:2rem; color:#64748b;"><i class="fa-solid fa-spinner fa-spin"></i> Çıkış listesi yükleniyor...</td></tr>';
+            
+            // Reset input values
+            if (document.getElementById('exit-search-inp')) document.getElementById('exit-search-inp').value = '';
+            if (document.getElementById('exit-filter-date')) document.getElementById('exit-filter-date').value = '';
+
+            exitView = 'active';
+            try {
+                await reloadExitLists();
+            } catch (err) {
+                alert("Liste yüklenemedi: " + err.message);
+            }
+        }
+
+        function populateExitFilterDropdowns(items) {
+            const prodSelect = document.getElementById('exit-filter-product');
+            const devSelect = document.getElementById('exit-filter-device');
+
+            // Unique products
+            const products = Array.from(new Set(items.map(i => (i.urun_adi || 'Bilinmeyen Ürün').trim()))).filter(Boolean).sort();
+            prodSelect.innerHTML = '<option value="">Tüm Ürünler (' + items.length + ')</option>' +
+                products.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
+
+            // Unique devices
+            const devices = Array.from(new Set(items.map(i => (i.cihaz_adi || 'Masaüstü PC').trim()))).filter(Boolean).sort();
+            devSelect.innerHTML = '<option value="">Tüm Cihazlar</option>' +
+                devices.map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
+        }
+
+        function renderExitItems(items) {
+            const tbody = document.getElementById('exit-list-tbody');
+            document.getElementById('exit-items-count-badge').textContent = `${items.length} Kutu`;
+
+            if (!items || items.length === 0) {
+                lastRenderedExit = [];
+                tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding:2rem; color:#64748b;">Kayıt bulunamadı.</td></tr>';
+                updateExitSelectionUi();
+                return;
+            }
+            lastRenderedExit = items;
+
+            tbody.innerHTML = items.map((it, idx) => `
+                <tr>
+                    <td><input type="checkbox" class="exit-row-chk" ${selectedExitIds.has(it.id) ? 'checked' : ''} onchange="toggleExitRow(${it.id}, this.checked)"></td>
+                    <td style="font-weight:700; color:#fff;">${esc(it.urun_adi || 'Bilinmeyen Ürün')}</td>
+                    <td><code>${esc(it.barkod || '-')}</code></td>
+                    <td><code>${esc(it.seri_no || '-')}</code></td>
+                    <td>${esc(it.parti_no || '-')}</td>
+                    <td>${esc(it.koli_no || '-')}</td>
+                    <td>
+                        <span style="display:inline-flex; align-items:center; gap:5px; background:rgba(56, 189, 248, 0.12); color:#38bdf8; border:1px solid rgba(56, 189, 248, 0.25); padding:3px 8px; border-radius:6px; font-size:0.75rem; font-weight:600;">
+                            <i class="fa-solid fa-laptop"></i> ${esc(it.cihaz_adi || 'Masaüstü PC')}
+                        </span>
+                    </td>
+                    <td style="font-size:0.78rem; color:#94a3b8;">${esc(it.tarih || '-')}</td>
+                    <td style="text-align:right;">
+                        ${exitView === 'deleted'
+                            ? `<button class="btn btn-outline" style="padding:3px 8px; font-size:0.75rem;" onclick="bulkExitAction('geri_al', [${it.id}])"><i class="fa-solid fa-rotate-left"></i> Geri Al</button>`
+                            : `<button class="btn btn-danger-outline" style="padding:3px 8px; font-size:0.75rem;" onclick="deleteExitItem(${it.id})"><i class="fa-solid fa-trash-can"></i> Sil</button>`}
+                    </td>
+                </tr>
+            `).join('');
+            updateExitSelectionUi();
+        }
+
+        function filterExitItems() {
+            const q = (document.getElementById('exit-search-inp').value || '').toLowerCase().trim();
+            const prod = (document.getElementById('exit-filter-product').value || '').trim();
+            const dev = (document.getElementById('exit-filter-device').value || '').trim();
+            const date = (document.getElementById('exit-filter-date').value || '').trim();
+
+            const filtered = currentExitSource().filter(it => {
+                // Text search match
+                if (q) {
+                    const matchText = (it.urun_adi || '').toLowerCase().includes(q) ||
+                                      (it.barkod || '').toLowerCase().includes(q) ||
+                                      (it.seri_no || '').toLowerCase().includes(q) ||
+                                      (it.koli_no || '').toLowerCase().includes(q) ||
+                                      (it.parti_no || '').toLowerCase().includes(q);
+                    if (!matchText) return false;
+                }
+
+                // Product filter
+                if (prod && (it.urun_adi || 'Bilinmeyen Ürün').trim() !== prod) {
+                    return false;
+                }
+
+                // Device filter
+                if (dev && (it.cihaz_adi || 'Masaüstü PC').trim() !== dev) {
+                    return false;
+                }
+
+                // Date filter (tarih typically starts with YYYY-MM-DD or DD.MM.YYYY)
+                if (date) {
+                    const itemDate = (it.tarih || '');
+                    if (!itemDate.includes(date)) return false;
+                }
+
+                return true;
+            });
+
+            renderExitItems(filtered);
+        }
+
+        function resetExitFilters() {
+            document.getElementById('exit-search-inp').value = '';
+            document.getElementById('exit-filter-product').value = '';
+            document.getElementById('exit-filter-device').value = '';
+            document.getElementById('exit-filter-date').value = '';
+            renderExitItems(currentExitSource());
+        }
+
+        async function deleteExitItem(itemId) {
+            if (!confirm("Bu kutu listeden kaldırılsın mı? (Bayiye ancak 'Değişiklikleri Bayiye Gönder' ile iletilir, Silinenler sekmesinden geri alınabilir.)")) return;
+            await bulkExitAction('sil', [itemId]);
+        }
+
+        let exitView = 'active';
+        let cachedDeletedItems = [];
+        let lastRenderedExit = [];
+        const selectedExitIds = new Set();
+
+        function currentExitSource() {
+            return exitView === 'deleted' ? cachedDeletedItems : cachedExitItems;
+        }
+
+        async function reloadExitLists() {
+            const res = await fetch(`/api/admin/bayi/${activeDealerForExit}/cikis_listesi`);
+            if (!res.ok) {
+                if (res.status === 401 || res.status === 403) {
+                    throw new Error("Oturum süreniz dolmuş. Lütfen sayfayı yenileyip tekrar giriş yapın.");
+                }
+                throw new Error(`Sunucuya erişilemedi (Hata: ${res.status}). Sunucunun açık olduğundan emin olun.`);
+            }
+            let data;
+            try {
+                data = await res.json();
+            } catch (e) {
+                throw new Error("Sunucu geçersiz yanıt döndürdü (Tünel bağlantısı kesilmiş olabilir).");
+            }
+            if (!data.success) throw new Error(data.error || 'Liste alınamadı');
+            cachedExitItems = data.items || [];
+            cachedDeletedItems = data.deleted_items || [];
+            selectedExitIds.clear();
+            populateExitFilterDropdowns(currentExitSource());
+            filterExitItems();
+            updateExitTabs();
+        }
+
+        function updateExitTabs() {
+            const a = document.getElementById('tab-exit-active');
+            const d = document.getElementById('tab-exit-deleted');
+            a.textContent = '📦 Liste (' + cachedExitItems.length + ')';
+            d.textContent = '🗑️ Silinenler (' + cachedDeletedItems.length + ')';
+            a.style.background = exitView === 'active' ? 'rgba(56,189,248,0.2)' : '';
+            d.style.background = exitView === 'deleted' ? 'rgba(248,113,113,0.2)' : '';
+            const isDel = exitView === 'deleted';
+            document.getElementById('btn-exit-del-sel').style.display = isDel ? 'none' : '';
+            document.getElementById('btn-exit-del-all').style.display = isDel ? 'none' : '';
+            document.getElementById('btn-exit-res-sel').style.display = isDel ? '' : 'none';
+            document.getElementById('btn-exit-res-all').style.display = isDel ? '' : 'none';
+        }
+
+        function setExitView(v) {
+            exitView = v;
+            selectedExitIds.clear();
+            populateExitFilterDropdowns(currentExitSource());
+            filterExitItems();
+            updateExitTabs();
+        }
+
+        function updateExitSelectionUi() {
+            const n = selectedExitIds.size;
+            const ds = document.getElementById('btn-exit-del-sel');
+            const rs = document.getElementById('btn-exit-res-sel');
+            if (ds) ds.textContent = 'Seçilenleri Sil (' + n + ')';
+            if (rs) rs.textContent = 'Seçilenleri Geri Al (' + n + ')';
+            const all = document.getElementById('exit-select-all');
+            if (all) all.checked = lastRenderedExit.length > 0 && lastRenderedExit.every(it => selectedExitIds.has(it.id));
+        }
+
+        function toggleExitRow(id, on) {
+            if (on) selectedExitIds.add(id); else selectedExitIds.delete(id);
+            updateExitSelectionUi();
+        }
+
+        function toggleSelectAllExit(on) {
+            lastRenderedExit.forEach(it => { if (on) selectedExitIds.add(it.id); else selectedExitIds.delete(it.id); });
+            document.querySelectorAll('.exit-row-chk').forEach(cb => { cb.checked = on; });
+            updateExitSelectionUi();
+        }
+
+        async function bulkExitAction(action, ids) {
+            try {
+                const res = await fetch(`/api/admin/bayi/${activeDealerForExit}/cikis_listesi/toplu`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: action, ids: ids })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    await reloadExitLists();
+                    showToast((action === 'sil' ? '🗑️ ' : '↩️ ') + data.message);
+                    loadDashboard();
+                } else {
+                    alert("İşlem başarısız: " + data.error);
+                }
+            } catch (err) {
+                alert("Hata: " + err.message);
+            }
+        }
+
+        async function bulkExitSelected(action) {
+            const ids = Array.from(selectedExitIds);
+            if (!ids.length) { alert("Önce tabloda kutu seçin."); return; }
+            if (action === 'sil' && !confirm(ids.length + " kutu listeden kaldırılsın mı?")) return;
+            await bulkExitAction(action, ids);
+        }
+
+        async function bulkExitVisible(action) {
+            const ids = lastRenderedExit.map(it => it.id);
+            if (!ids.length) { alert("İşlem yapılacak kutu yok."); return; }
+            if (action === 'sil' && !confirm("Görünen " + ids.length + " kutunun tümü listeden kaldırılsın mı?")) return;
+            await bulkExitAction(action, ids);
+        }
+
+        async function pushExitListChanges() {
+            showToast("📤 Değişiklikler bayinin dükkan bilgisayarına iletiliyor...");
+            try {
+                const res = await fetch(`/api/admin/bayi/${activeDealerForExit}/cikis_listesi/guncelle`, {
+                    method: 'POST'
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast("🟢 Bayinin çıkış listesi başarıyla güncellendi!");
+                    loadDashboard();
+                } else {
+                    alert("İletilemedi: " + data.error);
+                }
+            } catch (err) {
+                alert("Hata: " + err.message);
+            }
+        }
+
+        function closeExitListModal() {
+            document.getElementById('modalExitList').style.display = 'none';
+        }
+
+        // ==========================================
+        // HATA GÜNLÜĞÜ (DEBUG LOGS)
+        // ==========================================
+        let selectedLogCategory = '';
+        let logSearchText = '';
+
+        function openGlobalDebugLogs() {
+            openLogsForDealer('', 'Tüm Bayiler');
+        }
+
+        async function reloadCurrentLogs() {
+            await openLogsForDealer(activeDealerForLogs, document.getElementById('lbl-logs-dealer-name').textContent);
+        }
+
+        async function openLogsForDealer(bayiKodu, bayiAdi) {
+            activeDealerForLogs = bayiKodu;
+            document.getElementById('lbl-logs-dealer-name').textContent = bayiAdi || 'Tüm Bayiler';
+            document.getElementById('modalLogs').style.display = 'flex';
+            document.getElementById('logs-container').innerHTML = '<div style="text-align:center; padding:2rem; color:#64748b;"><i class="fa-solid fa-spinner fa-spin"></i> Hata ve işlem günlükleri yükleniyor...</div>';
+            
+            selectedLogCategory = '';
+            selectedLogLevel = '';
+            logSearchText = '';
+            const sInput = document.getElementById('log-search-input');
+            if (sInput) sInput.value = '';
+
+            try {
+                const url = bayiKodu ? `/api/admin/debug_logs?bayi_kodu=${encodeURIComponent(bayiKodu)}&limit=500` : '/api/admin/debug_logs?limit=500';
+                const res = await fetch(url);
+                const data = await res.json();
+                if (data.success) {
+                    cachedLogs = data.logs || [];
+                    
+                    // Rozet sayıları
+                    document.getElementById('lbl-cnt-all').textContent = cachedLogs.length;
+                    document.getElementById('lbl-cnt-error').textContent = cachedLogs.filter(l => l.seviye === 'ERROR').length;
+                    document.getElementById('lbl-cnt-warn').textContent = cachedLogs.filter(l => l.seviye === 'WARNING' || l.seviye === 'UYARI').length;
+                    const infoCntEl = document.getElementById('lbl-cnt-info');
+                    if (infoCntEl) infoCntEl.textContent = cachedLogs.filter(l => l.seviye === 'INFO').length;
+
+                    // Kategori sayıları
+                    const cStats = data.kategori_stats || {};
+                    const getCatCount = (patterns) => {
+                        return Object.entries(cStats)
+                            .filter(([k]) => patterns.some(p => k.includes(p)))
+                            .reduce((sum, [, v]) => sum + v, 0);
+                    };
+
+                    const applogCnt = getCatCount(['APP_LOG', 'ISTEMCI']);
+                    const bakanlikCnt = getCatCount(['BAKANLIK']);
+                    const karekodCnt = getCatCount(['KAREKOD', 'BARKOD', 'KOLİ', 'KOLI']);
+                    const mobilCnt = getCatCount(['MOBIL', 'PERSONEL']);
+                    const senkronCnt = getCatCount(['SENKRON']);
+                    const sistemCnt = getCatCount(['SISTEM', 'ADMIN', 'GUVENLIK', 'YETKI']);
+
+                    if (document.getElementById('lbl-cat-applog')) document.getElementById('lbl-cat-applog').textContent = applogCnt;
+                    if (document.getElementById('lbl-cat-bakanlik')) document.getElementById('lbl-cat-bakanlik').textContent = bakanlikCnt;
+                    if (document.getElementById('lbl-cat-karekod')) document.getElementById('lbl-cat-karekod').textContent = karekodCnt;
+                    if (document.getElementById('lbl-cat-mobil')) document.getElementById('lbl-cat-mobil').textContent = mobilCnt;
+                    if (document.getElementById('lbl-cat-senkron')) document.getElementById('lbl-cat-senkron').textContent = senkronCnt;
+                    if (document.getElementById('lbl-cat-sistem')) document.getElementById('lbl-cat-sistem').textContent = sistemCnt;
+
+                    applyLogFilters();
+                } else {
+                    document.getElementById('logs-container').innerHTML = `<div style="text-align:center; padding:2rem; color:#f87171;">Loglar alınamadı: ${esc(data.error || 'Bilinmeyen hata')}</div>`;
+                }
+            } catch (err) {
+                document.getElementById('logs-container').innerHTML = `<div style="text-align:center; padding:2rem; color:#f87171;">Bağlantı hatası: ${esc(err.message)}</div>`;
+            }
+        }
+
+        function filterLogsByLevel(level) {
+            selectedLogLevel = level;
+            // Buton aktiflik sınıfları
+            ['all', 'error', 'warn', 'info'].forEach(k => {
+                const btn = document.getElementById(`log-filter-${k}`);
+                if (!btn) return;
+                const matches = (k === 'all' && !level) || (k === 'error' && level === 'ERROR') || (k === 'warn' && (level === 'WARNING' || level === 'UYARI')) || (k === 'info' && level === 'INFO');
+                btn.style.fontWeight = matches ? '700' : 'normal';
+                btn.style.boxShadow = matches ? '0 0 0 2px rgba(255,255,255,0.2)' : 'none';
+            });
+            applyLogFilters();
+        }
+
+        function filterLogsByCategory(category) {
+            selectedLogCategory = category;
+            const catButtons = document.querySelectorAll('.log-cat-btn');
+            catButtons.forEach(b => {
+                b.style.background = 'transparent';
+                b.style.fontWeight = 'normal';
+            });
+            const activeBtn = category ? document.querySelector(`button[onclick="filterLogsByCategory('${category}')"]`) : document.getElementById('cat-btn-all');
+            if (activeBtn) {
+                activeBtn.style.background = 'rgba(255,255,255,0.12)';
+                activeBtn.style.fontWeight = '700';
+            }
+            applyLogFilters();
+        }
+
+        function applyLogFilters() {
+            const sInput = document.getElementById('log-search-input');
+            logSearchText = sInput ? sInput.value.trim().toLowerCase() : '';
+
+            let filtered = cachedLogs || [];
+
+            // Seviye filtresi
+            if (selectedLogLevel) {
+                if (selectedLogLevel === 'WARNING' || selectedLogLevel === 'UYARI') {
+                    filtered = filtered.filter(l => l.seviye === 'WARNING' || l.seviye === 'UYARI');
+                } else {
+                    filtered = filtered.filter(l => l.seviye === selectedLogLevel);
+                }
+            }
+
+            // Kategori filtresi
+            if (selectedLogCategory) {
+                if (selectedLogCategory === 'APP_LOG') {
+                    filtered = filtered.filter(l => (l.kategori || '').includes('APP_LOG') || (l.kategori || '').includes('ISTEMCI'));
+                } else if (selectedLogCategory === 'BAKANLIK_API') {
+                    filtered = filtered.filter(l => (l.kategori || '').includes('BAKANLIK'));
+                } else if (selectedLogCategory === 'KAREKOD_OKUTMA') {
+                    filtered = filtered.filter(l => (l.kategori || '').includes('KAREKOD') || (l.kategori || '').includes('BARKOD'));
+                } else if (selectedLogCategory === 'MOBIL_OTURUM') {
+                    filtered = filtered.filter(l => (l.kategori || '').includes('MOBIL') || (l.kategori || '').includes('PERSONEL'));
+                } else if (selectedLogCategory === 'SENKRON') {
+                    filtered = filtered.filter(l => (l.kategori || '').includes('SENKRON'));
+                } else if (selectedLogCategory === 'SISTEM') {
+                    filtered = filtered.filter(l => (l.kategori || '').includes('SISTEM') || (l.kategori || '').includes('ADMIN') || (l.kategori || '').includes('GUVENLIK') || (l.kategori || '').includes('YETKI'));
+                } else {
+                    filtered = filtered.filter(l => (l.kategori || '') === selectedLogCategory);
+                }
+            }
+
+            // Arama filtresi
+            if (logSearchText) {
+                filtered = filtered.filter(l => {
+                    const text = `${l.baslik || ''} ${l.detay || ''} ${l.kategori || ''} ${l.bayi_kodu || ''} ${l.request_payload || ''} ${l.response_payload || ''}`.toLowerCase();
+                    return text.includes(logSearchText);
+                });
+            }
+
+            renderLogs(filtered);
+            const footerInfo = document.getElementById('lbl-logs-footer-info');
+            if (footerInfo) {
+                footerInfo.textContent = `Toplam ${cachedLogs.length} kayıttan ${filtered.length} adedi listeleniyor`;
+            }
+        }
+
+        function renderLogs(logs) {
+            const container = document.getElementById('logs-container');
+            if (!logs || logs.length === 0) {
+                container.innerHTML = '<div style="text-align:center; padding:2.5rem; color:#64748b;"><i class="fa-solid fa-filter" style="font-size:1.8rem; margin-bottom:8px; display:block; opacity:0.5;"></i>Seçili kriterlere uygun hata veya işlem kaydı bulunamadı.</div>';
+                return;
+            }
+
+            container.innerHTML = logs.map(l => {
+                let badgeClass = 'badge-info';
+                let iconClass = 'fa-info-circle';
+                const sev = (l.seviye || 'INFO').toUpperCase();
+
+                if (sev === 'ERROR') {
+                    badgeClass = 'badge-error';
+                    iconClass = 'fa-triangle-exclamation';
+                } else if (sev === 'WARNING' || sev === 'UYARI') {
+                    badgeClass = 'badge-warn';
+                    iconClass = 'fa-circle-exclamation';
+                }
+
+                // Kategori etiketi & rengi
+                let catColor = '#94a3b8';
+                let catIcon = 'fa-tag';
+                const kat = (l.kategori || '').toUpperCase();
+                if (kat.includes('APP_LOG')) {
+                    catColor = '#f87171'; catIcon = 'fa-desktop';
+                } else if (kat.includes('BAKANLIK')) {
+                    catColor = '#38bdf8'; catIcon = 'fa-satellite-dish';
+                } else if (kat.includes('KAREKOD') || kat.includes('BARKOD')) {
+                    catColor = '#a3e635'; catIcon = 'fa-barcode';
+                } else if (kat.includes('MOBIL') || kat.includes('PERSONEL')) {
+                    catColor = '#c084fc'; catIcon = 'fa-mobile-screen';
+                } else if (kat.includes('SENKRON')) {
+                    catColor = '#2dd4bf'; catIcon = 'fa-arrows-rotate';
+                } else if (kat.includes('ADMIN') || kat.includes('SISTEM') || kat.includes('GUVENLIK')) {
+                    catColor = '#f472b6'; catIcon = 'fa-shield-halved';
+                }
+
+                return `
+                    <div class="log-item" style="border:1px solid rgba(255,255,255,0.07); border-radius:8px; margin-bottom:8px; background:rgba(15,23,42,0.6); overflow:hidden;">
+                        <div class="log-item-header" onclick="toggleLogDetail(${l.id})" style="padding:10px 14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:rgba(30,41,59,0.35);">
+                            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                                <span class="log-badge ${badgeClass}" style="display:inline-flex; align-items:center; gap:4px;">
+                                    <i class="fa-solid ${iconClass}"></i> ${l.seviye}
+                                </span>
+                                <span style="font-size:0.75rem; color:${catColor}; font-weight:600; display:inline-flex; align-items:center; gap:4px;">
+                                    <i class="fa-solid ${catIcon}"></i> [${esc(l.kategori)}]
+                                </span>
+                                <span style="font-weight:700; color:#fff; font-size:0.88rem;">${esc(l.baslik)}</span>
+                                ${l.bayi_kodu && l.bayi_kodu !== 'None' ? `<span style="font-size:0.7rem; background:rgba(255,255,255,0.06); padding:2px 6px; border-radius:4px; color:#cbd5e1;"><i class="fa-solid fa-store" style="font-size:0.65rem;"></i> ${esc(l.bayi_kodu)}</span>` : ''}
+                            </div>
+                            <div style="display:flex; align-items:center; gap:12px;">
+                                <span style="font-size:0.75rem; color:#94a3b8; font-family:var(--font-mono);">${l.tarih}</span>
+                                <i class="fa-solid fa-chevron-down" id="log-icon-${l.id}" style="font-size:0.75rem; color:#64748b; transition:transform 0.2s;"></i>
+                            </div>
+                        </div>
+                        <div class="log-details" id="log-body-${l.id}" style="display:none; padding:12px 16px; border-top:1px solid rgba(255,255,255,0.06); background:rgba(15,23,42,0.9);">
+                            ${l.detay ? `<div style="margin-bottom:10px; color:#cbd5e1; font-size:0.84rem; line-height:1.5;"><strong>Detay:</strong> ${esc(l.detay)}</div>` : ''}
+                            ${l.request_payload ? `
+                                <div style="margin-top:8px;">
+                                    <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.75rem; color:#94a3b8; margin-bottom:4px;">
+                                        <strong>Gönderilen İstek / Parametreler:</strong>
+                                        <button class="btn btn-sm btn-outline" onclick="copyLogSnippet('${l.id}_req', event)" style="font-size:0.7rem; padding:2px 8px;">Kopyala</button>
+                                    </div>
+                                    <div class="json-box" id="snippet_${l.id}_req" style="max-height:180px; overflow-y:auto; font-size:0.75rem; background:#090d16; padding:8px 10px; border-radius:6px; border:1px solid rgba(255,255,255,0.08); font-family:var(--font-mono); white-space:pre-wrap; word-break:break-all;">${esc(l.request_payload)}</div>
+                                </div>
+                            ` : ''}
+                            ${l.response_payload ? `
+                                <div style="margin-top:10px;">
+                                    <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.75rem; color:#94a3b8; margin-bottom:4px;">
+                                        <strong>Dönen Sunucu / Bakanlık Yanıtı:</strong>
+                                        <button class="btn btn-sm btn-outline" onclick="copyLogSnippet('${l.id}_res', event)" style="font-size:0.7rem; padding:2px 8px;">Kopyala</button>
+                                    </div>
+                                    <div class="json-box" id="snippet_${l.id}_res" style="max-height:180px; overflow-y:auto; font-size:0.75rem; background:#090d16; padding:8px 10px; border-radius:6px; border:1px solid rgba(255,255,255,0.08); font-family:var(--font-mono); color:#86efac; white-space:pre-wrap; word-break:break-all;">${esc(l.response_payload)}</div>
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function copyLogSnippet(elementSuffix, ev) {
+            if (ev) ev.stopPropagation();
+            const el = document.getElementById(`snippet_${elementSuffix}`);
+            if (el) {
+                navigator.clipboard.writeText(el.innerText || el.textContent);
+                showToast("📋 Paket kopyalandı!");
+            }
+        }
+
+        function toggleLogDetail(id) {
+            const body = document.getElementById(`log-body-${id}`);
+            const icon = document.getElementById(`log-icon-${id}`);
+            if (body.style.display === 'block') {
+                body.style.display = 'none';
+                icon.className = 'fa-solid fa-chevron-down';
+            } else {
+                body.style.display = 'block';
+                icon.className = 'fa-solid fa-chevron-up';
+            }
+        }
+
+        function copyAllLogsToClipboard() {
+            navigator.clipboard.writeText(JSON.stringify(cachedLogs, null, 2));
+            showToast("📋 Tüm loglar JSON olarak panoya kopyalandı!");
+        }
+
+        async function clearCurrentLogs() {
+            if (!confirm("Tüm hata günlüklerini silmek istediğinize emin misiniz?")) return;
+            try {
+                const res = await fetch('/api/admin/debug_logs/temizle', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    cachedLogs = [];
+                    applyLogFilters();
+                    showToast("🗑️ Loglar temizlendi.");
+                    loadDashboard();
+                }
+            } catch (err) {
+                alert("Hata: " + err.message);
+            }
+        }
+
+        function closeLogsModal() {
+            document.getElementById('modalLogs').style.display = 'none';
+        }
+
+        // ==========================================
+        // BAYİ GEÇMİŞ TÜM VERİLERİ SİLME (MODALLI VE SEÇENEKLİ)
+        // ==========================================
+        let activeClearDealerKodu = null;
+        let activeClearDealerAdi = '';
+
+        function openClearHistoryModal(bayiKodu, bayiAdi) {
+            activeClearDealerKodu = bayiKodu;
+            activeClearDealerAdi = bayiAdi || bayiKodu;
+            const lbl = document.getElementById('lbl-clear-history-dealer');
+            if (lbl) lbl.textContent = `${activeClearDealerAdi} (${activeClearDealerKodu})`;
+            
+            // Varsayılan olarak bekleyen, bugün satış ve loglar seçili DEĞİL, geçmiş arşiv ve oturumlar seçili
+            const chkBekleyen = document.getElementById('chk-clear-bekleyen');
+            const chkBugun = document.getElementById('chk-clear-bugun');
+            const chkGecmis = document.getElementById('chk-clear-gecmis');
+            const chkOturumlar = document.getElementById('chk-clear-oturumlar');
+            const chkLoglar = document.getElementById('chk-clear-loglar');
+            if (chkBekleyen) chkBekleyen.checked = false;
+            if (chkBugun) chkBugun.checked = false;
+            if (chkGecmis) chkGecmis.checked = true;
+            if (chkOturumlar) chkOturumlar.checked = true;
+            if (chkLoglar) chkLoglar.checked = false;
+
+            const modal = document.getElementById('modalClearHistory');
+            if (modal) modal.style.display = 'flex';
+        }
+
+        function closeClearHistoryModal() {
+            const modal = document.getElementById('modalClearHistory');
+            if (modal) modal.style.display = 'none';
+            activeClearDealerKodu = null;
+            activeClearDealerAdi = '';
+        }
+
+        function clearDealerHistory(bayiKodu, bayiAdi) {
+            openClearHistoryModal(bayiKodu, bayiAdi);
+        }
+
+        // ==========================================
+        // ARKA PLAN ASENKRON İŞLEM & SAĞ ALT BİLDİRİM SİSTEMİ
+        // ==========================================
+        let isClearHistoryInProgress = false;
+        let activeClearAbortController = null;
+        let activeClearingDealerName = '';
+
+        // Kullanıcı silme işlemi sürerken sekmeyi / uygulamayı kapatmaya çalışırsa koruma:
+        window.addEventListener('beforeunload', function(e) {
+            if (isClearHistoryInProgress) {
+                const uyari = "⚠️ DİKKAT: Arka planda bayi geçmiş verilerini silme işlemi devam ediyor! Kapatırsanız işlem yarıda kalabilir.";
+                e.preventDefault();
+                e.returnValue = uyari;
+                return uyari;
+            }
+        });
+
+        function showFloatingTaskCard(type, title, msg, canCancel = false, taskId = 'task-clear') {
+            const container = document.getElementById('floating-task-container');
+            if (!container) return;
+
+            let card = document.getElementById(taskId);
+            if (!card) {
+                card = document.createElement('div');
+                card.id = taskId;
+                card.style.cssText = "pointer-events:auto; background:rgba(15,23,42,0.95); backdrop-filter:blur(14px); border-radius:12px; padding:14px 18px; box-shadow:0 12px 35px rgba(0,0,0,0.6); display:flex; flex-direction:column; gap:8px; border:1px solid rgba(255,255,255,0.12); transition:all 0.3s ease; animation:slideInRight 0.35s ease;";
+                container.appendChild(card);
+            }
+
+            let borderCol = "rgba(59,130,246,0.55)";
+            let iconHtml = '<i class="fa-solid fa-spinner fa-spin" style="color:#38bdf8; font-size:1.25rem;"></i>';
+            let titleCol = "#38bdf8";
+
+            if (type === 'success') {
+                borderCol = "rgba(34,197,94,0.65)";
+                iconHtml = '<i class="fa-solid fa-circle-check" style="color:#4ade80; font-size:1.3rem;"></i>';
+                titleCol = "#4ade80";
+            } else if (type === 'error') {
+                borderCol = "rgba(239,68,68,0.75)";
+                iconHtml = '<i class="fa-solid fa-circle-exclamation" style="color:#f87171; font-size:1.3rem;"></i>';
+                titleCol = "#f87171";
+            } else if (type === 'warning') {
+                borderCol = "rgba(245,158,11,0.65)";
+                iconHtml = '<i class="fa-solid fa-triangle-exclamation" style="color:#fbbf24; font-size:1.3rem;"></i>';
+                titleCol = "#fbbf24";
+            }
+
+            card.style.borderColor = borderCol;
+
+            let cancelBtnHtml = '';
+            if (canCancel) {
+                cancelBtnHtml = `
+                    <div style="display:flex; justify-content:flex-end; margin-top:6px;">
+                        <button onclick="cancelClearDealerHistory()" style="background:rgba(239,68,68,0.2); border:1px solid rgba(239,68,68,0.5); color:#fca5a5; font-size:0.75rem; font-weight:700; padding:5px 12px; border-radius:6px; cursor:pointer; display:flex; align-items:center; gap:6px; transition:background 0.2s;">
+                            <i class="fa-solid fa-xmark"></i> İşlemi İptal Et
+                        </button>
+                    </div>
+                `;
+            } else {
+                cancelBtnHtml = `
+                    <div style="display:flex; justify-content:flex-end; margin-top:4px;">
+                        <button onclick="dismissFloatingTaskCard('${taskId}')" style="background:none; border:none; color:var(--text-muted); font-size:0.75rem; cursor:pointer; padding:2px 6px;">Kapat &times;</button>
+                    </div>
+                `;
+            }
+
+            card.innerHTML = `
+                <div style="display:flex; align-items:flex-start; gap:12px;">
+                    <div style="margin-top:2px;">${iconHtml}</div>
+                    <div style="flex:1;">
+                        <div style="font-size:0.88rem; font-weight:700; color:${titleCol};">${esc(title)}</div>
+                        <div style="font-size:0.78rem; color:#cbd5e1; margin-top:2px; line-height:1.4;">${esc(msg)}</div>
+                        ${cancelBtnHtml}
+                    </div>
+                </div>
+            `;
+
+            if (type !== 'loading') {
+                setTimeout(() => {
+                    dismissFloatingTaskCard(taskId);
+                }, type === 'error' ? 9000 : 6500);
+            }
+        }
+
+        function dismissFloatingTaskCard(taskId) {
+            const card = document.getElementById(taskId);
+            if (!card) return;
+            card.style.opacity = '0';
+            card.style.transform = 'translateX(50px)';
+            setTimeout(() => {
+                if (card && card.parentNode) card.parentNode.removeChild(card);
+            }, 350);
+        }
+
+        function cancelClearDealerHistory() {
+            if (activeClearAbortController) {
+                activeClearAbortController.abort();
+                activeClearAbortController = null;
+            }
+            isClearHistoryInProgress = false;
+            showFloatingTaskCard('warning', '⚠️ İşlem İptal Edildi', `'${activeClearingDealerName}' için silme işlemi isteğiniz üzerine iptal edildi.`);
+        }
+
+        async function submitClearDealerHistory() {
+            if (!activeClearDealerKodu) return;
+
+            const chkBekleyen = document.getElementById('chk-clear-bekleyen');
+            const chkBugun = document.getElementById('chk-clear-bugun');
+            const chkGecmis = document.getElementById('chk-clear-gecmis');
+            const chkOturumlar = document.getElementById('chk-clear-oturumlar');
+            const chkLoglar = document.getElementById('chk-clear-loglar');
+
+            const silBekleyen = chkBekleyen ? chkBekleyen.checked : false;
+            const silBugun = chkBugun ? chkBugun.checked : false;
+            const silGecmis = chkGecmis ? chkGecmis.checked : true;
+            const silOturumlar = chkOturumlar ? chkOturumlar.checked : true;
+            const silLoglar = chkLoglar ? chkLoglar.checked : false;
+
+            if (!silBekleyen && !silBugun && !silGecmis && !silOturumlar && !silLoglar) {
+                alert("Lütfen silmek için en az bir kategori seçin.");
+                return;
+            }
+
+            let detayMetin = [];
+            if (silBekleyen) detayMetin.push("• Bekleyen Kutular (Çıkış Listesi)");
+            if (silBugun) detayMetin.push("• Bugün Satılanlar Raporu");
+            if (silGecmis) detayMetin.push("• Geçmiş Satış Arşivi");
+            if (silOturumlar) detayMetin.push("• Mobil Oturumlar & Personel Cihazları");
+            if (silLoglar) detayMetin.push("• Hata & Log Kayıtları (Hata Günlüğü)");
+
+            const onay = confirm(`⚠️ DİKKAT: '${activeClearDealerAdi}' (${activeClearDealerKodu}) bayisi için aşağıdaki kayıtlar hem sunucudan hem de bayiden KALICI olarak silinecektir:\n\n` +
+                                 detayMetin.join('\n') + `\n\nBu işlem geri alınamaz! Onaylıyor musunuz?`);
+            if (!onay) return;
+
+            const targetBayiKodu = activeClearDealerKodu;
+            const targetBayiAdi = activeClearDealerAdi;
+            activeClearingDealerName = targetBayiAdi;
+
+            // 1. Modalı hemen kapat, kullanıcı admin panelini serbestçe kullanmaya devam etsin!
+            closeClearHistoryModal();
+
+            // 2. Kapatma koruması ve iptal kontrolcüsü devreye girer
+            isClearHistoryInProgress = true;
+            activeClearAbortController = new AbortController();
+
+            // 3. Sağ alt köşede hareketli bildirim ve iptal butonu belirir
+            showFloatingTaskCard('loading', '⏳ Silme İşlemi Sürüyor', `'${targetBayiAdi}' bayisine ait seçili veriler arka planda siliniyor...`, true);
+
+            try {
+                const res = await fetch('/api/admin/bayi/gecmis_temizle', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    signal: activeClearAbortController.signal,
+                    body: JSON.stringify({
+                        bayi_kodu: targetBayiKodu,
+                        sil_bekleyen: silBekleyen,
+                        sil_bugun_satis: silBugun,
+                        sil_gecmis_satis: silGecmis,
+                        sil_oturumlar: silOturumlar,
+                        sil_loglar: silLoglar
+                    })
+                });
+
+                const data = await res.json();
+                isClearHistoryInProgress = false;
+                activeClearAbortController = null;
+
+                if (data.success) {
+                    showFloatingTaskCard('success', '✓ Silme Tamamlandı', data.message || `'${targetBayiAdi}' verileri başarıyla temizlendi.`);
+                    loadDashboard();
+                } else {
+                    showFloatingTaskCard('error', '❌ Silme Başarısız Oldu', data.error || 'Veriler temizlenemedi.');
+                }
+            } catch (err) {
+                if (err.name === 'AbortError') {
+                    // İptal edildi, cancelClearDealerHistory tarafından işlendi
+                    return;
+                }
+                isClearHistoryInProgress = false;
+                activeClearAbortController = null;
+                showFloatingTaskCard('error', '❌ Bağlantı Hatası', err.message || 'Sunucuyla bağlantı kesildi.');
+            }
+        }
+
+        // ==========================================
+        // BAYİ EKLEME & DÜZENLEME FORMU
+        // ==========================================
+        function openEditDealerModal(bayiKodu) {
+            const d = currentDealers.find(x => x.bayi_kodu === bayiKodu);
+            if (!d) return;
+            document.getElementById('edit-dealer-id').value = d.id || '';
+            document.getElementById('dealer-name').value = d.bayi_adi || '';
+            document.getElementById('dealer-city').value = d.il || '';
+            document.getElementById('dealer-town').value = d.ilce || '';
+            document.getElementById('dealer-gln').value = d.gln_no || '';
+            document.getElementById('dealer-bkst-user').value = d.bkst_kullanici || '';
+            document.getElementById('dealer-bkst-pass').value = '';
+            document.getElementById('dealer-bkst-pass').placeholder = (d.bkst_sifre ? '•••••••• (Değiştirmeyecekseniz boş bırakın)' : 'Bakanlık Şifresi');
+            document.getElementById('dealer-remote-url').value = d.remote_url || '';
+            document.getElementById('dealer-notes').value = d.notlar || '';
+            document.getElementById('dealer-test-mode').checked = !!d.test_modu;
+            document.getElementById('dealerModalTitle').innerHTML = '<i class="fa-solid fa-pen-to-square"></i> Bayi Bilgilerini Düzenle';
+            document.getElementById('modalDealer').style.display = 'flex';
+        }
+
+        function openAddDealerModal() {
+            document.getElementById('edit-dealer-id').value = '';
+            document.getElementById('dealer-name').value = '';
+            document.getElementById('dealer-city').value = '';
+            document.getElementById('dealer-town').value = '';
+            document.getElementById('dealer-gln').value = '';
+            document.getElementById('dealer-bkst-user').value = '';
+            document.getElementById('dealer-bkst-pass').value = '';
+            document.getElementById('dealer-bkst-pass').placeholder = 'Bakanlık Şifresi';
+            document.getElementById('dealer-remote-url').value = '';
+            document.getElementById('dealer-notes').value = '';
+            document.getElementById('dealer-test-mode').checked = false;
+            document.getElementById('dealerModalTitle').innerHTML = '<i class="fa-solid fa-store"></i> Yeni Bayi Ekle';
+            document.getElementById('modalDealer').style.display = 'flex';
+        }
+
+        async function saveDealerForm() {
+            const bayiAdi = document.getElementById('dealer-name').value.trim();
+            if (!bayiAdi) {
+                alert("Lütfen Bayi Adı giriniz!");
+                return;
+            }
+
+            const payload = {
+                id: document.getElementById('edit-dealer-id').value,
+                bayi_adi: bayiAdi,
+                il: document.getElementById('dealer-city').value.trim(),
+                ilce: document.getElementById('dealer-town').value.trim(),
+                gln_no: document.getElementById('dealer-gln').value.trim(),
+                bkst_kullanici: document.getElementById('dealer-bkst-user').value.trim(),
+                bkst_sifre: document.getElementById('dealer-bkst-pass').value.trim(),
+                remote_url: document.getElementById('dealer-remote-url').value.trim(),
+                notlar: document.getElementById('dealer-notes').value.trim(),
+                test_modu: document.getElementById('dealer-test-mode').checked ? 1 : 0
+            };
+
+            try {
+                const res = await fetch('/api/admin/bayi/ekle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (data.success) {
+                    closeDealerModal();
+                    showToast("✅ Bayi başarıyla kaydedildi!");
+                    loadDashboard();
+                } else {
+                    alert("Kayıt hatası: " + data.error);
+                }
+            } catch (err) {
+                alert("Bağlantı hatası: " + err.message);
+            }
+        }
+
+        function closeDealerModal() {
+            document.getElementById('modalDealer').style.display = 'none';
+        }
+
+        // ==========================================
+        // TOAST & LOGOUT
+        // ==========================================
+        function showToast(msg) {
+            const toast = document.getElementById('adminToast');
+            document.getElementById('toastMsg').textContent = msg;
+            toast.style.display = 'flex';
+            setTimeout(() => { toast.style.display = 'none'; }, 3500);
+        }
+
+        // ==========================================
+        // 🔔 SİSTEM BİLDİRİMLERİ & ÜYELİK TALEPLERİ
+        // ==========================================
+        let cachedNotifications = [];
+
+        async function loadNotifications() {
+            try {
+                const res = await fetch('/api/admin/bildirimler');
+                const data = await res.json();
+                if (data.success) {
+                    cachedNotifications = data.bildirimler || [];
+                    const unread = data.unread_count || 0;
+                    
+                    const badge = document.getElementById('badge-unread-count');
+                    const banner = document.getElementById('banner-membership-requests');
+                    const bannerCount = document.getElementById('banner-request-count');
+                    const bannerText = document.getElementById('banner-request-text');
+
+                    if (badge) {
+                        badge.textContent = unread;
+                        badge.style.display = unread > 0 ? 'inline-block' : 'none';
+                    }
+
+                    const pendingReqs = cachedNotifications.filter(n => n.tur === 'UYE_TALEBI' && !n.okundu);
+                    if (banner && pendingReqs.length > 0) {
+                        banner.style.display = 'block';
+                        if (bannerCount) bannerCount.textContent = pendingReqs.length;
+                        if (bannerText) {
+                            const latest = pendingReqs[0];
+                            bannerText.innerHTML = `<b>TC: ${esc(latest.tc_no)}</b> bilgisine sahip ve Bakanlıkta <b>'${esc(latest.sirket_adi || 'Bilinmeyen Bayi')}'</b> olarak kayıtlı bayi giriş yapmayı denedi ve üye talebi oluşturdu.`;
+                        }
+                    } else if (banner) {
+                        banner.style.display = 'none';
+                    }
+                }
+            } catch (_) {}
+        }
+
+        async function openNotificationsModal() {
+            await loadNotifications();
+            let modal = document.getElementById('modalNotifications');
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = 'modalNotifications';
+                modal.className = 'modal-backdrop';
+                modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:99999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);';
+                document.body.appendChild(modal);
+            }
+            modal.style.display = 'flex';
+
+            const notifHtml = cachedNotifications.length === 0 
+                ? `<div style="text-align:center; padding:30px; color:#94a3b8;">Henüz yeni bir bildirim veya üyelik talebi bulunmuyor.</div>`
+                : cachedNotifications.map(n => `
+                    <div style="background:${n.okundu ? 'rgba(255,255,255,0.03)' : 'rgba(245, 158, 11, 0.08)'}; border:1px solid ${n.okundu ? 'rgba(255,255,255,0.08)' : 'rgba(245, 158, 11, 0.3)'}; border-radius:12px; padding:14px; margin-bottom:10px;">
+                        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+                            <div>
+                                <div style="font-size:0.92rem; font-weight:700; color:${n.tur === 'UYE_TALEBI' ? '#fbbf24' : '#38bdf8'}; display:flex; align-items:center; gap:6px;">
+                                    <i class="fa-solid ${n.tur === 'UYE_TALEBI' ? 'fa-user-plus' : 'fa-bell'}"></i> ${esc(n.baslik)}
+                                    ${!n.okundu ? '<span style="background:#ef4444; color:#fff; font-size:0.65rem; padding:1px 6px; border-radius:6px;">Yeni</span>' : ''}
+                                </div>
+                                <div style="font-size:0.85rem; color:#f1f5f9; margin-top:4px; line-height:1.4;">${esc(n.mesaj)}</div>
+                                <div style="font-size:0.75rem; color:#94a3b8; margin-top:6px;">📅 ${esc(n.tarih)} ${n.gln ? `• GLN: <code>${esc(n.gln)}</code>` : ''}</div>
+                            </div>
+                            <div style="display:flex; gap:6px; flex-shrink:0;">
+                                ${n.tur === 'UYE_TALEBI' && n.bayi_kodu ? `
+                                    <button class="btn btn-success" style="padding:4px 10px; font-size:0.75rem;" onclick="approveMembershipRequest(${n.id}, '${n.bayi_kodu}', '${esc(n.sirket_adi || n.tc_no)}')">
+                                        <i class="fa-solid fa-check"></i> Yetkilendir (Aç)
+                                    </button>
+                                ` : ''}
+                                ${!n.okundu ? `
+                                    <button class="btn btn-outline" style="padding:4px 8px; font-size:0.75rem;" onclick="markNotificationRead(${n.id})">
+                                        Okundu
+                                    </button>
+                                ` : ''}
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+
+            modal.innerHTML = `
+                <div style="background:#0f172a; border:1px solid rgba(255,255,255,0.15); border-radius:16px; padding:22px; max-width:640px; width:92%; max-height:85vh; display:flex; flex-direction:column; color:#e2e8f0; box-shadow:0 25px 50px -12px rgba(0,0,0,0.7);">
+                    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:12px; margin-bottom:14px;">
+                        <h3 style="margin:0; font-size:1.15rem; color:#fbbf24; display:flex; align-items:center; gap:8px;">
+                            <i class="fa-solid fa-bell"></i> Bildirimler & Üyelik Talepleri
+                        </h3>
+                        <button onclick="closeNotificationsModal()" style="background:transparent; border:none; color:#94a3b8; font-size:1.4rem; cursor:pointer;">&times;</button>
+                    </div>
+                    <div style="overflow-y:auto; flex:1; padding-right:4px;">
+                        ${notifHtml}
+                    </div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid rgba(255,255,255,0.1); padding-top:12px; margin-top:14px;">
+                        <button class="btn btn-outline" style="font-size:0.8rem;" onclick="markAllNotificationsRead()">Tümünü Okundu İşaretle</button>
+                        <button class="btn btn-outline" style="font-size:0.8rem;" onclick="closeNotificationsModal()">Kapat</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function closeNotificationsModal() {
+            const m = document.getElementById('modalNotifications');
+            if (m) m.style.display = 'none';
+        }
+
+        async function approveMembershipRequest(nid, bayiKodu, bayiAdi) {
+            if (!confirm(`'${bayiAdi}' bayisinin üyelik talebini onaylamak ve sisteme giriş yetkisi vermek istiyor musunuz?`)) return;
+            try {
+                const res = await fetch(`/api/admin/bildirim/${nid}/onayla`, { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    showToast("🟢 Bayi başarıyla yetkilendirildi! Artık sisteme giriş yapabilir.");
+                    closeNotificationsModal();
+                    await loadDashboard();
+                } else {
+                    alert("Onaylama hatası: " + data.error);
+                }
+            } catch (err) {
+                alert("Bağlantı hatası: " + err.message);
+            }
+        }
+
+        async function markNotificationRead(nid) {
+            try {
+                await fetch(`/api/admin/bildirim/${nid}/okundu`, { method: 'POST' });
+                await openNotificationsModal();
+                await loadNotifications();
+            } catch (_) {}
+        }
+
+        async function markAllNotificationsRead() {
+            for (const n of cachedNotifications.filter(x => !x.okundu)) {
+                await fetch(`/api/admin/bildirim/${n.id}/okundu`, { method: 'POST' }).catch(() => {});
+            }
+            await openNotificationsModal();
+            await loadNotifications();
+        }
+
+        // ==========================================
+        // 🔐 ADMIN GÜVENLİK & ŞİFRE DEĞİŞTİRME
+        // ==========================================
+        function openAdminSecurityModal() {
+            document.getElementById('admin-sec-current-pass').value = '';
+            document.getElementById('admin-sec-new-pass').value = '';
+            document.getElementById('admin-sec-confirm-pass').value = '';
+            document.getElementById('modalAdminSecurity').style.display = 'flex';
+            document.getElementById('admin-sec-current-pass').focus();
+        }
+
+        function closeAdminSecurityModal() {
+            document.getElementById('modalAdminSecurity').style.display = 'none';
+        }
+
+        async function submitAdminSecurity() {
+            const currentPass = document.getElementById('admin-sec-current-pass').value.trim();
+            const newUser = document.getElementById('admin-sec-new-user').value.trim();
+            const newPass = document.getElementById('admin-sec-new-pass').value.trim();
+            const confirmPass = document.getElementById('admin-sec-confirm-pass').value.trim();
+
+            if (!currentPass) {
+                alert('Lütfen mevcut admin parolanızı giriniz.');
+                return;
+            }
+            if (!newUser) {
+                alert('Lütfen yeni yönetici kullanıcı adını giriniz.');
+                return;
+            }
+            if (!newPass || newPass.length < 6) {
+                alert('Yeni parolanız en az 6 karakter olmalıdır.');
+                return;
+            }
+            if (newPass !== confirmPass) {
+                alert('Girdiğiniz yeni parolalar birbiriyle eşleşmiyor!');
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/admin/change_credentials', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: JSON.stringify({
+                        current_password: currentPass,
+                        new_username: newUser,
+                        new_password: newPass,
+                        confirm_password: confirmPass
+                    })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    closeAdminSecurityModal();
+                    showToast('🔑 ' + data.message);
+                } else {
+                    alert('Hata: ' + data.error);
+                }
+            } catch (err) {
+                alert('Bağlantı hatası: ' + err.message);
+            }
+        }
+
+        // ==========================================
+        // 🛡️ BAYİ LİSANS YETKİSİ AÇ / KAPAT (ASKIYA AL)
+        // ==========================================
+        async function toggleDealerStatus(bayiKodu, yeniDurum, bayiAdi) {
+            const isClosing = (yeniDurum === 'ASKIYA_ALINDI' || yeniDurum === 'PASIF');
+            const promptMsg = isClosing 
+                ? `'${bayiAdi}' bayisinin uygulama erişim yetkisini sonlandırmak ve ekranını kilitlemek istediğinize emin misiniz?`
+                : `'${bayiAdi}' bayisine uygulamayı kullanması için tam lisans yetkisi vermek istiyor musunuz?`;
+
+            if (!confirm(promptMsg)) return;
+
+            try {
+                const res = await fetch(`/api/admin/bayi/${bayiKodu}/durum`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: JSON.stringify({ durum: yeniDurum })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(data.message);
+                    loadDashboard();
+                } else {
+                    alert('Hata: ' + data.error);
+                }
+            } catch (err) {
+                alert('Bağlantı hatası: ' + err.message);
+            }
+        }
+
+        function adminLogout() {
+            if (confirm("Yönetici oturumundan çıkmak istiyor musunuz?")) {
+                fetch('/api/system/logout', { method: 'POST' }).finally(() => {
+                    window.location.href = '/login';
+                });
+            }
+        }
+
+        function esc(str) {
+            if (!str) return '';
+            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+    </script>
+</body>
+</html>

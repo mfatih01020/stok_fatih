@@ -7,6 +7,12 @@
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
     <link rel="shortcut icon" href="/static/favicon.ico">
+    <link rel="apple-touch-icon" href="/static/favicon.png">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="QR Compare">
+    <meta name="theme-color" content="#0f172a">
     <!-- Google Fonts Outfit & Inter -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -15,6 +21,11 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/static/style.css">
     <style>
+        @media (max-width: 900px) {
+            .mobile-top-user-wrap {
+                display: flex !important;
+            }
+        }
         .filter-btn-group {
             display: flex;
             gap: 0.6rem;
@@ -131,10 +142,20 @@
         <!-- SOL DİKİNE SIDEBAR NAVİGASYON -->
         <aside class="sidebar">
             <div class="sidebar-brand">
-                <i class="fa-solid fa-qrcode logo-icon"></i>
-                <div>
-                    <h2>QR Compare</h2>
-                    <p>Akıllı Stok Sistemi</p>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <i class="fa-solid fa-qrcode logo-icon"></i>
+                    <div>
+                        <h2>QR Compare</h2>
+                        <p>Akıllı Stok Sistemi</p>
+                    </div>
+                </div>
+                <div class="mobile-top-user-wrap" style="display:none; align-items:center; gap:8px;">
+                    <span style="font-size:0.75rem; color:#cbd5e1; background:rgba(255,255,255,0.08); padding:5px 9px; border-radius:8px; font-weight:600; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                        <i class="fa-solid fa-user-circle" style="color:#38bdf8;"></i> {{ current_user_name }}
+                    </span>
+                    <a href="/logout" onclick="return confirm('Oturumu kapatmak istediğinize emin misiniz?')" style="background:rgba(239,68,68,0.2); border:1px solid rgba(239,68,68,0.4); color:#fca5a5; font-size:0.78rem; font-weight:700; padding:5px 11px; border-radius:8px; text-decoration:none; display:inline-flex; align-items:center; gap:5px;" title="Oturumu Kapat">
+                        <i class="fa-solid fa-power-off"></i> Çıkış
+                    </a>
                 </div>
             </div>
 
@@ -170,10 +191,6 @@
             </nav>
 
             <div class="sidebar-footer">
-                <div class="system-status-pill {{ 'offline' if not is_system_active else '' }}">
-                    <span class="status-indicator {{ system_status_cls | default('online') }}"></span>
-                    <span>{{ system_status_text | default('Sistem Aktif') }}</span>
-                </div>
                 <div class="user-profile-card">
                     <div class="user-profile-info">
                         <i class="fa-solid fa-user-circle user-avatar-icon"></i>
@@ -182,6 +199,15 @@
                     <button type="button" class="btn-logout-icon" onclick="logoutUser()" title="Oturumdan Çıkış Yap">
                         <i class="fa-solid fa-power-off"></i>
                     </button>
+                </div>
+                <!-- 🌐 TEK VE SABİT MERKEZ SUNUCU CANLI ROZETİ -->
+                <div id="global-network-badge" class="network-badge online sidebar-net-badge system-status-pill" onclick="handleNetworkBadgeClick()" title="Merkez Sunucu ve Canlı Senkronizasyon Durumu (Tıklayarak Şimdi Eşitleyin)">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span class="net-pulse-dot status-indicator online"></span>
+                        <i class="fa-solid fa-wifi net-icon"></i>
+                        <span id="network-status-text" class="net-text">Merkez Sunucu Canlı</span>
+                    </div>
+                    <span id="pending-sync-badge" class="pending-count-pill" style="display:none;">0</span>
                 </div>
                 <div class="version-pill" onclick="showVersionModal()" title="Sürüm Bilgisi">
                     <i class="fa-solid fa-code-branch" style="color: #38bdf8;"></i>
@@ -854,6 +880,37 @@
 
         loadDepoStoklari();
     </script>
+
+    <nav class="global-mobile-nav">
+        <a href="/cikis" class="global-nav-item">
+            <i class="fa-solid fa-box-open"></i>
+            <span>Çıkış Okut</span>
+        </a>
+        <a href="/cikis-listesi" class="global-nav-item">
+            <i class="fa-solid fa-list-check"></i>
+            <span>Çıkış Listesi</span>
+        </a>
+        <a href="/stok-esitleme" class="global-nav-item">
+            <i class="fa-solid fa-boxes-stacked"></i>
+            <span>Terek Eşitle</span>
+        </a>
+        <a href="/depo_stoklari" class="global-nav-item active">
+            <i class="fa-solid fa-warehouse"></i>
+            <span>Depo Stokları</span>
+        </a>
+        {% if not session.get('mobile_quick_login') %}
+        <a href="/kullaniciya-satis" class="global-nav-item">
+            <i class="fa-solid fa-user-tag"></i>
+            <span>Satış Yap</span>
+        </a>
+        {% endif %}
+        <a href="/logout" class="global-nav-item" onclick="return confirm('Oturumu kapatmak istediğinize emin misiniz?')" style="color: #f87171;">
+            <i class="fa-solid fa-power-off"></i>
+            <span>Çıkış</span>
+        </a>
+    </nav>
+
     <script src="/static/app.js?v=20261005_v3000"></script>
+    <script src="/static/device_tracker.js"></script>
 </body>
 </html>

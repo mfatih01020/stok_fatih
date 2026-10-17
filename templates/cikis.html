@@ -7,11 +7,18 @@
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
     <link rel="shortcut icon" href="/static/favicon.ico">
+    <link rel="apple-touch-icon" href="/static/favicon.png">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="QR Compare">
+    <meta name="theme-color" content="#0f172a">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/html5-qrcode.min.js"></script>
     <style>
         .cikis-layout {
             display: grid;
@@ -20,6 +27,21 @@
             margin-top: 1.5rem;
         }
         @media (max-width: 900px) { .cikis-layout { grid-template-columns: 1fr; } }
+        @media (min-width: 992px) {
+            #camera-control-group,
+            #camera-scanner-container {
+                display: none !important;
+            }
+        }
+        @media (max-width: 991px) {
+            .qr-staff-desktop-only,
+            #mobileQrModal {
+                display: none !important;
+            }
+            .mobile-top-user-wrap {
+                display: flex !important;
+            }
+        }
 
         .scan-panel {
             display: flex;
@@ -218,10 +240,20 @@
         <!-- SOL DİKİNE SIDEBAR NAVİGASYON -->
         <aside class="sidebar">
             <div class="sidebar-brand">
-                <i class="fa-solid fa-qrcode logo-icon"></i>
-                <div>
-                    <h2>QR Compare</h2>
-                    <p>Akıllı Stok Sistemi</p>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <i class="fa-solid fa-qrcode logo-icon"></i>
+                    <div>
+                        <h2>QR Compare</h2>
+                        <p>Akıllı Stok Sistemi</p>
+                    </div>
+                </div>
+                <div class="mobile-top-user-wrap" style="display:none; align-items:center; gap:8px;">
+                    <span style="font-size:0.75rem; color:#cbd5e1; background:rgba(255,255,255,0.08); padding:5px 9px; border-radius:8px; font-weight:600; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                        <i class="fa-solid fa-user-circle" style="color:#38bdf8;"></i> {{ current_user_name }}
+                    </span>
+                    <a href="/logout" onclick="return confirm('Oturumu kapatmak istediğinize emin misiniz?')" style="background:rgba(239,68,68,0.2); border:1px solid rgba(239,68,68,0.4); color:#fca5a5; font-size:0.78rem; font-weight:700; padding:5px 11px; border-radius:8px; text-decoration:none; display:inline-flex; align-items:center; gap:5px;" title="Oturumu Kapat">
+                        <i class="fa-solid fa-power-off"></i> Çıkış
+                    </a>
                 </div>
             </div>
 
@@ -250,17 +282,15 @@
                     <i class="fa-solid fa-chart-pie"></i>
                     <span>İstatistikler & Raporlar</span>
                 </a>
+                {% if not session.get('mobile_quick_login') %}
                 <a href="/kullaniciya-satis" class="sidebar-link">
                     <i class="fa-solid fa-user-tag"></i>
                     <span>Kullanıcıya Satış (Demo)</span>
                 </a>
+                {% endif %}
             </nav>
 
             <div class="sidebar-footer">
-                <div class="system-status-pill {{ 'offline' if not is_system_active else '' }}">
-                    <span class="status-indicator {{ system_status_cls | default('online') }}"></span>
-                    <span>{{ system_status_text | default('Sistem Aktif') }}</span>
-                </div>
                 <div class="user-profile-card">
                     <div class="user-profile-info">
                         <i class="fa-solid fa-user-circle user-avatar-icon"></i>
@@ -269,6 +299,15 @@
                     <button type="button" class="btn-logout-icon" onclick="logoutUser()" title="Oturumdan Çıkış Yap">
                         <i class="fa-solid fa-power-off"></i>
                     </button>
+                </div>
+                <!-- 🌐 TEK VE SABİT MERKEZ SUNUCU CANLI ROZETİ -->
+                <div id="global-network-badge" class="network-badge online sidebar-net-badge system-status-pill" onclick="handleNetworkBadgeClick()" title="Merkez Sunucu ve Canlı Senkronizasyon Durumu (Tıklayarak Şimdi Eşitleyin)">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span class="net-pulse-dot status-indicator online"></span>
+                        <i class="fa-solid fa-wifi net-icon"></i>
+                        <span id="network-status-text" class="net-text">Merkez Sunucu Canlı</span>
+                    </div>
+                    <span id="pending-sync-badge" class="pending-count-pill" style="display:none;">0</span>
                 </div>
                 <div class="version-pill" onclick="showVersionModal()" title="Sürüm Bilgisi">
                     <i class="fa-solid fa-code-branch" style="color: #38bdf8;"></i>
@@ -279,11 +318,51 @@
 
         <!-- SAĞ ANA İÇERİK ALANI -->
         <main class="main-content">
-            <header class="content-header">
+            {% if session.get('mobile_quick_login') %}
+            <div style="background: linear-gradient(90deg, #1e1b4b, #312e81); border: 1.5px solid #818cf8; border-radius: 12px; padding: 10px 18px; margin-bottom: 1.2rem; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 4px 20px rgba(99, 102, 241, 0.25);">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <i class="fa-solid fa-user-gear" style="color:#fbbf24; font-size:1.3rem;"></i>
+                    <div>
+                        <div style="font-weight:800; color:#fff; font-size:0.95rem;">👷 ÇALIŞAN SAYIM MODU: <span style="color:#38bdf8;">{{ session.get('dealer_name', 'Bayi') }}</span> Depo Sayımı</div>
+                        <div style="font-size:0.75rem; color:#cbd5e1;">Bu yetkiyle ürün okutabilir, çıkış listesine ekleyip silebilir ve terek sayımı yapabilirsiniz. Resmi satış bildirimi yetkisi kısıtlanmıştır.</div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            {% if session.get('is_admin') and session.get('active_bayi_adi') %}
+            <div style="background: linear-gradient(90deg, #1e1b4b, #312e81); border: 1.5px solid #6366f1; border-radius: 12px; padding: 10px 18px; margin-bottom: 1.2rem; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 4px 20px rgba(99, 102, 241, 0.25); flex-wrap:wrap; gap:10px;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <i class="fa-solid fa-crown" style="color:#fbbf24; font-size:1.3rem;"></i>
+                    <div>
+                        <div style="font-weight:800; color:#fff; font-size:0.95rem; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                            <span>👑 SÜPER YÖNETİCİ MODU: <span style="color:#38bdf8;">{{ session.get('active_bayi_adi', 'Bayi') }}</span> Adına İşlem Yapıyorsunuz</span>
+                            {% if session.get('dealer_gln') %}
+                            <span style="font-size:0.78rem; background:rgba(56, 189, 248, 0.2); color:#38bdf8; border:1px solid rgba(56, 189, 248, 0.4); padding:2px 8px; border-radius:6px; font-family:monospace; font-weight:700;">GLN: {{ session.get('dealer_gln') }}</span>
+                            {% endif %}
+                        </div>
+                        <div style="font-size:0.75rem; color:#cbd5e1; margin-top:2px;">Okutulan barkodlar ve yapılan tüm işlemler doğrudan bu bayinin resmi hesabına işlenmektedir.</div>
+                    </div>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <a href="/admin" class="btn btn-outline" style="font-size:0.82rem; background:rgba(239, 68, 68, 0.2); border-color:#ef4444; color:#fca5a5; font-weight:700; text-decoration:none; padding:6px 14px; border-radius:8px; display:inline-flex; align-items:center; gap:6px;">
+                        <i class="fa-solid fa-arrow-left"></i> 🔙 Admin Paneline Dön
+                    </a>
+                </div>
+            </div>
+            {% endif %}
+            <header class="content-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
                 <div>
                     <h1 class="page-title"><i class="fa-solid fa-box-open icon-purple"></i> Barkod Okut & Sistemden Çıkış</h1>
                     <p class="page-subtitle">Elden satılan ürünlerinizi hızlıca okutarak stoktan düşün.</p>
                 </div>
+                {% if not session.get('mobile_quick_login') %}
+                <div class="qr-staff-desktop-only" style="display:flex; align-items:center; gap:10px;">
+                    <button type="button" onclick="openMobileQrModal()" style="background: linear-gradient(135deg, #4f46e5, #7c3aed); color: #fff; padding: 10px 18px; border-radius: 12px; font-weight: 700; border: none; cursor: pointer; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 15px rgba(79, 70, 229, 0.4); font-size: 0.9rem; transition: transform 0.15s;">
+                        <i class="fa-solid fa-mobile-screen-button" style="font-size: 1.1rem;"></i>
+                        <span>📱 Personel QR Girişi</span>
+                    </button>
+                </div>
+                {% endif %}
             </header>
 
         <!-- REHBER BİLGİLENDİRME KUTUSU -->
@@ -313,10 +392,16 @@
                     Barkod okutarak ürünleri sisteme kaydedin
                 </p>
             </div>
-            <a href="/cikis-listesi" class="btn btn-primary" style="text-decoration:none; display:flex; align-items:center; gap:.5rem;">
-                <i class="fa-solid fa-list-check"></i>
-                Sistemden Çıkacaklar Listesi
-            </a>
+            <div style="display:flex; align-items:center; gap:8px;">
+                <input type="file" id="excel-cikis-file" accept=".xlsx,.xls,.csv" style="display:none;" onchange="handleExitExcelUpload(this)">
+                <button id="btn-excel-upload" onclick="document.getElementById('excel-cikis-file').click()" class="btn btn-outline" style="border-color:rgba(34, 197, 94, 0.4); color:#4ade80; display:flex; align-items:center; gap:.5rem; font-size:.88rem;" title="Excel dosyasındaki karekodları tek tek çıkış listesine aktar">
+                    <i class="fa-solid fa-file-excel"></i> Excel'den Veri Çek / Yükle
+                </button>
+                <a href="/cikis-listesi" class="btn btn-primary" style="text-decoration:none; display:flex; align-items:center; gap:.5rem;">
+                    <i class="fa-solid fa-list-check"></i>
+                    Sistemden Çıkacaklar Listesi
+                </a>
+            </div>
         </div>
 
         <!-- Main Layout -->
@@ -338,16 +423,54 @@
                     <i class="fa-solid fa-boxes-stacked" style="font-size:1.8rem; color:rgba(88,101,242,.4);"></i>
                 </div>
 
+                <!-- Kamera ile Seri Okutma Butonu & Alanı (YALNIZCA TELEFON VE TABLETTE GÖRÜNÜR) -->
+                <div id="camera-control-group" class="camera-control-group" style="display: none; gap: 8px; align-items: center;">
+                    <button type="button" id="btn-toggle-camera" class="camera-toggle-btn" onclick="toggleCameraScanner()">
+                        <i class="fa-solid fa-camera"></i>
+                        <span>📷 Kamerayı Aç (Seri Okut)</span>
+                    </button>
+                    <button type="button" id="btn-switch-camera" class="btn btn-outline" onclick="switchCamera()" style="display:none; padding: 0.75rem; border-radius: 10px;" title="Kamera Değiştir">
+                        <i class="fa-solid fa-arrows-rotate"></i>
+                    </button>
+                    <button type="button" id="btn-toggle-torch" class="btn btn-outline" onclick="toggleTorch()" style="display:none; padding: 0.75rem 0.9rem; border-radius: 10px; gap: 5px; align-items: center; font-weight: 700;" title="Flaş (Fener) Aç/Kapat">
+                        <i class="fa-solid fa-bolt"></i> <span style="font-size:0.8rem;">Flaş</span>
+                    </button>
+                </div>
+
+                <!-- Kamera Görüntüleyici Kapsayıcısı -->
+                <div id="camera-scanner-container" class="camera-scanner-wrapper" style="display: none;">
+                    <div class="camera-scanner-header">
+                        <h4><i class="fa-solid fa-video"></i> Aktif Kamera Okuyucu</h4>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span id="camera-status-text" style="font-size: 0.75rem; color: #34d399; font-weight: 600;">Hazır - Barkod Gösterin</span>
+                            <button type="button" id="btn-toggle-torch-inline" onclick="toggleTorch()" style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); color: #fbbf24; cursor: pointer; font-size: 0.78rem; font-weight: 700; padding: 4px 10px; border-radius: 8px; display: inline-flex; align-items: center; gap: 4px;" title="Flaş Aç/Kapat">
+                                <i class="fa-solid fa-bolt"></i> Flaş
+                            </button>
+                            <button type="button" onclick="stopCameraScanner()" style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 1rem;" title="Kamerayı Kapat">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="camera-scanner-body">
+                        <div id="camera-reader"></div>
+                        <div class="camera-laser-line"></div>
+                        <div class="camera-badge-counter">
+                            <i class="fa-solid fa-bolt"></i>
+                            <span>Seri Mod: Tak Tak Okut</span>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Input -->
                 <div class="scan-input-wrap">
                     <i class="fa-solid fa-barcode"></i>
                     <input type="text" id="barkod-input"
-                           placeholder="Barkodu okutun veya yazın ve Enter'a basın..."
+                           placeholder="Barkodu okutun veya kamerayı açın..."
                            autocomplete="off" autocorrect="off" spellcheck="false">
                 </div>
                 <p style="color:var(--text-muted); font-size:.8rem; text-align:center;">
                     <i class="fa-solid fa-circle-info"></i>
-                    Barkod okuyucu Enter gönderince otomatik kayıt yapılır
+                    El terminali, USB okuyucu veya telefon kamerası ile kesintisiz okutun
                 </p>
 
                 <!-- Result Card -->
@@ -412,11 +535,30 @@ const cntToplam    = document.getElementById('cnt-toplam');
 const recentTbody  = document.getElementById('recent-tbody');
 let   satirSayisi  = 0;
 
-// Sayfa yüklenince input'a odaklan ve mevcut kayıtları getir
+// Cihaz Kontrolü: YALNIZCA TELEFON VE TABLETTE KAMERA BUTONUNU GÖSTER (BİLGİSAYARDA GİZLE)
+function setupDeviceSpecificUI() {
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || 
+                     (window.innerWidth < 992 && (('ontouchstart' in window) || (navigator.maxTouchPoints > 0)));
+    const camGroup = document.getElementById('camera-control-group');
+    if (camGroup) {
+        if (isMobile) {
+            camGroup.style.display = 'flex';
+            barkodInput.placeholder = 'Barkodu okutun veya kamerayı açın...';
+        } else {
+            camGroup.style.display = 'none';
+            barkodInput.placeholder = 'Barkodu okutun veya yazın ve Enter\'a basın...';
+        }
+    }
+}
+
+// Sayfa yüklenince cihazı kontrol et, input'a odaklan ve mevcut kayıtları getir
 window.addEventListener('load', () => {
+    setupDeviceSpecificUI();
     barkodInput.focus();
     loadRecent();
+    startLiveRecentPolling();
 });
+window.addEventListener('resize', setupDeviceSpecificUI);
 
 // Enter'a basınca okut
 barkodInput.addEventListener('keydown', e => {
@@ -426,18 +568,33 @@ barkodInput.addEventListener('keydown', e => {
     }
 });
 
+// Excel'den sütun kopyalanıp yapıştırıldığında çoklu satır tespiti
+barkodInput.addEventListener('paste', async (e) => {
+    const pasteText = (e.clipboardData || window.clipboardData).getData('text');
+    if (!pasteText) return;
+    const lines = pasteText.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+    if (lines.length > 1) {
+        e.preventDefault();
+        if (typeof window.handleBatchQrPaste === 'function') {
+            await window.handleBatchQrPaste(lines);
+        }
+    }
+});
+
 async function okutBarkod(barkod) {
     barkodInput.disabled = true;
     barkodInput.classList.remove('input-success', 'input-error');
 
     try {
+        const devId = localStorage.getItem('bkst_device_id') || '';
+        const devName = localStorage.getItem('bkst_device_name') || '';
         const res = await (window.apiFetch || fetch)('/api/cikis/okut', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'X-Requested-With': 'XMLHttpRequest'
             },
-            body: JSON.stringify({barkod})
+            body: JSON.stringify({ barkod, cihaz_id: devId, cihaz_adi: devName })
         });
         const data = await res.json();
 
@@ -451,20 +608,38 @@ async function okutBarkod(barkod) {
                 cntToplam.textContent = parseInt(cntToplam.textContent || '0') + data.kayitlar.length;
             } else {
                 showResultCard(data.kayit, data.tekrar_uyari);
-                prependRow(data.kayit, data.tekrar_uyari);
-                cntToplam.textContent = parseInt(cntToplam.textContent || '0') + 1;
+                if (data.already_exists) {
+                    // Ürün zaten listede mevcut: mükerrer satır ekleme ve sayacı arttırma!
+                    playBeep(false);
+                } else {
+                    prependRow(data.kayit, data.tekrar_uyari);
+                    cntToplam.textContent = parseInt(cntToplam.textContent || '0') + 1;
+                    if (data.tekrar_uyari) {
+                        playBeep(false); // Tekrar okutuldu uyarısı sesi
+                    }
+                }
             }
         } else {
+            playBeep(false);
             barkodInput.classList.add('input-error');
+            if (res.status === 401 || res.status === 403 || data.status === 'revoked' || data.unauthorized) {
+                alert("⛔ " + (data.error || "Personel mobil oturumu bayi tarafından sonlandırılmıştır. Giriş ekranına yönlendiriliyorsunuz."));
+                window.location.replace(data.redirect || '/login?error=oturum_sonlandi');
+                return;
+            }
             showErrorCard(data.error);
         }
     } catch(err) {
+        playBeep(false);
         barkodInput.classList.add('input-error');
         showErrorCard('Sunucuya bağlanılamadı: ' + err.message);
     } finally {
         barkodInput.value = '';
         barkodInput.disabled = false;
-        barkodInput.focus();
+        // Kamera açıkken sanal klavyeyi açıp ekranı kapatmaması için sadece kamera kapalıyken odaklan
+        if (!isCameraActive) {
+            barkodInput.focus();
+        }
         setTimeout(() => barkodInput.classList.remove('input-success','input-error'), 1500);
     }
 }
@@ -531,6 +706,9 @@ function prependRow(k, tekrar) {
         <td style="font-size:.75rem; color:var(--text-muted);">${(k.tarih || '').split(' ')[1] || ''}</td>
         <td><button class="btn-geri-al" onclick="geriAl(${k.id}, this)"><i class="fa-solid fa-rotate-left"></i></button></td>`;
     recentTbody.prepend(tr);
+    while (recentTbody.children.length > 25) {
+        recentTbody.lastElementChild.remove();
+    }
 }
 
 async function geriAl(id, btn) {
@@ -550,30 +728,85 @@ async function geriAl(id, btn) {
     }
 }
 
-async function loadRecent() {
-    const res  = await (window.apiFetch || fetch)('/api/cikis/listesi', {
-        headers: { 'X-Requested-With': 'XMLHttpRequest' }
-    });
-    const data = await res.json();
-    if (!data.success) return;
-    cntToplam.textContent = data.toplam;
-    if (!data.kayitlar.length) return;
-    recentTbody.innerHTML = '';
-    satirSayisi = data.toplam;
-    let no = data.toplam;
-    data.kayitlar.forEach(k => {
-        const tr = document.createElement('tr');
-        if (k.tekrar_uyari) tr.classList.add('warn-row');
-        tr.dataset.id = k.id;
-        tr.innerHTML = `
-            <td><span class="badge-sira">${no--}</span></td>
-            <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(k.urun_adi)}">${esc(k.urun_adi||'—')}</td>
-            <td>${esc(k.koli_no||'—')}</td>
-            <td>${esc(k.seri_no||'—')}</td>
-            <td style="font-size:.75rem;color:var(--text-muted);">${(k.tarih||'').split(' ')[1]||''}</td>
-            <td><button class="btn-geri-al" onclick="geriAl(${k.id},this)"><i class="fa-solid fa-rotate-left"></i></button></td>`;
-        recentTbody.appendChild(tr);
-    });
+let _lastLoadedRecentHash = "";
+let _recentPollingTimer = null;
+
+async function loadRecent(isPolling = false) {
+    try {
+        const res  = await (window.apiFetch || fetch)('/api/cikis/listesi?limit=25', {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+        const data = await res.json();
+        if (!data.success) {
+            if (res.status === 401 || res.status === 403 || data.status === 'revoked' || data.unauthorized) {
+                window.location.replace('/login?error=oturum_sonlandi');
+            }
+            return;
+        }
+
+        const currentHash = `${data.toplam}_${(data.kayitlar && data.kayitlar[0] ? data.kayitlar[0].id : 0)}`;
+        if (isPolling && currentHash === _lastLoadedRecentHash) {
+            return;
+        }
+
+        const prevCount = parseInt(cntToplam.textContent) || 0;
+        const isNewItemAdded = isPolling && _lastLoadedRecentHash && (data.toplam > prevCount);
+        _lastLoadedRecentHash = currentHash;
+
+        cntToplam.textContent = data.toplam || 0;
+        satirSayisi = data.toplam || 0;
+        if (!data.kayitlar || !data.kayitlar.length) {
+            recentTbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:2rem;">Henüz kayıt yok</td></tr>';
+            return;
+        }
+        recentTbody.innerHTML = '';
+        let no = data.toplam;
+        data.kayitlar.forEach((k, idx) => {
+            const tr = document.createElement('tr');
+            if (k.tekrar_uyari) tr.classList.add('warn-row');
+            if (isNewItemAdded && idx === 0) {
+                tr.style.backgroundColor = 'rgba(34, 197, 94, 0.25)';
+                tr.style.transition = 'background-color 2s ease';
+                setTimeout(() => { tr.style.backgroundColor = ''; }, 2200);
+            }
+            tr.dataset.id = k.id;
+            tr.innerHTML = `
+                <td><span class="badge-sira">${no--}</span></td>
+                <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(k.urun_adi)}">${esc(k.urun_adi||'—')}</td>
+                <td>${esc(k.koli_no||'—')}</td>
+                <td>${esc(k.seri_no||'—')}</td>
+                <td style="font-size:.75rem;color:var(--text-muted);">${(k.tarih||'').split(' ')[1]||''}</td>
+                <td><button class="btn-geri-al" onclick="geriAl(${k.id},this)"><i class="fa-solid fa-rotate-left"></i></button></td>`;
+            recentTbody.appendChild(tr);
+        });
+
+        // 📱 Mobilden personel okuttuğunda son okutulan kartını canlı güncelle!
+        if (isNewItemAdded && data.kayitlar[0]) {
+            const latest = data.kayitlar[0];
+            const rCard = document.getElementById('result-card');
+            if (rCard) {
+                rCard.className = 'result-card success';
+                rCard.innerHTML = `
+                    <p class="result-card-title"><i class="fa-solid fa-mobile-screen-button" style="color:#38bdf8;"></i> Mobilden Yeni Okutuldu</p>
+                    <div style="flex:1; display:flex; flex-direction:column; justify-content:center; gap:4px;">
+                        <div style="font-weight:700; color:#fff; font-size:1.05rem;">${esc(latest.urun_adi || 'Ürün')}</div>
+                        <div style="font-size:0.8rem; color:#cbd5e1;">
+                            <span>Koli: ${esc(latest.koli_no || '—')}</span> | <span>Seri: ${esc(latest.seri_no || '—')}</span> | <span>Saat: ${(latest.tarih || '').split(' ')[1] || ''}</span>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+    } catch (_) {}
+}
+
+function startLiveRecentPolling() {
+    if (_recentPollingTimer) clearInterval(_recentPollingTimer);
+    _recentPollingTimer = setInterval(() => {
+        if (!document.hidden) {
+            loadRecent(true);
+        }
+    }, 2000);
 }
 
 document.getElementById('btn-temizle-son').addEventListener('click', async () => {
@@ -596,6 +829,394 @@ document.getElementById('btn-temizle-son').addEventListener('click', async () =>
 function esc(str) {
     if (window.esc) return window.esc(str);
     return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+/* ══════════════════════════════════════════════════════════════
+   KAMERA İLE SERİ OKUTMA (CONTINUOUS SCANNER) MOTORU
+   ══════════════════════════════════════════════════════════════ */
+let html5QrScanner = null;
+let isCameraActive = false;
+let availableCameras = [];
+let currentCameraIndex = 0;
+let lastScannedBarcode = null;
+let lastScannedTime = 0;
+let isScanProcessing = false;
+let isTorchOn = false;
+
+// Audio Context ile anında ve gecikmesiz bip sesi (Harici mp3 gerektirmez)
+let audioCtx = null;
+function playBeep(success = true) {
+    try {
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+        }
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        if (success) {
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(1400, audioCtx.currentTime); // Parlak hızlı bip
+            gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.12);
+            osc.start(audioCtx.currentTime);
+            osc.stop(audioCtx.currentTime + 0.12);
+        } else {
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(320, audioCtx.currentTime); // Hata uyarısı
+            gain.gain.setValueAtTime(0.35, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.25);
+            osc.start(audioCtx.currentTime);
+            osc.stop(audioCtx.currentTime + 0.25);
+        }
+    } catch (_) {}
+}
+
+let isCameraTransitioning = false;
+
+async function toggleCameraScanner() {
+    if (isCameraTransitioning) return;
+    isCameraTransitioning = true;
+    try {
+        if (isCameraActive) {
+            await stopCameraScanner();
+        } else {
+            await startCameraScanner();
+        }
+    } finally {
+        isCameraTransitioning = false;
+    }
+}
+
+let scanUnlockTimer = null;
+
+async function applyContinuousFocus() {
+    try {
+        const video = document.querySelector('#camera-reader video');
+        if (video && video.srcObject) {
+            const track = video.srcObject.getVideoTracks()[0];
+            if (track && track.getCapabilities) {
+                const caps = track.getCapabilities();
+                if (caps.focusMode && caps.focusMode.includes('continuous')) {
+                    await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+                }
+            }
+        }
+    } catch (_) {}
+}
+
+async function startCameraScanner() {
+    if (typeof Html5Qrcode === 'undefined') {
+        alert('Kamera okuyucu kütüphanesi yüklenemedi. Lütfen sayfayı yenileyin.');
+        return;
+    }
+
+    // 1. Güvenli Bağlantı (HTTPS) Kontrolü: Mobil tarayıcılar HTTP üzerinden kamerayı engeller
+    if (!window.isSecureContext && location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+        alert('⚠️ Kamera Güvenlik Uyarısı:\n\nTarayıcı güvenlik kuralları gereği mobil cihazlarda kamera SADECE güvenli HTTPS bağlantısında çalışır.\n\nLütfen Cloudflare Tünel adresiniz (https://...) üzerinden bağlanınız.');
+        return;
+    }
+
+    const container = document.getElementById('camera-scanner-container');
+    const toggleBtn = document.getElementById('btn-toggle-camera');
+    const switchBtn = document.getElementById('btn-switch-camera');
+    const statusText = document.getElementById('camera-status-text');
+
+    container.style.display = 'block';
+    toggleBtn.classList.add('active');
+    toggleBtn.innerHTML = '<i class="fa-solid fa-stop"></i> <span>Kamerayı Durdur</span>';
+    statusText.textContent = 'Kamera başlatılıyor...';
+
+    // Geçiş hatası ("Cannot transition to a new state") almamak için eski örneği temizle ve sıfırla
+    if (html5QrScanner) {
+        try {
+            if (html5QrScanner.isScanning) {
+                await html5QrScanner.stop();
+            }
+        } catch (_) {}
+        try {
+            await html5QrScanner.clear();
+        } catch (_) {}
+        html5QrScanner = null;
+    }
+
+    html5QrScanner = new Html5Qrcode("camera-reader");
+
+    const qrConfig = {
+        fps: 20,
+        qrbox: function(viewfinderWidth, viewfinderHeight) {
+            const edge = Math.min(viewfinderWidth, viewfinderHeight) * 0.80;
+            return { width: Math.floor(edge), height: Math.floor(edge) };
+        },
+        aspectRatio: 1.0
+    };
+
+    try {
+        // Doğrudan arka kamera (facingMode: "environment")
+        await html5QrScanner.start(
+            { facingMode: "environment" },
+            qrConfig,
+            onCameraBarcodeScanned,
+            () => {}
+        );
+
+        isCameraActive = true;
+        statusText.textContent = 'Canlı - Barkod Gösterin (Seri Okuma Aktif)';
+        setTimeout(applyContinuousFocus, 400);
+        checkTorchCapability();
+
+        // Diğer kameraları arka planda sorgula (Kamera Değiştir butonu için)
+        Html5Qrcode.getCameras().then(cams => {
+            if (cams && cams.length > 0) {
+                availableCameras = cams;
+                if (cams.length > 1) {
+                    switchBtn.style.display = 'inline-flex';
+                }
+            }
+        }).catch(() => {});
+
+    } catch (err) {
+        console.warn('Arka kamera facingMode ile açılamadı, cihaz listesi taranıyor:', err);
+        try {
+            // İlk deneme başarısız olduysa taze bir Html5Qrcode örneği ile dene
+            try { await html5QrScanner.stop(); } catch (_) {}
+            try { await html5QrScanner.clear(); } catch (_) {}
+            html5QrScanner = new Html5Qrcode("camera-reader");
+
+            const cams = await Html5Qrcode.getCameras();
+            if (cams && cams.length > 0) {
+                availableCameras = cams;
+                const backCam = cams.find(c => /back|arka|rear|environment/i.test(c.label)) || cams[0];
+                currentCameraIndex = cams.indexOf(backCam);
+                if (cams.length > 1) switchBtn.style.display = 'inline-flex';
+
+                await html5QrScanner.start(
+                    backCam.id,
+                    qrConfig,
+                    onCameraBarcodeScanned,
+                    () => {}
+                );
+
+                isCameraActive = true;
+                statusText.textContent = 'Canlı - Barkod Gösterin (Seri Okuma Aktif)';
+                setTimeout(applyContinuousFocus, 400);
+                checkTorchCapability();
+                return;
+            }
+        } catch (err2) {
+            console.error('Kamera alternatifi de açılamadı:', err2);
+        }
+
+        statusText.textContent = 'Kamera erişim hatası!';
+        let userMsg = 'Kamera açılamadı.';
+        const errStr = String(err.name || err.message || err);
+        if (errStr.includes('NotAllowedError') || errStr.includes('PermissionDenied') || errStr.includes('Permission')) {
+            userMsg = '⚠️ KAMERA İZNİ GEREKLİ!\n\nTarayıcınızın kamera izni kapalı.\nÇözüm: Adres çubuğundaki kilit (🔒) simgesine dokunun ve Kamera İznini "İzin Ver" olarak değiştirip sayfayı yenileyin.';
+        } else if (errStr.includes('NotFoundError') || errStr.includes('DevicesNotFoundError')) {
+            userMsg = '⚠️ Cihazınızda kullanılabilir kamera algılanamadı.';
+        } else if (errStr.includes('NotReadableError') || errStr.includes('TrackStartError')) {
+            userMsg = '⚠️ Kamera başka bir sekme veya uygulama tarafından kullanılıyor.';
+        } else {
+            userMsg = '⚠️ Kamera başlatılamadı: ' + (err.message || err);
+        }
+        alert(userMsg);
+        await stopCameraScanner();
+    }
+}
+
+async function stopCameraScanner() {
+    const container = document.getElementById('camera-scanner-container');
+    const toggleBtn = document.getElementById('btn-toggle-camera');
+    const switchBtn = document.getElementById('btn-switch-camera');
+    const torchBtn  = document.getElementById('btn-toggle-torch');
+
+    if (html5QrScanner) {
+        try {
+            if (html5QrScanner.isScanning) {
+                await html5QrScanner.stop();
+            }
+        } catch (_) {}
+        try {
+            await html5QrScanner.clear();
+        } catch (_) {}
+        html5QrScanner = null;
+    }
+    isCameraActive = false;
+    container.style.display = 'none';
+    toggleBtn.classList.remove('active');
+    toggleBtn.innerHTML = '<i class="fa-solid fa-camera"></i> <span>📷 Kamerayı Aç (Seri Okut)</span>';
+    switchBtn.style.display = 'none';
+    torchBtn.style.display = 'none';
+    isTorchOn = false;
+}
+
+async function switchCamera() {
+    if (!availableCameras || availableCameras.length < 2 || !isCameraActive) return;
+    currentCameraIndex = (currentCameraIndex + 1) % availableCameras.length;
+    const nextCamId = availableCameras[currentCameraIndex].id;
+
+    const statusText = document.getElementById('camera-status-text');
+    statusText.textContent = 'Kamera değiştiriliyor...';
+
+    try {
+        await html5QrScanner.stop();
+        const qrConfig = {
+            fps: 15,
+            qrbox: function(viewfinderWidth, viewfinderHeight) {
+                const edge = Math.min(viewfinderWidth, viewfinderHeight) * 0.80;
+                return { width: Math.floor(edge), height: Math.floor(edge) };
+            },
+            aspectRatio: 1.0
+        };
+        await html5QrScanner.start(nextCamId, qrConfig, onCameraBarcodeScanned, () => {});
+        statusText.textContent = 'Canlı - Kamera: ' + (currentCameraIndex + 1);
+        checkTorchCapability();
+    } catch (err) {
+        console.error('Kamera değiştirilemedi:', err);
+    }
+}
+
+function checkTorchCapability() {
+    const torchBtn = document.getElementById('btn-toggle-torch');
+    if (torchBtn) {
+        torchBtn.style.display = 'inline-flex';
+        torchBtn.style.color = 'inherit';
+        torchBtn.style.borderColor = '';
+        torchBtn.style.background = '';
+    }
+    const inlineBtn = document.getElementById('btn-toggle-torch-inline');
+    if (inlineBtn) {
+        inlineBtn.style.background = 'rgba(245, 158, 11, 0.15)';
+        inlineBtn.style.color = '#fbbf24';
+    }
+}
+
+async function toggleTorch() {
+    const torchBtn = document.getElementById('btn-toggle-torch');
+    const inlineBtn = document.getElementById('btn-toggle-torch-inline');
+    const nextState = !isTorchOn;
+    let applied = false;
+
+    try {
+        const videoEl = document.querySelector('#camera-reader video');
+        const track = (videoEl && videoEl.srcObject && videoEl.srcObject.getVideoTracks)
+            ? videoEl.srcObject.getVideoTracks()[0]
+            : null;
+
+        if (track && track.applyConstraints) {
+            try {
+                await track.applyConstraints({ advanced: [{ torch: nextState }] });
+                applied = true;
+            } catch (_) {
+                try {
+                    await track.applyConstraints({ torch: nextState });
+                    applied = true;
+                } catch (_2) {}
+            }
+        }
+
+        if (!applied && html5QrScanner && typeof html5QrScanner.applyVideoConstraints === 'function') {
+            try {
+                await html5QrScanner.applyVideoConstraints({ advanced: [{ torch: nextState }] });
+                applied = true;
+            } catch (_) {}
+        }
+    } catch (_) {}
+
+    if (applied) {
+        isTorchOn = nextState;
+        if (torchBtn) {
+            torchBtn.style.color = isTorchOn ? '#f59e0b' : 'inherit';
+            torchBtn.style.borderColor = isTorchOn ? '#f59e0b' : '';
+            torchBtn.style.background = isTorchOn ? 'rgba(245, 158, 11, 0.18)' : '';
+        }
+        if (inlineBtn) {
+            inlineBtn.style.background = isTorchOn ? '#f59e0b' : 'rgba(245, 158, 11, 0.15)';
+            inlineBtn.style.color = isTorchOn ? '#0f172a' : '#fbbf24';
+        }
+    } else {
+        const statusText = document.getElementById('camera-status-text');
+        if (statusText) {
+            statusText.textContent = '⚠️ Bu kamera lensi flaşı desteklemiyor (Arka kamerayı seçin)';
+        }
+    }
+}
+
+/* 
+ * Kesintisiz, Durmadan ("Tak Tak") Barkod Okutma Geri Çağrısı 
+ * - Kamera ASLA kapanmaz (kullanıcı kapat butonuna basmadıkça sürekli çalışır)
+ * - Aynı kod için 2 saniye bekleme süresi (2 sn aralıkla tekrar okutulabilir)
+ * - Farklı kod için 0 ms (anında kesintisiz okuma)
+ */
+function onCameraBarcodeScanned(decodedText) {
+    if (!decodedText) return;
+
+    const cleanText = decodedText.trim();
+    if (!cleanText) return;
+
+    const now = Date.now();
+
+    // 1) Aynı barkod ise: 2 saniye (2000 ms) aralıkla tekrar okutulsun
+    // 2) Farklı barkod ise: Anında (gecikmesiz) okutulsun
+    if (cleanText === lastScannedBarcode && (now - lastScannedTime) < 2000) {
+        return;
+    }
+
+    if (isScanProcessing) {
+        return;
+    }
+
+    lastScannedBarcode = cleanText;
+    lastScannedTime = now;
+    isScanProcessing = true;
+
+    // Güvenlik: 1.5 saniye sonra okuma kilidini mutlaka serbest bırak (kamera asla takılmaz)
+    if (scanUnlockTimer) clearTimeout(scanUnlockTimer);
+    scanUnlockTimer = setTimeout(() => {
+        isScanProcessing = false;
+    }, 1500);
+
+    // Başarılı yakalama geri bildirimi (Ses + UI Lazer Parlama)
+    playBeep(true);
+
+    const laser = document.querySelector('.camera-laser-line');
+    if (laser) {
+        laser.style.background = 'linear-gradient(90deg, transparent, #10b981, #34d399, #10b981, transparent)';
+        laser.style.boxShadow = '0 0 16px #10b981';
+        setTimeout(() => {
+            laser.style.background = 'linear-gradient(90deg, transparent, #ef4444, #f87171, #ef4444, transparent)';
+            laser.style.boxShadow = '0 0 12px #ef4444';
+        }, 400);
+    }
+
+    // Kamera durum yazısını anlık yeşil yakalanan bilgi ile güncelle
+    const statusText = document.getElementById('camera-status-text');
+    if (statusText) {
+        statusText.innerHTML = '<span style="color:#10b981; font-weight:800;">⚡ Okundu: ' + esc(cleanText.substring(0, 16)) + '...</span>';
+        setTimeout(() => {
+            if (isCameraActive && statusText) {
+                statusText.textContent = 'Canlı - Barkod Gösterin (Kamera Açık)';
+            }
+        }, 1200);
+    }
+
+    // Input alanına da yazarak kaydet
+    barkodInput.value = cleanText;
+
+    // KAMERA ASLA KAPANMAZ: İstek arkada yapılır, kamera canlı akmaya devam eder
+    okutBarkod(cleanText)
+        .catch(err => {
+            console.error("Kamera okutma hatası:", err);
+        })
+        .finally(() => {
+            setTimeout(() => {
+                isScanProcessing = false;
+            }, 200);
+        });
 }
     </script>
 
@@ -623,6 +1244,293 @@ function esc(str) {
         </div>
     </div>
 
+    <!-- 📱 MOBİL SAYIM & 1 GÜNLÜK HIZLI QR GİRİŞ MODALI -->
+    <div id="mobileQrModal" class="modal" style="display:none; position:fixed; z-index:99999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.75); backdrop-filter:blur(6px); align-items:center; justify-content:center;">
+        <div style="background:#1e293b; color:#fff; max-width:480px; width:92%; margin:4% auto; padding:26px; border-radius:20px; border:1px solid rgba(255,255,255,0.15); box-shadow:0 25px 50px -12px rgba(0,0,0,0.7); position:relative; text-align:center;">
+            <span onclick="closeMobileQrModal()" style="position:absolute; right:20px; top:18px; cursor:pointer; font-size:1.6rem; color:#94a3b8; transition:color 0.2s;" title="Kapat">&times;</span>
+            
+            <div style="display:inline-flex; align-items:center; justify-content:center; width:54px; height:54px; border-radius:14px; background:rgba(99, 102, 241, 0.2); border:1px solid rgba(99, 102, 241, 0.4); color:#818cf8; font-size:1.6rem; margin-bottom:12px;">
+                <i class="fa-solid fa-qrcode"></i>
+            </div>
+
+            <h3 style="font-family:var(--font-outfit); font-size:1.3rem; font-weight:800; color:#fff; margin-bottom:4px;">
+                Mobil Depo Sayımı - Hızlı QR Giriş
+            </h3>
+            <p style="font-size:0.85rem; color:#94a3b8; margin-bottom:14px;">
+                Personelinize şifre vermeden, telefon kamerasından bu karekodu okutarak sayım oturumu açtırabilirsiniz.
+            </p>
+
+            <!-- Oturum Süresi Seçici -->
+            <div style="margin-bottom:12px; text-align:left;">
+                <label style="font-size:0.75rem; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:0.04em; display:block; margin-bottom:6px;">
+                    <i class="fa-solid fa-clock"></i> Oturum Süresi:
+                </label>
+                <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap:6px;">
+                    <button type="button" class="qr-duration-btn" data-hours="1" onclick="selectQrDuration(1)">1 Saat</button>
+                    <button type="button" class="qr-duration-btn" data-hours="3" onclick="selectQrDuration(3)">3 Saat</button>
+                    <button type="button" class="qr-duration-btn active" data-hours="12" onclick="selectQrDuration(12)">12 Saat</button>
+                    <button type="button" class="qr-duration-btn" data-hours="24" onclick="selectQrDuration(24)">24 Saat</button>
+                    <button type="button" class="qr-duration-btn" data-hours="168" onclick="selectQrDuration(168)">1 Hafta</button>
+                </div>
+            </div>
+
+            <!-- QR Code Container -->
+            <div style="background:#fff; padding:16px; border-radius:16px; display:inline-block; margin-bottom:14px; box-shadow:0 10px 25px rgba(0,0,0,0.3); min-width:210px; min-height:210px;" id="qr-display-box">
+                <div id="qr-loading-spinner" style="padding:70px 0; color:#64748b;">
+                    <i class="fa-solid fa-spinner fa-spin" style="font-size:2.2rem; color:#4f46e5;"></i>
+                    <div style="font-size:0.82rem; margin-top:10px; font-weight:600;">Karekod Üretiliyor...</div>
+                </div>
+                <img id="qr-image" src="" alt="Giriş Karekodu" style="display:none; width:200px; height:200px; margin:0 auto;">
+            </div>
+
+            <div style="background:rgba(15, 23, 42, 0.8); border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:12px; font-size:0.82rem; margin-bottom:12px; text-align:left;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                    <span style="color:#94a3b8;">Yetkili Bayi:</span>
+                    <span id="qr-dealer-name" style="font-weight:700; color:#38bdf8;">Yükleniyor...</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                    <span style="color:#94a3b8;">Geçerlilik:</span>
+                    <span id="qr-duration-label" style="font-weight:700; color:#34d399;">12 Saat (Şifresiz Giriş)</span>
+                </div>
+                <div style="display:flex; justify-content:space-between;">
+                    <span style="color:#94a3b8;">Bitiş Zamanı:</span>
+                    <span id="qr-expires-at" style="font-family:monospace; color:#cbd5e1;">-</span>
+                </div>
+            </div>
+
+            <!-- 🛑 Personel Oturumu Sonlandırma / Yetki İptali -->
+            <div style="background:rgba(239, 68, 68, 0.1); border:1px solid rgba(239, 68, 68, 0.35); border-radius:12px; padding:12px; margin-bottom:14px; text-align:left;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
+                    <span style="font-weight:700; font-size:0.83rem; color:#fca5a5; display:flex; align-items:center; gap:6px;">
+                        <i class="fa-solid fa-user-xmark"></i> Personel Oturumu Yönetimi
+                    </span>
+                    <span style="font-size:0.72rem; background:rgba(239,68,68,0.25); color:#fca5a5; padding:2px 7px; border-radius:6px; font-weight:700;">
+                        Anında İptal
+                    </span>
+                </div>
+                <p style="font-size:0.77rem; color:#94a3b8; margin:0 0 9px; line-height:1.4;">
+                    Personelin işi bittiğinde bu butona basarak personelin telefonundaki oturumunu derhal sonlandırabilir ve bağlantısını kapatabilirsiniz.
+                </p>
+                <button type="button" onclick="terminateAllStaffSessions()" class="btn" style="width:100%; background:linear-gradient(135deg, #ef4444, #b91c1c); color:#fff; border:none; padding:8px 12px; border-radius:9px; font-size:0.8rem; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:0 3px 10px rgba(239,68,68,0.35);">
+                    <i class="fa-solid fa-power-off"></i> 🛑 Personel Oturumunu Kapat (Bağlantıyı Kes)
+                </button>
+            </div>
+
+            <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">
+                <button type="button" class="btn btn-outline" onclick="copyMobileLoginLink()" style="font-size:0.82rem; padding:8px 14px; border-radius:10px; display:inline-flex; align-items:center; gap:6px;">
+                    <i class="fa-solid fa-copy"></i> Bağlantıyı Kopyala
+                </button>
+                <button type="button" class="btn btn-outline" onclick="loadMobileQrToken(selectedDurationHours)" style="font-size:0.82rem; padding:8px 14px; border-radius:10px; display:inline-flex; align-items:center; gap:6px;">
+                    <i class="fa-solid fa-arrows-rotate"></i> Yeni Karekod Oluştur
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        .qr-duration-btn {
+            background: rgba(30, 41, 59, 0.85);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: #94a3b8;
+            padding: 7px 4px;
+            border-radius: 8px;
+            font-size: 0.74rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-align: center;
+        }
+        .qr-duration-btn:hover {
+            background: rgba(51, 65, 85, 0.95);
+            color: #fff;
+            border-color: rgba(99, 102, 241, 0.6);
+        }
+        .qr-duration-btn.active {
+            background: linear-gradient(135deg, #6366f1, #4f46e5);
+            color: #ffffff;
+            border-color: #818cf8;
+            box-shadow: 0 2px 8px rgba(99, 102, 241, 0.4);
+            font-weight: 700;
+        }
+    </style>
+
+    <script>
+        let currentMobileLoginUrl = "";
+        let currentLocalLoginUrl = "";
+        let currentLanLoginUrl = "";
+        let selectedDurationHours = 12;
+
+        function selectQrDuration(hours) {
+            selectedDurationHours = hours;
+            document.querySelectorAll('.qr-duration-btn').forEach(btn => {
+                if (parseInt(btn.getAttribute('data-hours')) === hours) {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+            });
+            loadMobileQrToken(selectedDurationHours);
+        }
+
+        function openMobileQrModal() {
+            const modal = document.getElementById('mobileQrModal');
+            if (modal) modal.style.display = 'flex';
+            loadMobileQrToken(selectedDurationHours);
+        }
+
+        function closeMobileQrModal() {
+            const modal = document.getElementById('mobileQrModal');
+            if (modal) modal.style.display = 'none';
+        }
+
+        let currentActiveToken = '';
+        let currentActiveBayiKodu = '';
+
+        async function loadMobileQrToken(hours) {
+            const h = hours || selectedDurationHours || 12;
+            const spinner = document.getElementById('qr-loading-spinner');
+            const img = document.getElementById('qr-image');
+            const dealerEl = document.getElementById('qr-dealer-name');
+            const expEl = document.getElementById('qr-expires-at');
+            const durEl = document.getElementById('qr-duration-label');
+
+            if (spinner) {
+                spinner.style.display = 'block';
+                spinner.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="font-size:2.2rem; color:#4f46e5;"></i><div style="font-size:0.82rem; margin-top:10px; font-weight:600; color:#cbd5e1;">Yeni Karekod Üretiliyor...</div>';
+            }
+            if (img) img.style.display = 'none';
+
+            try {
+                const res = await fetch('/api/auth/generate_mobile_qr?duration_hours=' + h, { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    currentActiveToken = data.token || '';
+                    currentActiveBayiKodu = data.bayi_kodu || '';
+                    currentMobileLoginUrl = data.cloud_login_url || data.login_url;
+                    currentLocalLoginUrl = data.local_login_url || (window.location.origin + '/mobile_login?token=' + data.token);
+                    currentLanLoginUrl = data.lan_login_url || currentLocalLoginUrl;
+
+                    if (img && data.qr_data_url) {
+                        img.src = data.qr_data_url;
+                        img.style.display = 'block';
+                    }
+                    if (spinner) spinner.style.display = 'none';
+                    if (dealerEl) dealerEl.textContent = data.dealer_name || data.bayi_kodu;
+                    if (expEl) expEl.textContent = data.expires_at || '-';
+                    if (durEl) {
+                        const durText = h === 168 ? '1 Hafta (168 Saat)' : (h + ' Saat');
+                        durEl.textContent = durText + ' (Şifresiz Giriş)';
+                    }
+                } else {
+                    if (spinner) spinner.innerHTML = '<div style="color:#ef4444; padding:35px 0;"><i class="fa-solid fa-triangle-exclamation" style="font-size:2rem;"></i><br>' + (data.error || 'Karekod üretilemedi') + '</div>';
+                }
+            } catch (err) {
+                console.error("QR üretme hatası:", err);
+                if (spinner) spinner.innerHTML = '<div style="color:#ef4444; padding:50px 0;"><i class="fa-solid fa-triangle-exclamation" style="font-size:2rem;"></i><br>Sunucuya bağlanılamadı</div>';
+            }
+        }
+
+        function copyMobileLoginLink() {
+            // Canlı internet tünel adresini kesin olarak önceliklendir (Dışarıdan ve personelin telefonundan şifresiz giriş için)
+            let urlToCopy = currentMobileLoginUrl;
+            if (!urlToCopy || urlToCopy.includes('localhost') || urlToCopy.includes('127.0.0.1')) {
+                urlToCopy = currentLanLoginUrl || currentLocalLoginUrl;
+            }
+            if (!urlToCopy) {
+                alert("Henüz karekod bağlantısı üretilmedi.");
+                return;
+            }
+            navigator.clipboard.writeText(urlToCopy)
+                .then(() => alert("✅ Canlı Mobil Giriş Bağlantısı Kopyalandı!\n\n" + urlToCopy + "\n\nPersonelinize bu bağlantıyı gönderdiğinizde (WhatsApp vb.), herhangi bir şifre girmesine gerek kalmadan doğrudan mobil sayım ekranına giriş yapacaktır."))
+                .catch(() => prompt("Canlı Giriş Bağlantısı:", urlToCopy));
+        }
+
+        async function terminateAllStaffSessions() {
+            if (!confirm("Personelin telefonundaki açık oturumu sonlandırmak ve merkez sunucu bağlantısını derhal kesmek istiyor musunuz?")) return;
+            const btn = document.querySelector('button[onclick="terminateAllStaffSessions()"]');
+            const originalBtnHtml = btn ? btn.innerHTML : '';
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Bağlantı Kesiliyor & Sunucu Doğrulanıyor...';
+            }
+            try {
+                const res = await fetch('/api/dealer/terminate_staff_sessions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify({
+                        token: currentActiveToken || '',
+                        bayi_kodu: currentActiveBayiKodu || ''
+                    })
+                });
+                const rawText = await res.text();
+                let data = null;
+                try {
+                    data = JSON.parse(rawText);
+                } catch (parseErr) {
+                    if (res.status === 401 || res.status === 403 || rawText.includes('/login')) {
+                        alert("Oturum süreniz dolmuş olabilir. Lütfen sayfayı yenileyip tekrar deneyin.");
+                        return;
+                    }
+                    throw new Error("Sunucu geçersiz yanıt döndürdü (HTTP " + res.status + ").");
+                }
+                if (data && data.success) {
+                    alert("✓ " + (data.message || "Personel oturumu başarıyla kapatıldı. Şimdi yeni bir karekod hazırlanıyor."));
+                    currentActiveToken = '';
+                    currentMobileLoginUrl = '';
+                    currentLocalLoginUrl = '';
+                    currentLanLoginUrl = '';
+
+                    // 🔄 Personel oturumu kapatıldıktan sonra bekletmeden anında yepyeni bir QR kod oluştur ve göster!
+                    await loadMobileQrToken(selectedDurationHours);
+                } else {
+                    alert("❌ Bağlantı Kesilemedi: " + ((data && data.error) || "İşlem başarısız"));
+                }
+            } catch (err) {
+                alert("❌ Sunucuya ulaşılamadı: " + (err.message || err));
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = originalBtnHtml;
+                }
+            }
+        }
+
+        window.addEventListener('click', (e) => {
+            const modal = document.getElementById('mobileQrModal');
+            if (e.target === modal) closeMobileQrModal();
+        });
+    </script>
+
+    <nav class="global-mobile-nav">
+        <a href="/cikis" class="global-nav-item active">
+            <i class="fa-solid fa-box-open"></i>
+            <span>Çıkış Okut</span>
+        </a>
+        <a href="/cikis-listesi" class="global-nav-item">
+            <i class="fa-solid fa-list-check"></i>
+            <span>Çıkış Listesi</span>
+        </a>
+        <a href="/stok-esitleme" class="global-nav-item">
+            <i class="fa-solid fa-boxes-stacked"></i>
+            <span>Terek Eşitle</span>
+        </a>
+        <a href="/depo_stoklari" class="global-nav-item">
+            <i class="fa-solid fa-warehouse"></i>
+            <span>Depo Stokları</span>
+        </a>
+        {% if not session.get('mobile_quick_login') %}
+        <a href="/kullaniciya-satis" class="global-nav-item">
+            <i class="fa-solid fa-user-tag"></i>
+            <span>Satış Yap</span>
+        </a>
+        {% endif %}
+        <a href="/logout" class="global-nav-item" onclick="return confirm('Oturumu kapatmak istediğinize emin misiniz?')" style="color: #f87171;">
+            <i class="fa-solid fa-power-off"></i>
+            <span>Çıkış</span>
+        </a>
+    </nav>
+
     <script src="/static/app.js?v=20261005_v3000"></script>
+    <script src="/static/device_tracker.js"></script>
 </body>
 </html>

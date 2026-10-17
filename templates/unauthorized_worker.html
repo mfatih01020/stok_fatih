@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Yetki Sınırı - QR Compare</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: #090d16;
+            color: #f1f5f9;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .card {
+            background: rgba(22, 28, 45, 0.85);
+            border: 1px solid rgba(245, 158, 11, 0.35);
+            border-radius: 20px;
+            padding: 32px 24px;
+            max-width: 440px;
+            width: 100%;
+            text-align: center;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+            backdrop-filter: blur(12px);
+        }
+        .icon-wrap {
+            width: 76px;
+            height: 76px;
+            border-radius: 50%;
+            background: rgba(245, 158, 11, 0.15);
+            border: 2px solid rgba(245, 158, 11, 0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 18px;
+            color: #f59e0b;
+            font-size: 2rem;
+        }
+        h2 {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.45rem;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 12px;
+        }
+        p {
+            font-size: 0.92rem;
+            color: #94a3b8;
+            line-height: 1.6;
+            margin-bottom: 22px;
+        }
+        .allowed-box {
+            background: rgba(15, 23, 42, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 14px;
+            font-size: 0.85rem;
+            color: #cbd5e1;
+            margin-bottom: 24px;
+            text-align: left;
+        }
+        .allowed-box strong { color: #38bdf8; display: block; margin-bottom: 6px; }
+        .allowed-box ul { list-style: none; padding-left: 0; }
+        .allowed-box li { margin-bottom: 5px; display: flex; align-items: center; gap: 8px; }
+        .btn-action {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            width: 100%;
+            padding: 13px;
+            background: linear-gradient(135deg, #4f46e5, #6366f1);
+            color: #fff;
+            border: none;
+            border-radius: 12px;
+            font-weight: 600;
+            font-size: 0.95rem;
+            text-decoration: none;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="icon-wrap">
+            <i class="fa-solid fa-lock"></i>
+        </div>
+        <h2>{{ title or 'Satış Yetkisi Bulunmamaktadır' }}</h2>
+        <p>{{ message or 'Çalışan karekod oturumu ile resmi Bakanlık satışı yapılamaz. Bu işlem yalnızca bayi sahibi tarafından yapılabilir.' }}</p>
+        
+        <div class="allowed-box">
+            <strong>Yapabileceğiniz İşlemler:</strong>
+            <ul>
+                <li><i class="fa-solid fa-check" style="color:#10b981;"></i> Depo Sayımı Yapmak (Karekod Okutma)</li>
+                <li><i class="fa-solid fa-check" style="color:#10b981;"></i> Çıkış Listesine Ürün Ekleyip Çıkartmak</li>
+                <li><i class="fa-solid fa-check" style="color:#10b981;"></i> Stok Eşitleme / Terek Sayımı Yapmak</li>
+            </ul>
+        </div>
+
+        <a href="/cikis-listesi" class="btn-action">
+            <i class="fa-solid fa-arrow-left"></i> Çıkış Listesine Geri Dön
+        </a>
+    </div>
+</body>
+</html>

@@ -1,0 +1,1347 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#4f46e5">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Mobil Depo Sayım - QR Compare</title>
+    
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="/static/html5-qrcode.min.js"></script>
+
+    <style>
+        :root {
+            --bg-dark: #090d16;
+            --card-bg: rgba(22, 28, 45, 0.85);
+            --card-border: rgba(255, 255, 255, 0.08);
+            --primary: #4f46e5;
+            --primary-glow: rgba(79, 70, 229, 0.35);
+            --success: #10b981;
+            --success-glow: rgba(16, 185, 129, 0.3);
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+        body {
+            background: var(--bg-dark);
+            color: var(--text-main);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            min-height: 100vh;
+            padding-bottom: 80px;
+            overflow-x: hidden;
+        }
+
+        /* 📱 Mobil Üst Başlık */
+        .mobile-header {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: rgba(9, 13, 22, 0.95);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--card-border);
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .header-brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .brand-icon {
+            width: 38px;
+            height: 38px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, var(--primary), #818cf8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            color: #fff;
+            box-shadow: 0 4px 12px var(--primary-glow);
+        }
+
+        .brand-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.05rem;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+
+        .brand-sub {
+            font-size: 0.72rem;
+            color: #38bdf8;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .btn-header-action {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid var(--card-border);
+            color: var(--text-muted);
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.95rem;
+            cursor: pointer;
+            text-decoration: none;
+        }
+
+        /* 🛡️ 1 Günlük Yetki & Bayi Bilgi Şeridi */
+        .dealer-banner {
+            background: linear-gradient(90deg, #1e1b4b, #172554);
+            border-bottom: 1px solid rgba(99, 102, 241, 0.3);
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.8rem;
+        }
+
+        .dealer-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .dealer-name-badge {
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .countdown-badge {
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: #34d399;
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* 📊 Sayaç Kartları */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            padding: 14px 16px 8px;
+        }
+
+        .stat-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 14px;
+            padding: 12px 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .stat-num {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.6rem;
+            font-weight: 800;
+            color: #fff;
+            line-height: 1;
+        }
+
+        .stat-label {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .stat-icon {
+            font-size: 1.6rem;
+            color: rgba(99, 102, 241, 0.3);
+        }
+
+        /* 📸 Kamera Alanı */
+        .camera-section {
+            padding: 8px 16px;
+        }
+
+        .btn-camera-main {
+            width: 100%;
+            padding: 14px 20px;
+            background: linear-gradient(135deg, #4f46e5, #6366f1);
+            color: #fff;
+            border: none;
+            border-radius: 14px;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 700;
+            font-size: 1.05rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            cursor: pointer;
+            box-shadow: 0 4px 20px var(--primary-glow);
+            transition: transform 0.15s, opacity 0.15s;
+        }
+        .btn-camera-main:active { transform: scale(0.98); }
+
+        .camera-container {
+            margin-top: 12px;
+            background: #000;
+            border-radius: 16px;
+            overflow: hidden;
+            border: 2px solid var(--primary);
+            position: relative;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+        }
+
+        .camera-view-header {
+            background: rgba(15, 23, 42, 0.9);
+            padding: 8px 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.8rem;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        #camera-reader {
+            width: 100%;
+            min-height: 250px;
+            background: #000;
+        }
+
+        .camera-laser {
+            position: absolute;
+            left: 5%;
+            right: 5%;
+            top: 50%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, #ef4444, #f87171, #ef4444, transparent);
+            box-shadow: 0 0 10px #ef4444;
+            animation: laserScan 2s infinite ease-in-out;
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        @keyframes laserScan {
+            0%, 100% { top: 20%; }
+            50% { top: 80%; }
+        }
+
+        /* 🎯 Odaklanma Animasyonlu Hedef Kutusu */
+        #camera-focus-ring {
+            display: none;
+            position: absolute;
+            width: 54px;
+            height: 54px;
+            border: 2px solid #facc15;
+            border-radius: 10px;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 95;
+            box-shadow: 0 0 14px rgba(250, 204, 21, 0.85);
+            animation: focusRingPulse 0.5s ease-out;
+        }
+
+        @keyframes focusRingPulse {
+            0% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
+            50% { transform: translate(-50%, -50%) scale(1.0); opacity: 1; }
+            100% { transform: translate(-50%, -50%) scale(0.92); opacity: 0.85; }
+        }
+
+        .camera-controls-row {
+            display: flex;
+            gap: 6px;
+            padding: 8px 10px;
+            background: rgba(15, 23, 42, 0.95);
+            border-top: 1px solid rgba(255,255,255,0.1);
+            justify-content: space-between;
+        }
+
+        .btn-cam-tool {
+            flex: 1;
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid var(--card-border);
+            color: #fff;
+            border-radius: 8px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            cursor: pointer;
+        }
+
+        /* ⌨️ Barkod / Karekod Giriş Alanı */
+        .input-section {
+            padding: 8px 16px;
+        }
+
+        .input-wrapper {
+            position: relative;
+        }
+
+        .input-wrapper i {
+            position: absolute;
+            left: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--primary);
+            font-size: 1.1rem;
+        }
+
+        #barkod-input {
+            width: 100%;
+            padding: 13px 46px 13px 44px;
+            background: var(--card-bg);
+            border: 1.5px solid var(--card-border);
+            border-radius: 12px;
+            color: #fff;
+            font-size: 0.95rem;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        #barkod-input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px var(--primary-glow);
+        }
+
+        .btn-input-send {
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: var(--primary);
+            color: #fff;
+            border: none;
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+
+        /* 🎯 Son Okutulan Kartı (Sonuç) */
+        .result-section {
+            padding: 8px 16px;
+        }
+
+        .result-card {
+            background: var(--card-bg);
+            border: 1.5px solid var(--card-border);
+            border-radius: 14px;
+            padding: 14px;
+            min-height: 90px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            transition: border-color 0.3s, background 0.3s;
+        }
+        .result-card.success {
+            border-color: var(--success);
+            background: rgba(16, 185, 129, 0.08);
+        }
+        .result-card.warning {
+            border-color: var(--warning);
+            background: rgba(245, 158, 11, 0.08);
+        }
+        .result-card.danger {
+            border-color: var(--danger);
+            background: rgba(239, 68, 68, 0.08);
+        }
+
+        .result-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+
+        .result-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.15rem;
+            font-weight: 700;
+            color: #fff;
+            line-height: 1.3;
+        }
+
+        .result-meta {
+            display: flex;
+            gap: 10px;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin-top: 6px;
+            flex-wrap: wrap;
+        }
+
+        .result-meta span {
+            background: rgba(255,255,255,0.06);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+
+        /* 📋 Son Okutulanlar Listesi */
+        .recent-section {
+            padding: 10px 16px;
+        }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+
+        .section-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .recent-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .recent-item {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 10px 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            animation: fadeIn 0.3s;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .item-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            max-width: 80%;
+        }
+
+        .item-name {
+            font-weight: 600;
+            font-size: 0.88rem;
+            color: #fff;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .item-sub {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn-item-delete {
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #f87171;
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+
+        /* 📱 Alt Sabit Navigasyon */
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(9, 13, 22, 0.96);
+            backdrop-filter: blur(12px);
+            border-top: 1px solid var(--card-border);
+            display: flex;
+            padding: 8px 12px;
+            gap: 8px;
+            z-index: 100;
+        }
+
+        .nav-btn {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            padding: 6px;
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 0.72rem;
+            font-weight: 600;
+            border-radius: 8px;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+        }
+        .nav-btn.active {
+            color: #38bdf8;
+            background: rgba(56, 189, 248, 0.1);
+        }
+        .nav-btn i { font-size: 1.15rem; }
+
+        /* PWA Banner */
+        .pwa-banner {
+            background: linear-gradient(90deg, #312e81, #1e1b4b);
+            border: 1px solid #6366f1;
+            border-radius: 12px;
+            padding: 10px 14px;
+            margin: 8px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.8rem;
+        }
+        .pwa-btn {
+            background: #4f46e5;
+            color: #fff;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.75rem;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ÜST BAŞLIK -->
+    <header class="mobile-header">
+        <div class="header-brand">
+            <div class="brand-icon">
+                <i class="fa-solid fa-qrcode"></i>
+            </div>
+            <div>
+                <div class="brand-title">QR Compare</div>
+                <div class="brand-sub"><i class="fa-solid fa-circle" style="font-size: 6px; color: #10b981;"></i> Mobil Depo Sayım</div>
+            </div>
+        </div>
+        <div style="display: flex; gap: 8px;">
+            <a href="/download/QR_Compare.apk" class="btn-header-action" title="Android APK İndir" download>
+                <i class="fa-brands fa-android" style="color: #4ade80;"></i>
+            </a>
+            <button type="button" class="btn-header-action" onclick="logoutMobile()" title="Oturumu Kapat">
+                <i class="fa-solid fa-power-off" style="color: #f87171;"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- 1 GÜNLÜK YETKİ & BAYİ BANNERI -->
+    <div class="dealer-banner">
+        <div class="dealer-info">
+            <i class="fa-solid fa-store" style="color: #a5b4fc;"></i>
+            <span class="dealer-name-badge">{{ dealer_name }}</span>
+        </div>
+        <div class="countdown-badge" id="countdown-badge" title="24 Saatlik Giriş Kalan Süresi">
+            <i class="fa-regular fa-clock"></i>
+            <span id="countdown-text">24:00</span>
+        </div>
+    </div>
+
+    <!-- PWA / APK YÜKLE BANNERI -->
+    <div class="pwa-banner" id="pwa-install-banner" style="display: none;">
+        <div>
+            <strong>📱 Uygulama Olarak Yükle</strong>
+            <div style="color: #cbd5e1; font-size: 0.72rem;">Ana ekranınıza ekleyip tam ekran kullanın.</div>
+        </div>
+        <button type="button" class="pwa-btn" id="btn-pwa-install">
+            <i class="fa-solid fa-download"></i> Yükle
+        </button>
+    </div>
+
+    <!-- SAYAÇLAR -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div>
+                <div class="stat-num" id="cnt-toplam">0</div>
+                <div class="stat-label">Okutulan Toplam</div>
+            </div>
+            <i class="fa-solid fa-boxes-stacked stat-icon"></i>
+        </div>
+        <div class="stat-card">
+            <div>
+                <div class="stat-num" id="cnt-cesit">0</div>
+                <div class="stat-label">Ürün Çeşidi</div>
+            </div>
+            <i class="fa-solid fa-tags stat-icon"></i>
+        </div>
+    </div>
+
+    <!-- 📸 KAMERA TARAYICI -->
+    <div class="camera-section">
+        <button type="button" class="btn-camera-main" id="btn-toggle-camera" onclick="toggleCamera()" style="margin-bottom:10px;">
+            <i class="fa-solid fa-camera"></i>
+            <span id="btn-camera-text">📷 Kamerayı Aç (Seri Okut)</span>
+        </button>
+
+        <div class="camera-container" id="camera-container" style="display: none; position: relative;">
+            <div class="camera-view-header">
+                <span id="cam-status" style="color: #34d399; font-weight: 600;">⚡ Canlı Kamera: Barkod Gösterin</span>
+                <button type="button" onclick="stopCamera()" style="background:none; border:none; color:#ef4444; font-size:1.1rem; cursor:pointer;" title="Kamerayı Kapat">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            
+            <div style="position: relative; overflow: hidden; border-radius: 12px; background: #000; cursor: crosshair;" id="camera-box-wrap" onclick="handleCameraTouchFocus(event)">
+                <!-- 🎯 ANLIK ODAKLANMA HALKASI -->
+                <div id="camera-focus-ring"></div>
+
+                <!-- 🎯 ANLIK OKUMA HUD BİLDİRİMİ (KAMERA ÜZERİNDE BÜYÜK VE NET) -->
+                <div id="scan-hud-overlay" style="display:none; position:absolute; top:12px; left:12px; right:12px; z-index:99; padding:14px 16px; border-radius:14px; text-align:center; font-weight:700; box-shadow:0 12px 30px rgba(0,0,0,0.7); transition:all 0.2s ease; backdrop-filter:blur(8px); pointer-events:none;">
+                    <div id="hud-icon" style="font-size:1.6rem; margin-bottom:4px;"></div>
+                    <div id="hud-title" style="font-size:1.1rem; font-weight:800; line-height:1.3;"></div>
+                    <div id="hud-sub" style="font-size:0.82rem; opacity:0.95; margin-top:4px;"></div>
+                </div>
+
+                <div id="camera-reader" style="width:100%; min-height:260px;"></div>
+                <div class="camera-laser"></div>
+
+                <!-- 📦 KAMERA İÇİ CANLI ADET SAYACI -->
+                <div id="cam-counter-badge" style="position:absolute; bottom:10px; left:50%; transform:translateX(-50%); z-index:90; background:rgba(15,23,42,0.9); border:1px solid rgba(255,255,255,0.25); backdrop-filter:blur(8px); color:#fff; padding:6px 18px; border-radius:20px; font-size:0.85rem; font-weight:700; display:flex; align-items:center; gap:8px; box-shadow:0 4px 15px rgba(0,0,0,0.6); pointer-events:none;">
+                    <i class="fa-solid fa-boxes-stacked" style="color:#38bdf8;"></i>
+                    <span>Okutulan: <b id="cam-live-count" style="color:#34d399; font-size:1.05rem;">0</b> Adet</span>
+                </div>
+            </div>
+
+            <div class="camera-controls-row">
+                <button type="button" class="btn-cam-tool" onclick="switchCamera()" title="Kamera Değiştir (Ön / Arka)">
+                    <i class="fa-solid fa-arrows-rotate"></i> Kamera
+                </button>
+                <button type="button" class="btn-cam-tool" id="btn-focus" onclick="triggerManualFocus(null)" title="Kamerayı Yeniden Netle / Odakla">
+                    <i class="fa-solid fa-crosshairs" style="color: #facc15;"></i> Netle
+                </button>
+                <button type="button" class="btn-cam-tool" id="btn-zoom" onclick="toggleZoom()" title="Kamerayı Büyüt (1x / 1.5x / 2x)">
+                    <i class="fa-solid fa-magnifying-glass-plus" style="color: #38bdf8;"></i> <span id="zoom-text">1.5x</span>
+                </button>
+                <button type="button" class="btn-cam-tool" id="btn-torch" onclick="toggleTorch()" title="Feneri Aç / Kapat">
+                    <i class="fa-solid fa-bolt"></i> Flaş
+                </button>
+            </div>
+            <div style="font-size:0.73rem; color:#94a3b8; text-align:center; padding:6px 12px 2px; background:rgba(15,23,42,0.6); border-radius:0 0 12px 12px; margin-top:-2px;">
+                💡 <b>Netlik İpucu:</b> Ekrana dokunarak netleyebilir veya <b>1.5x / 2x</b> büyütme ile telefonu <b>15-20 cm</b> mesafeden tutabilirsiniz.
+            </div>
+        </div>
+    </div>
+
+    <!-- ⌨️ BARKOD / KAREKOD MANUEL VEYA EL TERMİNALİ GİRİŞİ -->
+    <div class="input-section">
+        <div class="input-wrapper">
+            <i class="fa-solid fa-barcode"></i>
+            <input type="text" id="barkod-input" placeholder="Barkod / Seri No okutun veya yazın..." autocomplete="off" autocorrect="off" spellcheck="false">
+            <button type="button" class="btn-input-send" onclick="handleManualSubmit()">
+                <i class="fa-solid fa-arrow-right"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- 🎯 SON OKUTULAN ÜRÜN KARTI -->
+    <div class="result-section">
+        <div class="result-card" id="result-card">
+            <div class="result-header">
+                <span>Son Okutulan Ürün</span>
+                <span id="result-time">-</span>
+            </div>
+            <div class="result-title" id="result-title">Henüz ürün okutulmadı</div>
+            <div class="result-meta" id="result-meta" style="display: none;">
+                <span>GTIN: <b id="res-gtin">-</b></span>
+                <span>SN: <b id="res-sn">-</b></span>
+                <span>Parti: <b id="res-parti">-</b></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 📋 SON OKUTULANLAR LİSTESİ -->
+    <div class="recent-section">
+        <div class="section-header">
+            <div class="section-title">
+                <i class="fa-solid fa-clock-rotate-left" style="color: #38bdf8;"></i>
+                Son Okutulanlar
+            </div>
+            <a href="/cikis-listesi" style="font-size: 0.78rem; color: #a5b4fc; text-decoration: none;">
+                Tümünü Gör <i class="fa-solid fa-chevron-right"></i>
+            </a>
+        </div>
+        <div class="recent-list" id="recent-list">
+            <div style="text-align: center; color: var(--text-muted); font-size: 0.85rem; padding: 20px;">
+                Henüz kayıt yok. Barkod okutmaya başlayın.
+            </div>
+        </div>
+    </div>
+
+    <!-- 📱 ALT SABİT NAVİGASYON -->
+    <nav class="bottom-nav">
+        <a href="/mobil_sayim" class="nav-btn active">
+            <i class="fa-solid fa-qrcode"></i>
+            <span>Sayım Yap</span>
+        </a>
+        <a href="/cikis" class="nav-btn">
+            <i class="fa-solid fa-box-open"></i>
+            <span>Çıkış Okut</span>
+        </a>
+        <a href="/cikis-listesi" class="nav-btn">
+            <i class="fa-solid fa-list-check"></i>
+            <span>Çıkış Listesi</span>
+        </a>
+        <a href="/stok-esitleme" class="nav-btn">
+            <i class="fa-solid fa-boxes-stacked"></i>
+            <span>Terek Eşitleme</span>
+        </a>
+        <a href="/depo_stoklari" class="nav-btn">
+            <i class="fa-solid fa-warehouse"></i>
+            <span>Depo Stokları</span>
+        </a>
+    </nav>
+
+    <script>
+        const ACTIVE_BAYI_KODU = "{{ bayi_kodu }}";
+        const TOKEN_EXPIRES_AT = "{{ token_exp }}";
+
+        let html5QrScanner = null;
+        let isCameraRunning = false;
+        let currentFacingMode = "environment";
+        let isTorchOn = false;
+        let isProcessingScan = false;
+        let lastBarcode = "";
+        let lastBarcodeTime = 0;
+
+        // 🔊 Ses Efektleri (Web Audio API - harici dosya gerektirmez)
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playBeep(success = true) {
+            try {
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                
+                if (success) {
+                    osc.frequency.setValueAtTime(1200, audioCtx.currentTime);
+                    osc.frequency.setValueAtTime(1800, audioCtx.currentTime + 0.08);
+                    gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.18);
+                    osc.start();
+                    osc.stop(audioCtx.currentTime + 0.18);
+                } else {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+                    osc.frequency.setValueAtTime(200, audioCtx.currentTime + 0.15);
+                    gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.35);
+                    osc.start();
+                    osc.stop(audioCtx.currentTime + 0.35);
+                }
+            } catch (_) {}
+            
+            // Titreşim desteği
+            if (navigator.vibrate) {
+                navigator.vibrate(success ? [70] : [150, 100, 150]);
+            }
+        }
+
+        // ⏳ 24 Saatlik Geri Sayım Göstergesi
+        function initCountdown() {
+            if (!TOKEN_EXPIRES_AT) return;
+            const expTime = new Date(TOKEN_EXPIRES_AT.replace(/-/g, '/')).getTime();
+            const badge = document.getElementById('countdown-text');
+
+            function updateTime() {
+                const now = Date.now();
+                const diff = expTime - now;
+                if (diff <= 0) {
+                    badge.textContent = "Süre Doldu!";
+                    alert("24 saatlik oturum süreniz doldu. Lütfen bilgisayardan yeni bir karekod okutunuz.");
+                    window.location.reload();
+                    return;
+                }
+                const hrs = Math.floor(diff / (1000 * 60 * 60));
+                const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                badge.textContent = hrs + "s " + mins + "d kaldı";
+            }
+            updateTime();
+            setInterval(updateTime, 60000);
+        }
+
+        // 📸 Kamera Tarayıcı Fonksiyonları
+        async function toggleCamera() {
+            if (isCameraRunning) {
+                stopCamera();
+            } else {
+                startCamera();
+            }
+        }
+
+        function getActiveVideoTrack() {
+            try {
+                const video = document.querySelector('#camera-reader video');
+                if (video && video.srcObject) {
+                    return video.srcObject.getVideoTracks()[0];
+                }
+            } catch (_) {}
+            return null;
+        }
+
+        async function applyCameraFocusAndZoom() {
+            const track = getActiveVideoTrack();
+            if (!track || !track.getCapabilities) return;
+            try {
+                const caps = track.getCapabilities();
+                const adv = {};
+                if (caps.focusMode && caps.focusMode.includes('continuous')) {
+                    adv.focusMode = 'continuous';
+                }
+                if (Object.keys(adv).length > 0) {
+                    await track.applyConstraints({ advanced: [adv] });
+                }
+            } catch (e) {
+                console.log('Focus constraint notice:', e);
+            }
+        }
+
+        let isFocusing = false;
+        async function triggerManualFocus(e) {
+            const ring = document.getElementById('camera-focus-ring');
+            if (ring) {
+                ring.style.animation = 'none';
+                ring.offsetHeight; // reflow trigger
+                ring.style.animation = 'focusRingPulse 0.5s ease-out';
+                ring.style.display = 'block';
+                if (!e) {
+                    ring.style.left = '50%';
+                    ring.style.top = '50%';
+                }
+                setTimeout(() => { if (ring) ring.style.display = 'none'; }, 650);
+            }
+
+            const track = getActiveVideoTrack();
+            if (!track || isFocusing) return;
+            isFocusing = true;
+            try {
+                const caps = track.getCapabilities ? track.getCapabilities() : {};
+                if (caps.focusMode && caps.focusMode.includes('continuous')) {
+                    await track.applyConstraints({ advanced: [{ focusMode: 'single-shot' }] }).catch(() => {});
+                    setTimeout(async () => {
+                        await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {});
+                        isFocusing = false;
+                    }, 250);
+                } else {
+                    isFocusing = false;
+                }
+            } catch (_) {
+                isFocusing = false;
+            }
+        }
+
+        function handleCameraTouchFocus(e) {
+            const box = document.getElementById('camera-box-wrap');
+            const ring = document.getElementById('camera-focus-ring');
+            if (box && ring && e) {
+                const rect = box.getBoundingClientRect();
+                const clientX = e.clientX || (e.touches && e.touches[0]?.clientX);
+                const clientY = e.clientY || (e.touches && e.touches[0]?.clientY);
+                if (clientX && clientY) {
+                    ring.style.left = (clientX - rect.left) + 'px';
+                    ring.style.top = (clientY - rect.top) + 'px';
+                }
+            }
+            triggerManualFocus(e);
+        }
+
+        let currentZoom = 1;
+        async function toggleZoom() {
+            const zoomSteps = [1, 1.5, 2];
+            const nextIdx = (zoomSteps.indexOf(currentZoom) + 1) % zoomSteps.length;
+            currentZoom = zoomSteps[nextIdx];
+            
+            const zoomText = document.getElementById('zoom-text');
+            if (zoomText) zoomText.textContent = (currentZoom === 1 ? '1x Zoom' : currentZoom + 'x');
+
+            const track = getActiveVideoTrack();
+            let hardwareZoomSuccess = false;
+            if (track && track.getCapabilities) {
+                const caps = track.getCapabilities();
+                if (caps.zoom) {
+                    const zMin = caps.zoom.min || 1;
+                    const zMax = caps.zoom.max || 1;
+                    const targetZ = Math.min(Math.max(currentZoom, zMin), zMax);
+                    try {
+                        await track.applyConstraints({ advanced: [{ zoom: targetZ }] });
+                        hardwareZoomSuccess = true;
+                    } catch (_) {}
+                }
+            }
+
+            const video = document.querySelector('#camera-reader video');
+            if (video) {
+                if (hardwareZoomSuccess) {
+                    video.style.transform = 'none';
+                } else {
+                    video.style.transform = `scale(${currentZoom})`;
+                    video.style.transformOrigin = 'center center';
+                    video.style.transition = 'transform 0.2s cubic-bezier(0.4, 0, 0.2, 1)';
+                }
+            }
+        }
+
+        async function startCamera() {
+            const container = document.getElementById('camera-container');
+            const btnText = document.getElementById('btn-camera-text');
+            container.style.display = 'block';
+            btnText.textContent = "🛑 Kamerayı Durdur";
+
+            try {
+                if (!html5QrScanner) {
+                    html5QrScanner = new Html5Qrcode("camera-reader");
+                }
+                const config = {
+                    fps: 25,
+                    qrbox: function(viewfinderWidth, viewfinderHeight) {
+                        return {
+                            width: Math.min(viewfinderWidth * 0.88, 320),
+                            height: Math.min(viewfinderHeight * 0.75, 260)
+                        };
+                    },
+                    aspectRatio: 1.3333
+                };
+
+                const cameraConstraints = {
+                    facingMode: currentFacingMode,
+                    width: { ideal: 1920, min: 1280 },
+                    height: { ideal: 1080, min: 720 },
+                    focusMode: "continuous"
+                };
+
+                await html5QrScanner.start(
+                    cameraConstraints,
+                    config,
+                    onBarcodeScanned,
+                    function(err) {} // sessiz hata yutucu
+                );
+                isCameraRunning = true;
+                setTimeout(applyCameraFocusAndZoom, 400);
+            } catch (err) {
+                console.error("Kamera başlatılamadı, alternatif mod deneniyor:", err);
+                try {
+                    // Fallback to basic facingMode if high-res constraints fail on older devices
+                    await html5QrScanner.start(
+                        { facingMode: currentFacingMode },
+                        { fps: 25, aspectRatio: 1.3333 },
+                        onBarcodeScanned,
+                        function(_) {}
+                    );
+                    isCameraRunning = true;
+                    setTimeout(applyCameraFocusAndZoom, 400);
+                } catch (fallbackErr) {
+                    alert("Kamera erişimi sağlanamadı. Lütfen tarayıcı izinlerinizi kontrol ediniz.");
+                    stopCamera();
+                }
+            }
+        }
+
+        async function stopCamera() {
+            const container = document.getElementById('camera-container');
+            const btnText = document.getElementById('btn-camera-text');
+            if (html5QrScanner && isCameraRunning) {
+                try { await html5QrScanner.stop(); } catch (_) {}
+            }
+            isCameraRunning = false;
+            container.style.display = 'none';
+            btnText.textContent = "📷 Kamerayı Aç (Seri Okut)";
+        }
+
+        async function switchCamera() {
+            currentFacingMode = (currentFacingMode === "environment") ? "user" : "environment";
+            if (isCameraRunning) {
+                await stopCamera();
+                await startCamera();
+            }
+        }
+
+        async function toggleTorch() {
+            const nextState = !isTorchOn;
+            let applied = false;
+            try {
+                const track = getActiveVideoTrack();
+                if (track && track.applyConstraints) {
+                    try {
+                        await track.applyConstraints({ advanced: [{ torch: nextState }] });
+                        applied = true;
+                    } catch (_) {
+                        try {
+                            await track.applyConstraints({ torch: nextState });
+                            applied = true;
+                        } catch (_2) {}
+                    }
+                }
+                if (!applied && html5QrScanner && typeof html5QrScanner.applyVideoConstraints === 'function') {
+                    try {
+                        await html5QrScanner.applyVideoConstraints({ advanced: [{ torch: nextState }] });
+                        applied = true;
+                    } catch (_) {}
+                }
+            } catch (_) {}
+
+            const btn = document.getElementById('btn-torch');
+            if (applied) {
+                isTorchOn = nextState;
+                if (btn) {
+                    btn.style.color = isTorchOn ? '#0f172a' : '#fff';
+                    btn.style.background = isTorchOn ? '#f59e0b' : '';
+                    btn.style.borderColor = isTorchOn ? '#f59e0b' : '';
+                }
+            } else {
+                const st = document.getElementById('cam-status');
+                if (st) st.textContent = '⚠️ Bu lens flaşı desteklemiyor (Arka kamerayı seçin)';
+            }
+        }
+
+        // ⚡ Kesintisiz Seri Barkod Okuma ("Tak Tak Okut")
+        function onBarcodeScanned(decodedText) {
+            if (!decodedText || isProcessingScan) return;
+            const code = decodedText.trim();
+            if (!code) return;
+
+            const now = Date.now();
+            // Aynı barkod için 2 saniye bekleme, farklı barkod için anında okuma
+            if (code === lastBarcode && (now - lastBarcodeTime) < 2000) {
+                return;
+            }
+
+            lastBarcode = code;
+            lastBarcodeTime = now;
+            isProcessingScan = true;
+
+            // Lazer parlaması
+            const laser = document.querySelector('.camera-laser');
+            if (laser) {
+                laser.style.background = 'linear-gradient(90deg, transparent, #10b981, #34d399, #10b981, transparent)';
+                setTimeout(() => {
+                    laser.style.background = 'linear-gradient(90deg, transparent, #ef4444, #f87171, #ef4444, transparent)';
+                }, 300);
+            }
+
+            processBarcode(code);
+            setTimeout(() => { isProcessingScan = false; }, 800);
+        }
+
+        // ⌨️ Manuel Giriş
+        function handleManualSubmit() {
+            const input = document.getElementById('barkod-input');
+            const val = input.value.trim();
+            if (val) {
+                processBarcode(val);
+                input.value = "";
+            }
+        }
+
+        document.getElementById('barkod-input').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                handleManualSubmit();
+            }
+        });
+
+        // 🎯 HUD Görsel Bildirim Sistemi (Kamera Üzerinde Anlık Uyarı)
+        let hudTimer = null;
+        function showScanFeedback(type, title, subtitle) {
+            const hud = document.getElementById('scan-hud-overlay');
+            const hudIcon = document.getElementById('hud-icon');
+            const hudTitle = document.getElementById('hud-title');
+            const hudSub = document.getElementById('hud-sub');
+            const boxWrap = document.getElementById('camera-box-wrap');
+            if (!hud) return;
+
+            if (hudTimer) clearTimeout(hudTimer);
+
+            if (type === 'success') {
+                hud.style.background = 'rgba(16, 185, 129, 0.94)';
+                hud.style.color = '#ffffff';
+                hud.style.border = '2px solid #34d399';
+                hudIcon.innerHTML = '<i class="fa-solid fa-circle-check" style="color:#ffffff;"></i>';
+                hudTitle.textContent = title || 'OKUTULDU';
+                hudSub.textContent = subtitle || '1 Adet Çıkış Listesine Eklendi';
+                if (boxWrap) {
+                    boxWrap.style.boxShadow = '0 0 35px #10b981';
+                    setTimeout(() => { if (boxWrap) boxWrap.style.boxShadow = 'none'; }, 600);
+                }
+            } else if (type === 'warning') {
+                hud.style.background = 'rgba(245, 158, 11, 0.94)';
+                hud.style.color = '#ffffff';
+                hud.style.border = '2px solid #fbbf24';
+                hudIcon.innerHTML = '<i class="fa-solid fa-triangle-exclamation" style="color:#ffffff;"></i>';
+                hudTitle.textContent = title || 'MÜKERRER OKUTMA';
+                hudSub.textContent = subtitle || 'Bu ürün zaten listede mevcut';
+                if (boxWrap) {
+                    boxWrap.style.boxShadow = '0 0 35px #f59e0b';
+                    setTimeout(() => { if (boxWrap) boxWrap.style.boxShadow = 'none'; }, 600);
+                }
+            } else {
+                hud.style.background = 'rgba(239, 68, 68, 0.94)';
+                hud.style.color = '#ffffff';
+                hud.style.border = '2px solid #f87171';
+                hudIcon.innerHTML = '<i class="fa-solid fa-circle-xmark" style="color:#ffffff;"></i>';
+                hudTitle.textContent = title || 'HATA';
+                hudSub.textContent = subtitle || 'Geçersiz karekod veya barkod';
+                if (boxWrap) {
+                    boxWrap.style.boxShadow = '0 0 35px #ef4444';
+                    setTimeout(() => { if (boxWrap) boxWrap.style.boxShadow = 'none'; }, 600);
+                }
+            }
+
+            hud.style.display = 'block';
+            hudTimer = setTimeout(() => {
+                hud.style.display = 'none';
+            }, 1900);
+        }
+
+        // 📦 Sunucuya Barkod Gönderme & Kayıt
+        async function processBarcode(barcode) {
+            const resultCard = document.getElementById('result-card');
+            const resultTitle = document.getElementById('result-title');
+            const resultTime = document.getElementById('result-time');
+            const resultMeta = document.getElementById('result-meta');
+
+            resultTitle.textContent = "Sorgulanıyor...";
+            resultCard.className = "result-card";
+
+            try {
+                const resp = await fetch('/api/cikis/okut', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        barkod: barcode,
+                        cihaz_turu: "Mobil Depo Sayım Cihazı",
+                        bayi_kodu: ACTIVE_BAYI_KODU
+                    })
+                });
+
+                const data = await resp.json();
+
+                resultTime.textContent = new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+                if (resp.status === 401 || resp.status === 403 || data.status === 'revoked' || data.unauthorized) {
+                    playBeep(false);
+                    alert("⛔ " + (data.error || "Personel mobil oturumu bayi tarafından sonlandırılmıştır. Giriş ekranına yönlendiriliyorsunuz."));
+                    window.location.replace(data.redirect || '/login?error=oturum_sonlandi');
+                    return;
+                } else if (data.success) {
+                    playBeep(true);
+                    showScanFeedback('success', (data.urun_adi || 'Ürün Eklendi'), '✓ Başarıyla Çıkış Listesine Eklendi');
+                    resultCard.className = "result-card success";
+                    resultTitle.innerHTML = '<span style="color:#10b981;">✓</span> ' + (data.urun_adi || 'Bakanlık Onaylı Ürün');
+                    resultMeta.style.display = 'flex';
+                    document.getElementById('res-gtin').textContent = data.gtin || data.barkod || '-';
+                    document.getElementById('res-sn').textContent = data.seri_no || '-';
+                    document.getElementById('res-parti').textContent = data.parti_no || '-';
+                    loadStatsAndRecent();
+                } else if (data.tekrar_uyari) {
+                    playBeep(false);
+                    showScanFeedback('warning', 'Mükerrer Okutma!', (data.urun_adi || 'Bu ürün zaten listede var'));
+                    resultCard.className = "result-card warning";
+                    resultTitle.innerHTML = '<span style="color:#f59e0b;">⚠️ Mükerrer:</span> ' + (data.urun_adi || 'Daha Önce Okutulmuş');
+                    resultMeta.style.display = 'flex';
+                    document.getElementById('res-gtin').textContent = data.gtin || '-';
+                    document.getElementById('res-sn').textContent = data.seri_no || '-';
+                    document.getElementById('res-parti').textContent = 'Zaten Listede Mevcut';
+                } else {
+                    playBeep(false);
+                    showScanFeedback('danger', 'Okuma Hatası!', (data.error || 'Geçersiz Barkod'));
+                    resultCard.className = "result-card danger";
+                    resultTitle.innerHTML = '<span style="color:#ef4444;">✗ Hata:</span> ' + (data.error || 'Geçersiz Barkod');
+                    resultMeta.style.display = 'none';
+                }
+            } catch (err) {
+                playBeep(false);
+                showScanFeedback('danger', 'Bağlantı Hatası!', 'Sunucuya ulaşılamadı');
+                resultCard.className = "result-card danger";
+                resultTitle.textContent = "Bağlantı Hatası: Sunucuya ulaşılamadı!";
+            }
+        }
+
+        // 📊 İstatistikleri ve Son Okutulanları Getir
+        async function loadStatsAndRecent() {
+            try {
+                const resp = await fetch('/api/cikis/listesi?limit=15&bayi_kodu=' + encodeURIComponent(ACTIVE_BAYI_KODU));
+                if (resp.status === 401 || resp.status === 403) {
+                    window.location.replace('/login?error=oturum_sonlandi');
+                    return;
+                }
+                const data = await resp.json();
+                if (data && (data.status === 'revoked' || data.unauthorized)) {
+                    window.location.replace('/login?error=oturum_sonlandi');
+                    return;
+                }
+                if (data && data.kayitlar) {
+                    const total = data.toplam_sayi || data.kayitlar.length;
+                    document.getElementById('cnt-toplam').textContent = total;
+                    const liveCamBadge = document.getElementById('cam-live-count');
+                    if (liveCamBadge) liveCamBadge.textContent = total;
+                    
+                    // Farklı ürün çeşidi sayısı
+                    const uniqueNames = new Set(data.kayitlar.map(k => k.urun_adi)).size;
+                    document.getElementById('cnt-cesit').textContent = uniqueNames || (data.kayitlar.length ? 1 : 0);
+
+                    // Son okutulanları listele
+                    renderRecentList(data.kayitlar.slice(0, 12));
+                }
+            } catch (_) {}
+        }
+
+        function renderRecentList(items) {
+            const container = document.getElementById('recent-list');
+            if (!items || items.length === 0) {
+                container.innerHTML = '<div style="text-align: center; color: var(--text-muted); font-size: 0.85rem; padding: 20px;">Henüz kayıt yok. Barkod okutmaya başlayın.</div>';
+                return;
+            }
+
+            container.innerHTML = items.map(item => `
+                <div class="recent-item">
+                    <div class="item-info">
+                        <div class="item-name">${escapeHtml(item.urun_adi || 'Bilinmeyen Ürün')}</div>
+                        <div class="item-sub">
+                            <span>SN: ${escapeHtml(item.seri_no || '-')}</span>
+                            <span>Saat: ${item.tarih ? item.tarih.split(' ')[1] || item.tarih : '-'}</span>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-item-delete" onclick="deleteItem(${item.id})" title="Sil / Geri Al">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                </div>
+            `).join('');
+        }
+
+        async function deleteItem(id) {
+            if (!confirm("Bu okutulan ürünü listeden silmek istediğinize emin misiniz?")) return;
+            try {
+                const res = await fetch('/api/cikis/sil/' + id, { method: 'DELETE' });
+                const d = await res.json();
+                if (d.success) {
+                    loadStatsAndRecent();
+                } else {
+                    alert("Silinemedi: " + (d.error || 'Bilinmeyen hata'));
+                }
+            } catch (e) {
+                alert("Bağlantı hatası!");
+            }
+        }
+
+        function escapeHtml(text) {
+            return String(text || '').replace(/[&<>"']/g, function(m) {
+                return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];
+            });
+        }
+
+        function logoutMobile() {
+            if (confirm("Mobil sayım oturumunu kapatmak istiyor musunuz?")) {
+                window.location.href = "/logout";
+            }
+        }
+
+        // 📲 PWA Kurulum Yönetimi
+        let deferredPrompt;
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            const pwaBanner = document.getElementById('pwa-install-banner');
+            if (pwaBanner) pwaBanner.style.display = 'flex';
+        });
+
+        document.getElementById('btn-pwa-install')?.addEventListener('click', async () => {
+            if (deferredPrompt) {
+                deferredPrompt.prompt();
+                const { outcome } = await deferredPrompt.userChoice;
+                deferredPrompt = null;
+                document.getElementById('pwa-install-banner').style.display = 'none';
+            } else {
+                window.location.href = '/download/QR_Compare.apk';
+            }
+        });
+
+        // 🔄 PWA Otomatik Güncelleme ve Service Worker Kaydı
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js', { scope: '/' })
+                    .then(reg => {
+                        reg.update(); // Her açılışta sunucudaki güncel kodları zorla sorgula
+                        reg.onupdatefound = () => {
+                            const newWorker = reg.installing;
+                            if (newWorker) {
+                                newWorker.onstatechange = () => {
+                                    if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                        console.log("Yeni mobil sürüm indirildi ve önbellek güncellendi.");
+                                    }
+                                };
+                            }
+                        };
+                    })
+                    .catch(err => console.warn("PWA SW kayıt uyarısı:", err));
+            });
+        }
+
+        // Sayfa Başlatma
+        window.addEventListener('DOMContentLoaded', () => {
+            initCountdown();
+            loadStatsAndRecent();
+            // Kullanıcı izin verdiyse kamerayı hemen otomatik aç
+            setTimeout(() => {
+                startCamera().catch(e => console.log("Otomatik kamera başlangıcı kullanıcı dokunuşu bekliyor:", e));
+            }, 300);
+        });
+    </script>
+    <script src="/static/device_tracker.js"></script>
+</body>
+</html>

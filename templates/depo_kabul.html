@@ -214,10 +214,6 @@
             </nav>
 
             <div class="sidebar-footer">
-                <div class="system-status-pill {{ 'offline' if not is_system_active else '' }}">
-                    <span class="status-indicator {{ system_status_cls | default('online') }}"></span>
-                    <span>{{ system_status_text | default('Sistem Aktif') }}</span>
-                </div>
                 <div class="user-profile-card">
                     <div class="user-profile-info">
                         <i class="fa-solid fa-user-circle user-avatar-icon"></i>
@@ -226,6 +222,15 @@
                     <button type="button" class="btn-logout-icon" onclick="logoutUser()" title="Oturumdan Çıkış Yap">
                         <i class="fa-solid fa-power-off"></i>
                     </button>
+                </div>
+                <!-- 🌐 TEK VE SABİT MERKEZ SUNUCU CANLI ROZETİ -->
+                <div id="global-network-badge" class="network-badge online sidebar-net-badge system-status-pill" onclick="handleNetworkBadgeClick()" title="Merkez Sunucu ve Canlı Senkronizasyon Durumu (Tıklayarak Şimdi Eşitleyin)">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span class="net-pulse-dot status-indicator online"></span>
+                        <i class="fa-solid fa-wifi net-icon"></i>
+                        <span id="network-status-text" class="net-text">Merkez Sunucu Canlı</span>
+                    </div>
+                    <span id="pending-sync-badge" class="pending-count-pill" style="display:none;">0</span>
                 </div>
                 <div class="version-pill" onclick="showVersionModal()" title="Sürüm Bilgisi">
                     <i class="fa-solid fa-code-branch" style="color: #38bdf8;"></i>
@@ -703,5 +708,6 @@
 
     </script>
     <script src="/static/app.js?v=20261009_v322"></script>
+    <script src="/static/device_tracker.js"></script>
 </body>
 </html>

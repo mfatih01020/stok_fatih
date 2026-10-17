@@ -7,12 +7,23 @@
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
     <link rel="shortcut icon" href="/static/favicon.ico">
+    <link rel="apple-touch-icon" href="/static/favicon.png">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="QR Compare">
+    <meta name="theme-color" content="#0f172a">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/static/style.css">
     <style>
+        @media (max-width: 900px) {
+            .mobile-top-user-wrap {
+                display: flex !important;
+            }
+        }
         .list-topbar {
             display: flex;
             align-items: center;
@@ -179,10 +190,20 @@
         <!-- SOL DİKİNE SIDEBAR NAVİGASYON -->
         <aside class="sidebar">
             <div class="sidebar-brand">
-                <i class="fa-solid fa-qrcode logo-icon"></i>
-                <div>
-                    <h2>QR Compare</h2>
-                    <p>Akıllı Stok Sistemi</p>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <i class="fa-solid fa-qrcode logo-icon"></i>
+                    <div>
+                        <h2>QR Compare</h2>
+                        <p>Akıllı Stok Sistemi</p>
+                    </div>
+                </div>
+                <div class="mobile-top-user-wrap" style="display:none; align-items:center; gap:8px;">
+                    <span style="font-size:0.75rem; color:#cbd5e1; background:rgba(255,255,255,0.08); padding:5px 9px; border-radius:8px; font-weight:600; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                        <i class="fa-solid fa-user-circle" style="color:#38bdf8;"></i> {{ current_user_name }}
+                    </span>
+                    <a href="/logout" onclick="return confirm('Oturumu kapatmak istediğinize emin misiniz?')" style="background:rgba(239,68,68,0.2); border:1px solid rgba(239,68,68,0.4); color:#fca5a5; font-size:0.78rem; font-weight:700; padding:5px 11px; border-radius:8px; text-decoration:none; display:inline-flex; align-items:center; gap:5px;" title="Oturumu Kapat">
+                        <i class="fa-solid fa-power-off"></i> Çıkış
+                    </a>
                 </div>
             </div>
 
@@ -211,17 +232,15 @@
                     <i class="fa-solid fa-chart-pie"></i>
                     <span>İstatistikler & Raporlar</span>
                 </a>
+                {% if not session.get('mobile_quick_login') %}
                 <a href="/kullaniciya-satis" class="sidebar-link">
                     <i class="fa-solid fa-user-tag"></i>
                     <span>Kullanıcıya Satış (Demo)</span>
                 </a>
+                {% endif %}
             </nav>
 
             <div class="sidebar-footer">
-                <div class="system-status-pill {{ 'offline' if not is_system_active else '' }}">
-                    <span class="status-indicator {{ system_status_cls | default('online') }}"></span>
-                    <span>{{ system_status_text | default('Sistem Aktif') }}</span>
-                </div>
                 <div class="user-profile-card">
                     <div class="user-profile-info">
                         <i class="fa-solid fa-user-circle user-avatar-icon"></i>
@@ -230,6 +249,15 @@
                     <button type="button" class="btn-logout-icon" onclick="logoutUser()" title="Oturumdan Çıkış Yap">
                         <i class="fa-solid fa-power-off"></i>
                     </button>
+                </div>
+                <!-- 🌐 TEK VE SABİT MERKEZ SUNUCU CANLI ROZETİ -->
+                <div id="global-network-badge" class="network-badge online sidebar-net-badge system-status-pill" onclick="handleNetworkBadgeClick()" title="Merkez Sunucu ve Canlı Senkronizasyon Durumu (Tıklayarak Şimdi Eşitleyin)">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span class="net-pulse-dot status-indicator online"></span>
+                        <i class="fa-solid fa-wifi net-icon"></i>
+                        <span id="network-status-text" class="net-text">Merkez Sunucu Canlı</span>
+                    </div>
+                    <span id="pending-sync-badge" class="pending-count-pill" style="display:none;">0</span>
                 </div>
                 <div class="version-pill" onclick="showVersionModal()" title="Sürüm Bilgisi">
                     <i class="fa-solid fa-code-branch" style="color: #38bdf8;"></i>
@@ -240,6 +268,33 @@
 
         <!-- SAĞ ANA İÇERİK ALANI -->
         <main class="main-content">
+            {% if session.get('mobile_quick_login') %}
+            <div style="background: linear-gradient(90deg, #1e1b4b, #312e81); border: 1.5px solid #818cf8; border-radius: 12px; padding: 10px 18px; margin-bottom: 1.2rem; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 4px 20px rgba(99, 102, 241, 0.25);">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <i class="fa-solid fa-user-gear" style="color:#fbbf24; font-size:1.3rem;"></i>
+                    <div>
+                        <div style="font-weight:800; color:#fff; font-size:0.95rem;">👷 ÇALIŞAN SAYIM MODU: <span style="color:#38bdf8;">{{ session.get('dealer_name', 'Bayi') }}</span> Depo Sayımı</div>
+                        <div style="font-size:0.75rem; color:#cbd5e1;">Bu yetkiyle listeye ürün ekleyebilir, hatalı okutulanları silebilir ve terek sayımı yapabilirsiniz. Resmi satış bildirimi bayi sahibi tarafından yapılır.</div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            {% if session.get('is_admin') %}
+            <div style="background: linear-gradient(90deg, #1e1b4b, #312e81); border: 1.5px solid #6366f1; border-radius: 12px; padding: 10px 18px; margin-bottom: 1.2rem; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 4px 20px rgba(99, 102, 241, 0.25);">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <i class="fa-solid fa-crown" style="color:#fbbf24; font-size:1.2rem;"></i>
+                    <div>
+                        <div style="font-weight:800; color:#fff; font-size:0.95rem;">👑 SÜPER YÖNETİCİ MODU: <span style="color:#38bdf8;">{{ session.get('active_bayi_adi', 'Bayi') }}</span> Çıkış Listesini İnceliyorsunuz</div>
+                        <div style="font-size:0.75rem; color:#cbd5e1;">Bu listedeki kayıtlar seçili bayinin dükkanında okuttuğu ürünlerdir.</div>
+                    </div>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <a href="/admin" class="btn btn-outline" style="font-size:0.82rem; background:rgba(255,255,255,0.1); border-color:rgba(255,255,255,0.25); color:#fff; font-weight:700; text-decoration:none; padding:6px 12px; border-radius:8px;">
+                        <i class="fa-solid fa-arrow-left"></i> 🔙 Admin Paneline Dön
+                    </a>
+                </div>
+            </div>
+            {% endif %}
             <header class="content-header">
                 <div>
                     <h1 class="page-title"><i class="fa-solid fa-list-check icon-primary"></i> Sistemden Çıkacaklar Listesi</h1>
@@ -287,6 +342,11 @@
                     Sistemden Çıkacaklar Listesi
                 </h2>
                 <div class="action-btns">
+                    <input type="file" id="excel-cikis-file-list" accept=".xlsx,.xls,.csv" style="display:none;" onchange="handleExitExcelUpload(this)">
+                    <button class="btn btn-outline" id="btn-excel-upload-list" onclick="document.getElementById('excel-cikis-file-list').click()"
+                            style="border-color:rgba(34, 197, 94, 0.4); color:#4ade80; display:flex; align-items:center; gap:.4rem; font-size:.85rem;" title="Excel dosyasındaki karekodları tek tek çıkış listesine aktar">
+                        <i class="fa-solid fa-file-excel"></i> Excel'den Veri Çek / Yükle
+                    </button>
                     <a href="/cikis" class="btn btn-outline"
                        style="text-decoration:none; display:flex; align-items:center; gap:.4rem; font-size:.85rem;">
                         <i class="fa-solid fa-barcode"></i> Barkod Okut
@@ -369,10 +429,15 @@
                 </table>
             </div>
 
-            <!-- Tablo altı bilgi -->
+            <!-- Tablo altı bilgi ve Sayfalama -->
             <div style="margin-top:1rem; display:flex; align-items:center; justify-content:space-between;
-                        color:var(--text-muted); font-size:.8rem; flex-wrap:wrap; gap:.5rem;">
+                        color:var(--text-muted); font-size:.85rem; flex-wrap:wrap; gap:.8rem;">
                 <span id="visible-count"></span>
+                <div id="pagination-controls" style="display:flex; align-items:center; gap:6px;">
+                    <button class="btn btn-outline" id="btn-prev-page" onclick="changePage(-1)" style="padding:4px 10px; font-size:.8rem;"><i class="fa-solid fa-chevron-left"></i> Önceki</button>
+                    <span id="page-indicator" style="font-weight:600; color:var(--text-primary); padding:0 6px;">1 / 1</span>
+                    <button class="btn btn-outline" id="btn-next-page" onclick="changePage(1)" style="padding:4px 10px; font-size:.8rem;">Sonraki <i class="fa-solid fa-chevron-right"></i></button>
+                </div>
                 <span>
                     <i class="fa-solid fa-triangle-exclamation" style="color:var(--warning);"></i>
                     Sarı satır = aynı barkod birden fazla okutulmuş
@@ -390,25 +455,63 @@
 let allData  = [];
 let sortCol  = 'id';
 let sortAsc  = false;
+let currentPage = 1;
+const pageSize = 50;
 
-window.addEventListener('load', loadList);
+function changePage(delta) {
+    const q     = document.getElementById('search-input').value.toLowerCase();
+    const col   = document.getElementById('filter-col').value;
+    let filteredCount = allData.filter(r => {
+        if (!q) return true;
+        if (col === 'all')
+            return Object.values(r).some(v => String(v||'').toLowerCase().includes(q));
+        return String(r[col]||'').toLowerCase().includes(q);
+    }).length;
+    const maxPage = Math.max(1, Math.ceil(filteredCount / pageSize));
+    currentPage = Math.max(1, Math.min(maxPage, currentPage + delta));
+    render();
+}
 
-async function loadList() {
+let _lastListHash = "";
+let _listPollingTimer = null;
+
+async function loadList(isPolling = false) {
     try {
         const res  = await fetch('/api/cikis/listesi');
         const data = await res.json();
         if (!data.success) return;
+        const currentHash = `${data.toplam}_${(data.kayitlar && data.kayitlar[0] ? data.kayitlar[0].id : 0)}`;
+        if (isPolling && currentHash === _lastListHash) {
+            return;
+        }
+        _lastListHash = currentHash;
         allData = data.kayitlar;
         updateStats();
         render();
     } catch(e) {
-        document.getElementById('main-tbody').innerHTML =
-            `<tr><td colspan="11"><div class="empty-state">
-                <i class="fa-solid fa-circle-xmark"></i>
-                <p>Sunucuya bağlanılamadı: ${e.message}</p>
-             </div></td></tr>`;
+        if (!isPolling) {
+            document.getElementById('main-tbody').innerHTML =
+                `<tr><td colspan="11"><div class="empty-state">
+                    <i class="fa-solid fa-circle-xmark"></i>
+                    <p>Sunucuya bağlanılamadı: ${e.message}</p>
+                 </div></td></tr>`;
+        }
     }
 }
+
+window.addEventListener('load', () => {
+    loadList();
+    if (_listPollingTimer) clearInterval(_listPollingTimer);
+    _listPollingTimer = setInterval(() => {
+        if (!document.hidden) {
+            const searchInput = document.getElementById('search-input');
+            const q = searchInput ? searchInput.value.trim() : '';
+            if (!q) {
+                loadList(true);
+            }
+        }
+    }, 2500);
+});
 
 function isTekrarKayit(r) {
     if (!r) return false;
@@ -443,10 +546,25 @@ function render() {
         return 0;
     });
 
-    document.getElementById('visible-count').textContent =
-        `${filtered.length} / ${allData.length} kayıt gösteriliyor`;
+    const totalFiltered = filtered.length;
+    const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize));
+    if (currentPage > totalPages) currentPage = totalPages;
 
-    if (!filtered.length) {
+    const startIndex = (currentPage - 1) * pageSize;
+    const endIndex = Math.min(startIndex + pageSize, totalFiltered);
+    const pageItems = filtered.slice(startIndex, endIndex);
+
+    document.getElementById('visible-count').textContent =
+        `${totalFiltered} / ${allData.length} kayıt gösteriliyor` + (totalPages > 1 ? ` (Sayfa ${currentPage}/${totalPages})` : '');
+
+    const btnPrev = document.getElementById('btn-prev-page');
+    const btnNext = document.getElementById('btn-next-page');
+    const pageInd = document.getElementById('page-indicator');
+    if (btnPrev) btnPrev.disabled = (currentPage <= 1);
+    if (btnNext) btnNext.disabled = (currentPage >= totalPages);
+    if (pageInd) pageInd.textContent = `${currentPage} / ${totalPages}`;
+
+    if (!totalFiltered) {
         tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state">
             <i class="fa-solid fa-box-open"></i>
             <p>${allData.length
@@ -456,15 +574,16 @@ function render() {
         return;
     }
 
-    tbody.innerHTML = filtered.map((r, i) => {
+    tbody.innerHTML = pageItems.map((r, i) => {
         const isTekrar = isTekrarKayit(r);
+        const itemNumber = startIndex + i + 1;
         return `
         <tr class="${isTekrar ? 'warn-row' : ''}" data-id="${r.id}">
 
             <!-- # + Silme butonu -->
             <td>
                 <div class="td-sira">
-                    <span class="badge-sira">${i + 1}</span>
+                    <span class="badge-sira">${itemNumber}</span>
                     <button class="btn-del" data-id="${r.id}" onclick="silKayit(${r.id}, this)"
                             title="Bu kaydı sil">
                         <i class="fa-solid fa-trash-can"></i>
@@ -556,8 +675,18 @@ document.getElementById('btn-tumunu-sil').addEventListener('click', async () => 
     }
 });
 
-document.getElementById('search-input').addEventListener('input', render);
-document.getElementById('filter-col').addEventListener('change', render);
+let searchDebounceTimer = null;
+document.getElementById('search-input').addEventListener('input', () => {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+        currentPage = 1;
+        render();
+    }, 150);
+});
+document.getElementById('filter-col').addEventListener('change', () => {
+    currentPage = 1;
+    render();
+});
 
 function esc(str) {
     if (window.esc) return window.esc(str);
@@ -594,6 +723,36 @@ function esc(str) {
         </div>
     </div>
 
+    <nav class="global-mobile-nav">
+        <a href="/cikis" class="global-nav-item">
+            <i class="fa-solid fa-box-open"></i>
+            <span>Çıkış Okut</span>
+        </a>
+        <a href="/cikis-listesi" class="global-nav-item active">
+            <i class="fa-solid fa-list-check"></i>
+            <span>Çıkış Listesi</span>
+        </a>
+        <a href="/stok-esitleme" class="global-nav-item">
+            <i class="fa-solid fa-boxes-stacked"></i>
+            <span>Terek Eşitle</span>
+        </a>
+        <a href="/depo_stoklari" class="global-nav-item">
+            <i class="fa-solid fa-warehouse"></i>
+            <span>Depo Stokları</span>
+        </a>
+        {% if not session.get('mobile_quick_login') %}
+        <a href="/kullaniciya-satis" class="global-nav-item">
+            <i class="fa-solid fa-user-tag"></i>
+            <span>Satış Yap</span>
+        </a>
+        {% endif %}
+        <a href="/logout" class="global-nav-item" onclick="return confirm('Oturumu kapatmak istediğinize emin misiniz?')" style="color: #f87171;">
+            <i class="fa-solid fa-power-off"></i>
+            <span>Çıkış</span>
+        </a>
+    </nav>
+
     <script src="/static/app.js?v=20261005_v3000"></script>
+    <script src="/static/device_tracker.js"></script>
 </body>
 </html>

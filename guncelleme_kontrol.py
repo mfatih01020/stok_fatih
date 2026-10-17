@@ -63,25 +63,31 @@ def get_unified_version_info():
     return full_ver, v_date, v_msg
 
 def install_dependencies():
-    print(f"  {CYAN}[3/3] Gerekli Python kütüphaneleri kontrol ediliyor ve kuruluyor...{RESET}")
-    req_file = os.path.join(BASE_DIR, "requirements.txt")
-    if os.path.exists(req_file):
+    print(f"  {CYAN}[3/3] Gerekli Python kütüphaneleri kontrol ediliyor...{RESET}")
+    required_modules = ['waitress', 'flask', 'pandas', 'openpyxl', 'requests']
+    missing_modules = []
+    for mod in required_modules:
         try:
-            res = subprocess.run(
-                [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"],
-                capture_output=True, text=True, cwd=BASE_DIR, creationflags=NO_WINDOW
-            )
-            if res.returncode == 0:
-                print(f"  {GREEN}  ✓ Tüm Python paketleri başarıyla doğrulandı ve yüklendi.{RESET}")
-            else:
-                print(f"  {YELLOW}  • Temel paketler (waitress, flask, pandas, openpyxl, requests) kuruluyor...{RESET}")
-                subprocess.run(
-                    [sys.executable, "-m", "pip", "install", "waitress", "flask", "pandas", "openpyxl", "requests", "xlrd"],
-                    capture_output=True, text=True, cwd=BASE_DIR, creationflags=NO_WINDOW
-                )
-                print(f"  {GREEN}  ✓ Temel paketler başarıyla yüklendi.{RESET}")
-        except Exception as e:
-            print(f"  {YELLOW}  • Paket yükleme uyarısı: {e}{RESET}")
+            __import__(mod)
+        except ImportError:
+            missing_modules.append(mod)
+
+    if not missing_modules:
+        print(f"  {GREEN}  ✓ Tüm temel Python paketleri sistemde hazır, ekstra pip kurulumuna gerek yok.{RESET}")
+        return
+
+    print(f"  {YELLOW}  • Eksik Python paketleri tespit edildi ({', '.join(missing_modules)}), kuruluyor...{RESET}")
+    try:
+        res = subprocess.run(
+            [sys.executable, "-m", "pip", "install"] + missing_modules,
+            capture_output=True, text=True, cwd=BASE_DIR, creationflags=NO_WINDOW
+        )
+        if res.returncode == 0:
+            print(f"  {GREEN}  ✓ Eksik paketler başarıyla yüklendi.{RESET}")
+        else:
+            print(f"  {YELLOW}  • Paket yükleme uyarısı (çevrimdışı modda olabilir): {res.stderr[:200] if res.stderr else ''}{RESET}")
+    except Exception as e:
+        print(f"  {YELLOW}  • Paket yükleme atlandı (çevrimdışı mod): {e}{RESET}")
 
 def recompile_exe_if_possible():
     ps1_file = os.path.join(BASE_DIR, "build_exe.ps1")
@@ -95,10 +101,6 @@ def recompile_exe_if_possible():
             pass
 
 def is_dev_mode():
-    if os.environ.get("DEV_MODE") == "1":
-        return True
-    if os.path.exists(os.path.join(BASE_DIR, ".dev_mode")):
-        return True
     return False
 
 def parse_version_tuple(v_str):

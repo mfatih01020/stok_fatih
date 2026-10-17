@@ -7,6 +7,12 @@
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
     <link rel="shortcut icon" href="/static/favicon.ico">
+    <link rel="apple-touch-icon" href="/static/favicon.png">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="QR Compare">
+    <meta name="theme-color" content="#0f172a">
     <!-- Google Fonts Outfit & Inter -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,6 +20,7 @@
     <!-- FontAwesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/html5-qrcode.min.js"></script>
     <style>
         body {
             display: flex;
@@ -166,6 +173,16 @@
                 <i class="fa-solid fa-right-to-bracket"></i> Giriş Yap ve Kaydet
             </button>
         </form>
+
+        <div style="margin-top: 1.4rem; text-align: center; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1.2rem;">
+            <p style="font-size: 0.82rem; color: #94a3b8; margin-bottom: 0.75rem;">
+                Depo personeli misiniz? Şifre girmeden giriş yapın:
+            </p>
+            <button type="button" onclick="openWorkerQrScanner()" style="width: 100%; padding: 0.85rem; background: linear-gradient(135deg, #4f46e5, #7c3aed); border: none; border-radius: 12px; color: #fff; font-weight: 700; font-size: 0.95rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 15px rgba(79, 70, 229, 0.35); transition: opacity 0.2s;">
+                <i class="fa-solid fa-qrcode" style="font-size: 1.15rem;"></i>
+                <span>📷 Personel QR Kodu ile Giriş</span>
+            </button>
+        </div>
     </div>
 
     <script>
@@ -199,12 +216,26 @@
                     }
                     sessionStorage.removeItem('app_launch_synced');
                     sessionStorage.setItem('startup_update_checked', 'true');
+                    
+                    if (data.is_admin) {
+                        showAlert('👑 Yönetici girişi başarılı! Admin paneline yönlendiriliyorsunuz...', false);
+                        setTimeout(() => {
+                            window.location.href = data.redirect || '/admin';
+                        }, 600);
+                        return;
+                    }
+
                     showAlert('🟢 Giriş başarılı! Yönlendiriliyorsunuz...', false);
                     setTimeout(() => {
                         window.location.href = '/cikis?force_sync=1';
                     }, 800);
                 } else {
-                    showAlert('❌ ' + (data.error || 'Giriş yapılamadı. Bilgilerinizi kontrol edin.'), true);
+                    const isUnauth = data.unauthorized || (data.error && (data.error.includes('yetki') || data.error.includes('Yetki')));
+                    if (isUnauth) {
+                        showAlert(`<div style="display:flex;align-items:center;gap:10px;text-align:left;"><i class="fa-solid fa-ban" style="font-size:1.5rem;color:#ef4444;flex-shrink:0;"></i><div><div style="font-size:0.92rem;font-weight:700;color:#f87171;">UYGULAMA YETKİNİZ BULUNMAMAKTADIR!</div><div style="font-size:0.82rem;color:#cbd5e1;margin-top:2px;">${esc(data.error || 'Bu bayilik hesabının yetkisi bulunmamaktadır. Lütfen sistem yöneticisiyle iletişime geçiniz.')}</div></div></div>`, true);
+                    } else {
+                        showAlert('❌ ' + (data.error || 'Giriş yapılamadı. Bilgilerinizi kontrol edin.'), true);
+                    }
                 }
             } catch (err) {
                 showAlert('❌ Bağlantı hatası: ' + err.message, true);
@@ -218,16 +249,34 @@
             const alertBox = document.getElementById('loginAlert');
             alertBox.style.display = 'block';
             if (isError) {
-                alertBox.style.background = 'rgba(239, 68, 68, 0.15)';
-                alertBox.style.border = '1px solid rgba(239, 68, 68, 0.35)';
-                alertBox.style.color = '#f87171';
+                alertBox.style.background = 'rgba(239, 68, 68, 0.18)';
+                alertBox.style.border = '1px solid rgba(239, 68, 68, 0.45)';
+                alertBox.style.color = '#fca5a5';
+                alertBox.style.padding = '12px 14px';
+                alertBox.style.borderRadius = '14px';
             } else {
-                alertBox.style.background = 'rgba(34, 197, 94, 0.15)';
-                alertBox.style.border = '1px solid rgba(34, 197, 94, 0.35)';
+                alertBox.style.background = 'rgba(34, 197, 94, 0.18)';
+                alertBox.style.border = '1px solid rgba(34, 197, 94, 0.45)';
                 alertBox.style.color = '#4ade80';
+                alertBox.style.padding = '12px 14px';
+                alertBox.style.borderRadius = '14px';
             }
             alertBox.innerHTML = msg;
         }
+
+        function esc(str) {
+            return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+
+
+        // Sayfa yüklendiğinde URL parametresini kontrol et
+        window.addEventListener('DOMContentLoaded', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('error') === 'yetkisiz') {
+                showAlert('<div style="display:flex;align-items:center;gap:10px;text-align:left;"><i class="fa-solid fa-triangle-exclamation" style="font-size:1.6rem;color:#ef4444;flex-shrink:0;"></i><div><div style="font-size:0.92rem;font-weight:700;color:#f87171;">UYGULAMA YETKİNİZ BULUNMAMAKTADIR!</div><div style="font-size:0.82rem;color:#cbd5e1;margin-top:2px;">Bayilik erişim yetkiniz yönetici tarafından sonlandırılmıştır. Yetki verilene kadar giriş yapılamaz.</div></div></div>', true);
+            }
+        });
 
         // Heartbeat (Sunucunun login ekranındayken kapanmasını önler)
         (function startHeartbeat() {
@@ -341,6 +390,55 @@
                     setTimeout(() => { if (overlay) overlay.remove(); }, 2000);
                 });
         }
+
+        let workerQrScanner = null;
+        async function openWorkerQrScanner() {
+            const modal = document.getElementById('workerScannerModal');
+            if (modal) modal.style.display = 'flex';
+            const statusEl = document.getElementById('worker-scan-status');
+            try {
+                if (!workerQrScanner) {
+                    workerQrScanner = new Html5Qrcode("worker-qr-reader");
+                }
+                await workerQrScanner.start(
+                    { facingMode: "environment" },
+                    { fps: 20, qrbox: { width: 250, height: 250 } },
+                    (decodedText) => {
+                        if (decodedText && (decodedText.includes('/mobile_login?token=') || decodedText.includes('token='))) {
+                            statusEl.innerHTML = '<span style="color:#10b981; font-weight:800;">⚡ Karekod Okundu! Giriş Yapılıyor...</span>';
+                            workerQrScanner.stop().catch(() => {});
+                            window.location.href = decodedText;
+                        }
+                    },
+                    () => {}
+                );
+                statusEl.textContent = "Karekod Bekleniyor... Masaüstündeki QR kodu gösteriniz.";
+            } catch (e) {
+                console.error("Camera error:", e);
+                statusEl.innerHTML = '<span style="color:#ef4444;">Kamera açılamadı. Kamera izinlerini kontrol ediniz.</span>';
+            }
+        }
+
+        function closeWorkerQrScanner() {
+            const modal = document.getElementById('workerScannerModal');
+            if (modal) modal.style.display = 'none';
+            if (workerQrScanner) {
+                workerQrScanner.stop().catch(() => {});
+            }
+        }
     </script>
+
+    <!-- PERSONEL QR TARAYICI MODALI -->
+    <div id="workerScannerModal" class="modal" style="display:none; position:fixed; z-index:99999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.8); backdrop-filter:blur(6px); align-items:center; justify-content:center;">
+        <div style="background:#1e293b; color:#fff; max-width:440px; width:92%; margin:5% auto; padding:22px; border-radius:20px; border:1px solid rgba(255,255,255,0.15); box-shadow:0 25px 50px rgba(0,0,0,0.7); position:relative; text-align:center;">
+            <span onclick="closeWorkerQrScanner()" style="position:absolute; right:18px; top:16px; cursor:pointer; font-size:1.6rem; color:#94a3b8;" title="Kapat">&times;</span>
+            <h3 style="font-family:var(--font-outfit); font-size:1.2rem; font-weight:700; margin-bottom:6px;">Personel QR Girişi</h3>
+            <p style="font-size:0.82rem; color:#94a3b8; margin-bottom:14px;">Masaüstü ekranındaki 24 saatlik karekodu kameraya gösteriniz.</p>
+            <div id="worker-qr-reader" style="width:100%; min-height:260px; background:#000; border-radius:14px; overflow:hidden;"></div>
+            <div id="worker-scan-status" style="font-size:0.8rem; color:#38bdf8; margin-top:10px; font-weight:600;">Kamera Açılıyor...</div>
+        </div>
+    </div>
+
+    <script src="/static/device_tracker.js"></script>
 </body>
 </html>

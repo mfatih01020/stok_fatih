@@ -7,6 +7,12 @@
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
     <link rel="shortcut icon" href="/static/favicon.ico">
+    <link rel="apple-touch-icon" href="/static/favicon.png">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="QR Compare">
+    <meta name="theme-color" content="#0f172a">
     <!-- Google Fonts Outfit & Inter -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,6 +20,21 @@
     <!-- FontAwesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/html5-qrcode.min.js"></script>
+    <style>
+        /* 📸 Kamera bölümü masaüstü bilgisayarlarda KESİNLİKLE gizlidir, sadece telefon ve tablette görünür */
+        @media (min-width: 992px) {
+            #btn-toggle-audit-cam,
+            #audit-camera-container {
+                display: none !important;
+            }
+        }
+        @media (max-width: 900px) {
+            .mobile-top-user-wrap {
+                display: flex !important;
+            }
+        }
+    </style>
 </head>
 <body class="sidebar-layout">
     <div class="glass-bg-decor1"></div>
@@ -23,10 +44,20 @@
         <!-- SOL DİKİNE SIDEBAR NAVİGASYON -->
         <aside class="sidebar">
             <div class="sidebar-brand">
-                <i class="fa-solid fa-qrcode logo-icon"></i>
-                <div>
-                    <h2>QR Compare</h2>
-                    <p>Akıllı Stok Sistemi</p>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <i class="fa-solid fa-qrcode logo-icon"></i>
+                    <div>
+                        <h2>QR Compare</h2>
+                        <p>Akıllı Stok Sistemi</p>
+                    </div>
+                </div>
+                <div class="mobile-top-user-wrap" style="display:none; align-items:center; gap:8px;">
+                    <span style="font-size:0.75rem; color:#cbd5e1; background:rgba(255,255,255,0.08); padding:5px 9px; border-radius:8px; font-weight:600; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                        <i class="fa-solid fa-user-circle" style="color:#38bdf8;"></i> {{ current_user_name }}
+                    </span>
+                    <a href="/logout" onclick="return confirm('Oturumu kapatmak istediğinize emin misiniz?')" style="background:rgba(239,68,68,0.2); border:1px solid rgba(239,68,68,0.4); color:#fca5a5; font-size:0.78rem; font-weight:700; padding:5px 11px; border-radius:8px; text-decoration:none; display:inline-flex; align-items:center; gap:5px;" title="Oturumu Kapat">
+                        <i class="fa-solid fa-power-off"></i> Çıkış
+                    </a>
                 </div>
             </div>
 
@@ -62,10 +93,6 @@
             </nav>
 
             <div class="sidebar-footer">
-                <div class="system-status-pill {{ 'offline' if not is_system_active else '' }}">
-                    <span class="status-indicator {{ system_status_cls | default('online') }}"></span>
-                    <span>{{ system_status_text | default('Sistem Aktif') }}</span>
-                </div>
                 <div class="user-profile-card">
                     <div class="user-profile-info">
                         <i class="fa-solid fa-user-circle user-avatar-icon"></i>
@@ -74,6 +101,15 @@
                     <button type="button" class="btn-logout-icon" onclick="logoutUser()" title="Oturumdan Çıkış Yap">
                         <i class="fa-solid fa-power-off"></i>
                     </button>
+                </div>
+                <!-- 🌐 TEK VE SABİT MERKEZ SUNUCU CANLI ROZETİ -->
+                <div id="global-network-badge" class="network-badge online sidebar-net-badge system-status-pill" onclick="handleNetworkBadgeClick()" title="Merkez Sunucu ve Canlı Senkronizasyon Durumu (Tıklayarak Şimdi Eşitleyin)">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span class="net-pulse-dot status-indicator online"></span>
+                        <i class="fa-solid fa-wifi net-icon"></i>
+                        <span id="network-status-text" class="net-text">Merkez Sunucu Canlı</span>
+                    </div>
+                    <span id="pending-sync-badge" class="pending-count-pill" style="display:none;">0</span>
                 </div>
                 <div class="version-pill" id="versionBadge" onclick="showVersionModal()" title="Sürüm Bilgisi">
                     <i class="fa-solid fa-code-branch" style="color: #38bdf8;"></i>
@@ -161,6 +197,48 @@
                         <h2>Terek (Raf) QR Sayım & Stok Eşitleme</h2>
                         <p class="panel-subtitle">Koli veya ürün QR okutun. Bakanlık stoğundaki eksik ürünler otomatik tespit edilir.</p>
                     </div>
+                </div>
+            </div>
+
+            <!-- 📸 Yalnızca Mobil/Tablet İçin Terek QR Kamera Butonu -->
+            <button type="button" class="btn btn-primary" id="btn-toggle-audit-cam" onclick="toggleAuditCamera()" style="width: 100%; margin-bottom: 12px; display: none; align-items: center; justify-content: center; gap: 8px; font-weight: 700; padding: 12px; font-size: 1rem; border-radius: 12px; background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff; border: none; cursor: pointer; box-shadow: 0 4px 15px rgba(79, 70, 229, 0.4);">
+                <i class="fa-solid fa-camera"></i> <span id="btn-audit-cam-text">📷 Kamerayı Aç (Terek Seri Sayım)</span>
+            </button>
+
+            <div class="camera-container" id="audit-camera-container" style="display: none; position: relative; margin-bottom: 15px; border-radius: 14px; overflow: hidden; border: 2px solid #4f46e5; background: #000; box-shadow: 0 8px 24px rgba(0,0,0,0.6);">
+                <div style="background: rgba(15, 23, 42, 0.95); padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; font-size: 0.82rem; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                    <span style="color: #34d399; font-weight: 600;">⚡ Canlı Kamera: Terek Koli / Ürün QR Gösterin</span>
+                    <button type="button" onclick="stopAuditCamera()" style="background:none; border:none; color:#ef4444; font-size:1.15rem; cursor:pointer;" title="Kamerayı Kapat">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+
+                <div style="position: relative; overflow: hidden; background: #000; cursor: crosshair;" id="audit-camera-box-wrap" onclick="handleAuditCameraTouch(event)">
+                    <div id="audit-focus-ring" style="display:none; position:absolute; width:54px; height:54px; border:2px solid #facc15; border-radius:10px; transform:translate(-50%, -50%); pointer-events:none; z-index:95; box-shadow:0 0 14px rgba(250, 204, 21, 0.85); animation:focusRingPulse 0.5s ease-out;"></div>
+                    <div id="audit-scan-hud" style="display:none; position:absolute; top:12px; left:12px; right:12px; z-index:99; padding:12px 14px; border-radius:12px; text-align:center; font-weight:700; box-shadow:0 12px 30px rgba(0,0,0,0.7); backdrop-filter:blur(8px); pointer-events:none; transition:all 0.2s ease;">
+                        <div id="audit-hud-title" style="font-size:1.05rem; font-weight:800;"></div>
+                        <div id="audit-hud-sub" style="font-size:0.8rem; margin-top:2px;"></div>
+                    </div>
+                    <div id="audit-camera-reader" style="width:100%; min-height:260px;"></div>
+                    <div class="camera-laser" style="position:absolute; left:5%; right:5%; top:50%; height:2px; background:linear-gradient(90deg, transparent, #ef4444, #f87171, #ef4444, transparent); box-shadow:0 0 10px #ef4444; pointer-events:none; z-index:5; animation:laserScan 2s infinite ease-in-out;"></div>
+                </div>
+
+                <div style="display: flex; gap: 6px; padding: 8px 10px; background: rgba(15, 23, 42, 0.95); border-top: 1px solid rgba(255,255,255,0.1); justify-content: space-between;">
+                    <button type="button" class="btn-cam-tool" onclick="switchAuditCamera()" style="flex:1; padding:8px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.1); color:#fff; border-radius:8px; font-size:0.78rem; font-weight:600; display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer;">
+                        <i class="fa-solid fa-arrows-rotate"></i> Kamera
+                    </button>
+                    <button type="button" class="btn-cam-tool" onclick="triggerAuditManualFocus(null)" style="flex:1; padding:8px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.1); color:#fff; border-radius:8px; font-size:0.78rem; font-weight:600; display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer;">
+                        <i class="fa-solid fa-crosshairs" style="color:#facc15;"></i> Netle
+                    </button>
+                    <button type="button" class="btn-cam-tool" onclick="toggleAuditZoom()" style="flex:1; padding:8px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.1); color:#fff; border-radius:8px; font-size:0.78rem; font-weight:600; display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer;">
+                        <i class="fa-solid fa-magnifying-glass-plus" style="color:#38bdf8;"></i> <span id="audit-zoom-text">1.5x</span>
+                    </button>
+                    <button type="button" class="btn-cam-tool" id="btn-audit-torch" onclick="toggleAuditTorch()" style="flex:1; padding:8px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.1); color:#fff; border-radius:8px; font-size:0.78rem; font-weight:600; display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer;">
+                        <i class="fa-solid fa-bolt"></i> Flaş
+                    </button>
+                </div>
+                <div style="font-size:0.73rem; color:#94a3b8; text-align:center; padding:6px 12px 4px; background:rgba(15,23,42,0.6);">
+                    💡 <b>Netlik İpucu:</b> Telefonu <b>15-20 cm</b> mesafede tutun ve <b>1.5x / 2x</b> büyütmeyi kullanın. Ekrana dokunarak odaklayabilirsiniz.
                 </div>
             </div>
 
@@ -255,6 +333,381 @@
         </main>
     </div>
 
+    <nav class="global-mobile-nav">
+        <a href="/cikis" class="global-nav-item">
+            <i class="fa-solid fa-box-open"></i>
+            <span>Çıkış Okut</span>
+        </a>
+        <a href="/cikis-listesi" class="global-nav-item">
+            <i class="fa-solid fa-list-check"></i>
+            <span>Çıkış Listesi</span>
+        </a>
+        <a href="/stok-esitleme" class="global-nav-item active">
+            <i class="fa-solid fa-boxes-stacked"></i>
+            <span>Terek Eşitle</span>
+        </a>
+        <a href="/depo_stoklari" class="global-nav-item">
+            <i class="fa-solid fa-warehouse"></i>
+            <span>Depo Stokları</span>
+        </a>
+        {% if not session.get('mobile_quick_login') %}
+        <a href="/kullaniciya-satis" class="global-nav-item">
+            <i class="fa-solid fa-user-tag"></i>
+            <span>Satış Yap</span>
+        </a>
+        {% endif %}
+        <a href="/logout" class="global-nav-item" onclick="return confirm('Oturumu kapatmak istediğinize emin misiniz?')" style="color: #f87171;">
+            <i class="fa-solid fa-power-off"></i>
+            <span>Çıkış</span>
+        </a>
+    </nav>
+
     <script src="/static/app.js?v=20261009_v322"></script>
+    <script>
+        // 📸 Terek QR Sayım Kamera Motoru
+        let auditQrScanner = null;
+        let isAuditCamRunning = false;
+        let auditFacingMode = "environment";
+        let isAuditTorchOn = false;
+        let auditZoomLevel = 1;
+        let isAuditProcessing = false;
+        let lastAuditCode = "";
+        let lastAuditTime = 0;
+
+        const audioCtxAudit = new (window.AudioContext || window.webkitAudioContext)();
+        function playAuditBeep(ok = true) {
+            try {
+                if (audioCtxAudit.state === 'suspended') audioCtxAudit.resume();
+                const osc = audioCtxAudit.createOscillator();
+                const gain = audioCtxAudit.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtxAudit.destination);
+                if (ok) {
+                    osc.frequency.setValueAtTime(1200, audioCtxAudit.currentTime);
+                    osc.frequency.setValueAtTime(1700, audioCtxAudit.currentTime + 0.08);
+                    gain.gain.setValueAtTime(0.3, audioCtxAudit.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, audioCtxAudit.currentTime + 0.18);
+                    osc.start();
+                    osc.stop(audioCtxAudit.currentTime + 0.18);
+                } else {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(300, audioCtxAudit.currentTime);
+                    gain.gain.setValueAtTime(0.4, audioCtxAudit.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, audioCtxAudit.currentTime + 0.25);
+                    osc.start();
+                    osc.stop(audioCtxAudit.currentTime + 0.25);
+                }
+            } catch (_) {}
+            if (navigator.vibrate) navigator.vibrate(ok ? [70] : [150, 100, 150]);
+        }
+
+        function showAuditHud(title, sub, type = 'success') {
+            const hud = document.getElementById('audit-scan-hud');
+            const t = document.getElementById('audit-hud-title');
+            const s = document.getElementById('audit-hud-sub');
+            if (!hud) return;
+            t.textContent = title;
+            s.textContent = sub;
+            hud.style.background = type === 'success' ? 'rgba(16, 185, 129, 0.95)' : 'rgba(239, 68, 68, 0.95)';
+            hud.style.color = '#fff';
+            hud.style.display = 'block';
+            setTimeout(() => { hud.style.display = 'none'; }, 1800);
+        }
+
+        function getAuditVideoTrack() {
+            try {
+                const v = document.querySelector('#audit-camera-reader video');
+                if (v && v.srcObject) return v.srcObject.getVideoTracks()[0];
+            } catch (_) {}
+            return null;
+        }
+
+        async function applyAuditFocus() {
+            const track = getAuditVideoTrack();
+            if (!track || !track.getCapabilities) return;
+            try {
+                const caps = track.getCapabilities();
+                if (caps.focusMode && caps.focusMode.includes('continuous')) {
+                    await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+                }
+            } catch (_) {}
+        }
+
+        async function triggerAuditManualFocus(e) {
+            const ring = document.getElementById('audit-focus-ring');
+            if (ring) {
+                ring.style.animation = 'none';
+                ring.offsetHeight;
+                ring.style.animation = 'focusRingPulse 0.5s ease-out';
+                ring.style.display = 'block';
+                if (!e) {
+                    ring.style.left = '50%';
+                    ring.style.top = '50%';
+                }
+                setTimeout(() => { if (ring) ring.style.display = 'none'; }, 600);
+            }
+            const track = getAuditVideoTrack();
+            if (track && track.getCapabilities) {
+                const caps = track.getCapabilities();
+                if (caps.focusMode && caps.focusMode.includes('continuous')) {
+                    await track.applyConstraints({ advanced: [{ focusMode: 'single-shot' }] }).catch(() => {});
+                    setTimeout(async () => {
+                        await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {});
+                    }, 250);
+                }
+            }
+        }
+
+        function handleAuditCameraTouch(e) {
+            const box = document.getElementById('audit-camera-box-wrap');
+            const ring = document.getElementById('audit-focus-ring');
+            if (box && ring && e) {
+                const rect = box.getBoundingClientRect();
+                const clientX = e.clientX || (e.touches && e.touches[0]?.clientX);
+                const clientY = e.clientY || (e.touches && e.touches[0]?.clientY);
+                if (clientX && clientY) {
+                    ring.style.left = (clientX - rect.left) + 'px';
+                    ring.style.top = (clientY - rect.top) + 'px';
+                }
+            }
+            triggerAuditManualFocus(e);
+        }
+
+        async function toggleAuditZoom() {
+            const steps = [1, 1.5, 2];
+            const nextIdx = (steps.indexOf(auditZoomLevel) + 1) % steps.length;
+            auditZoomLevel = steps[nextIdx];
+            const txt = document.getElementById('audit-zoom-text');
+            if (txt) txt.textContent = auditZoomLevel === 1 ? '1x Zoom' : auditZoomLevel + 'x';
+
+            const track = getAuditVideoTrack();
+            let hwZoom = false;
+            if (track && track.getCapabilities) {
+                const caps = track.getCapabilities();
+                if (caps.zoom) {
+                    const zMin = caps.zoom.min || 1;
+                    const zMax = caps.zoom.max || 1;
+                    const tZ = Math.min(Math.max(auditZoomLevel, zMin), zMax);
+                    try {
+                        await track.applyConstraints({ advanced: [{ zoom: tZ }] });
+                        hwZoom = true;
+                    } catch (_) {}
+                }
+            }
+            const v = document.querySelector('#audit-camera-reader video');
+            if (v) {
+                if (hwZoom) {
+                    v.style.transform = 'none';
+                } else {
+                    v.style.transform = `scale(${auditZoomLevel})`;
+                    v.style.transformOrigin = 'center center';
+                    v.style.transition = 'transform 0.2s cubic-bezier(0.4,0,0.2,1)';
+                }
+            }
+        }
+
+        async function toggleAuditTorch() {
+            const nextState = !isAuditTorchOn;
+            let applied = false;
+            try {
+                const track = getAuditVideoTrack();
+                if (track && track.applyConstraints) {
+                    try {
+                        await track.applyConstraints({ advanced: [{ torch: nextState }] });
+                        applied = true;
+                    } catch (_) {
+                        try {
+                            await track.applyConstraints({ torch: nextState });
+                            applied = true;
+                        } catch (_2) {}
+                    }
+                }
+                if (!applied && auditQrScanner && typeof auditQrScanner.applyVideoConstraints === 'function') {
+                    try {
+                        await auditQrScanner.applyVideoConstraints({ advanced: [{ torch: nextState }] });
+                        applied = true;
+                    } catch (_) {}
+                }
+            } catch (_) {}
+
+            const btn = document.getElementById('btn-audit-torch');
+            if (applied) {
+                isAuditTorchOn = nextState;
+                if (btn) {
+                    btn.style.color = isAuditTorchOn ? '#0f172a' : '#fff';
+                    btn.style.background = isAuditTorchOn ? '#f59e0b' : 'rgba(255,255,255,0.08)';
+                    btn.style.borderColor = isAuditTorchOn ? '#f59e0b' : 'rgba(255,255,255,0.1)';
+                }
+            } else {
+                showAuditCamHud('warn', '⚠️ Flaş Açılamadı', 'Bu kamera lensi flaş/fener özelliğini desteklemiyor.');
+            }
+        }
+
+        let isAuditCamTransitioning = false;
+
+        async function toggleAuditCamera() {
+            if (isAuditCamTransitioning) return;
+            isAuditCamTransitioning = true;
+            try {
+                if (isAuditCamRunning) {
+                    await stopAuditCamera();
+                } else {
+                    await startAuditCamera();
+                }
+            } finally {
+                isAuditCamTransitioning = false;
+            }
+        }
+
+        async function startAuditCamera() {
+            // Güvenli Bağlantı (HTTPS) Kontrolü: Mobil tarayıcılar HTTP üzerinden kamerayı engeller
+            if (!window.isSecureContext && location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+                alert('⚠️ Kamera Güvenlik Uyarısı:\n\nTarayıcı güvenlik kuralları gereği mobil cihazlarda kamera SADECE güvenli HTTPS bağlantısında çalışır.\n\nLütfen Cloudflare Tünel adresiniz (https://...) üzerinden bağlanınız.');
+                return;
+            }
+
+            const container = document.getElementById('audit-camera-container');
+            const btnText = document.getElementById('btn-audit-cam-text');
+            container.style.display = 'block';
+            btnText.textContent = "🛑 Kamerayı Durdur";
+
+            // Geçiş hatası ("Cannot transition to a new state") önlemek için eski örneği temizle
+            if (auditQrScanner) {
+                try {
+                    if (auditQrScanner.isScanning) {
+                        await auditQrScanner.stop();
+                    }
+                } catch (_) {}
+                try {
+                    await auditQrScanner.clear();
+                } catch (_) {}
+                auditQrScanner = null;
+            }
+
+            auditQrScanner = new Html5Qrcode("audit-camera-reader");
+
+            const config = {
+                fps: 20,
+                qrbox: function(viewfinderWidth, viewfinderHeight) {
+                    return {
+                        width: Math.min(viewfinderWidth * 0.88, 320),
+                        height: Math.min(viewfinderHeight * 0.75, 260)
+                    };
+                },
+                aspectRatio: 1.0
+            };
+
+            try {
+                await auditQrScanner.start(
+                    { facingMode: auditFacingMode },
+                    config,
+                    onAuditScanned,
+                    function(_) {}
+                );
+                isAuditCamRunning = true;
+                setTimeout(applyAuditFocus, 400);
+            } catch (err) {
+                console.error("Audit kamera açılamadı, alternatif deneniyor:", err);
+                try {
+                    try { await auditQrScanner.stop(); } catch (_) {}
+                    try { await auditQrScanner.clear(); } catch (_) {}
+                    auditQrScanner = new Html5Qrcode("audit-camera-reader");
+
+                    const cams = await Html5Qrcode.getCameras();
+                    if (cams && cams.length > 0) {
+                        const backCam = cams.find(c => /back|arka|rear|environment/i.test(c.label)) || cams[0];
+                        await auditQrScanner.start(
+                            backCam.id,
+                            config,
+                            onAuditScanned,
+                            function(_) {}
+                        );
+                        isAuditCamRunning = true;
+                        setTimeout(applyAuditFocus, 400);
+                        return;
+                    }
+                } catch (e2) {
+                    console.error("Kamera alternatifi de açılamadı:", e2);
+                }
+
+                const errStr = String(err && (err.name || err.message) ? (err.name + " " + err.message) : err);
+                if (errStr.includes('NotAllowedError') || errStr.includes('PermissionDenied') || errStr.includes('Permission')) {
+                    alert("⚠️ KAMERA İZNİ ENGELLENDİ!\n\nTarayıcınızda kamera izni verilmemiş.\n\nÇözüm: Adres çubuğundaki kilit (🔒) simgesine dokunup Kamera İznini 'İzin Ver' yapın ve sayfayı yenileyin.");
+                } else if (errStr.includes('NotFoundError') || errStr.includes('DevicesNotFoundError')) {
+                    alert("⚠️ Cihazınızda kullanılabilir kamera algılanamadı.");
+                } else if (errStr.includes('NotReadableError') || errStr.includes('TrackStartError')) {
+                    alert("⚠️ Kamera başka bir uygulama veya sekme tarafından meşgul.");
+                } else {
+                    alert("⚠️ Kamera açılamadı: " + (err.message || err));
+                }
+                await stopAuditCamera();
+            }
+        }
+
+        async function stopAuditCamera() {
+            const container = document.getElementById('audit-camera-container');
+            const btnText = document.getElementById('btn-audit-cam-text');
+            if (auditQrScanner) {
+                try {
+                    if (auditQrScanner.isScanning) {
+                        await auditQrScanner.stop();
+                    }
+                } catch (_) {}
+                try {
+                    await auditQrScanner.clear();
+                } catch (_) {}
+                auditQrScanner = null;
+            }
+            isAuditCamRunning = false;
+            container.style.display = 'none';
+            btnText.textContent = "📷 Kamerayı Aç (Terek Seri Sayım)";
+        }
+
+        async function switchAuditCamera() {
+            auditFacingMode = (auditFacingMode === "environment") ? "user" : "environment";
+            if (isAuditCamRunning) {
+                await stopAuditCamera();
+                await startAuditCamera();
+            }
+        }
+
+        function onAuditScanned(decodedText) {
+            if (!decodedText || isAuditProcessing) return;
+            const code = decodedText.trim();
+            if (!code) return;
+
+            const now = Date.now();
+            if (code === lastAuditCode && (now - lastAuditTime) < 2000) return;
+            lastAuditCode = code;
+            lastAuditTime = now;
+            isAuditProcessing = true;
+
+            playAuditBeep(true);
+            showAuditHud("✓ QR OKUNDU", code.substring(0, 32));
+
+            // Terek sayım motoruna anında aktar
+            const el = document.getElementById('audit-input-main');
+            if (el) el.value = code;
+            if (typeof handleScanSubmit === 'function') {
+                handleScanSubmit(code);
+            } else if (typeof window.triggerAuditSubmit === 'function') {
+                window.triggerAuditSubmit();
+            }
+
+            setTimeout(() => { isAuditProcessing = false; }, 800);
+        }
+
+        // Cihaz Kontrolü: Masaüstü bilgisayarlarda KESİNLİKLE gizle, yalnızca telefon/tablette göster
+        function setupAuditCameraUI() {
+            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || 
+                             (window.innerWidth < 992 && (('ontouchstart' in window) || (navigator.maxTouchPoints > 0)));
+            const camBtn = document.getElementById('btn-toggle-audit-cam');
+            if (camBtn) {
+                camBtn.style.display = isMobile ? 'flex' : 'none';
+            }
+        }
+        window.addEventListener('DOMContentLoaded', setupAuditCameraUI);
+        window.addEventListener('resize', setupAuditCameraUI);
+    </script>
 </body>
 </html>

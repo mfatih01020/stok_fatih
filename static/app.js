@@ -1,6 +1,13 @@
 // ── QR COMPARE APP.JS ──────────────────────────────────────────────────────
 console.log("QR Compare app.js loading...");
 
+// 🛡️ ÇEVRİMDIŞI ÇALIŞMA GARANTİSİ (DİNOZOR OYUNUNU ENGELLEYEN SERVICE WORKER)
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
+    });
+}
+
 // Global HTML & Attribute Escaping Helpers
 window.esc = function(str) {
     return String(str || '')
@@ -17,6 +24,27 @@ window.escAttr = function(str) {
         .replace(/'/g, '&#39;');
 };
 
+function showServerConnectionErrorModal() {
+    if (document.getElementById('server-conn-error-modal')) return;
+    const modal = document.createElement('div');
+    modal.id = 'server-conn-error-modal';
+    modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(15,23,42,0.85);backdrop-filter:blur(8px);z-index:999999;display:flex;align-items:center;justify-content:center;padding:20px;';
+    modal.innerHTML = `
+        <div style="background:#1e293b;border:1px solid rgba(255,255,255,0.15);border-radius:20px;padding:36px;max-width:440px;width:100%;text-align:center;box-shadow:0 25px 50px -12px rgba(0,0,0,0.7);color:#f8fafc;font-family:system-ui, -apple-system, sans-serif;">
+            <div style="width:68px;height:68px;margin:0 auto 16px;background:rgba(239,68,68,0.15);border:2px solid rgba(239,68,68,0.4);border-radius:50%;display:flex;align-items:center;justify-content:center;color:#f87171;font-size:32px;">⚠️</div>
+            <h2 style="font-size:1.35rem;font-weight:700;margin:0 0 12px;color:#ffffff;">Sunucu Bağlantısı Kesildi</h2>
+            <p style="font-size:0.92rem;color:#94a3b8;line-height:1.6;margin:0 0 24px;">Merkez sunucuya ulaşılamıyor veya internet bağlantınız kesildi.<br>Lütfen sunucunun açık olduğunu ve internetinizi kontrol edip uygulamayı yeniden başlatınız veya tekrar deneyiniz.</p>
+            <div style="display:flex;gap:12px;justify-content:center;">
+                <button onclick="location.reload()" style="background:linear-gradient(135deg,#0284c7,#0369a1);color:#fff;border:none;padding:12px 24px;border-radius:12px;font-weight:600;font-size:0.95rem;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">🔄 Tekrar Dene / Yenile</button>
+                <button onclick="document.getElementById('server-conn-error-modal').remove()" style="background:transparent;color:#94a3b8;border:1px solid #475569;padding:12px 18px;border-radius:12px;font-weight:500;font-size:0.95rem;cursor:pointer;">Kapat</button>
+            </div>
+            <div style="margin-top:16px;font-size:0.8rem;color:#64748b;">Hata: 1033 / Ağ Kesintisi &bull; QR Compare</div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
+window.showServerConnectionErrorModal = showServerConnectionErrorModal;
+
 // Global Session Authenticated Fetch Helper & Native Fetch Interceptor
 const _nativeGlobalFetch = window.fetch;
 window.fetch = async function(resource, init = {}) {
@@ -30,11 +58,24 @@ window.fetch = async function(resource, init = {}) {
             if (!init.headers['X-Requested-With']) init.headers['X-Requested-With'] = 'XMLHttpRequest';
         }
     }
-    const response = await _nativeGlobalFetch.call(window, resource, init);
-    if (response.status === 401 && urlStr && urlStr.startsWith('/api/') && !urlStr.startsWith('/api/system/heartbeat') && !urlStr.startsWith('/api/system/user_info')) {
-        window.location.href = '/login';
+    try {
+        const response = await _nativeGlobalFetch.call(window, resource, init);
+        // Cloudflare Error 1033 / 530 / 502 / 504 / 521 / 522 Interceptor
+        if (response && (response.status === 530 || response.status === 502 || response.status === 503 || response.status === 504 || response.status === 521 || response.status === 522)) {
+            showServerConnectionErrorModal();
+        }
+        if ((response.status === 401 || response.status === 403) && urlStr && urlStr.startsWith('/api/') && !urlStr.startsWith('/api/system/user_info')) {
+            if (navigator.onLine) {
+                window.location.href = '/login?error=yetkisiz';
+            }
+        }
+        return response;
+    } catch (err) {
+        if (urlStr && urlStr.startsWith('/api/')) {
+            showServerConnectionErrorModal();
+        }
+        throw err;
     }
-    return response;
 };
 window.apiFetch = window.fetch;
 
@@ -51,16 +92,35 @@ window.apiFetch = window.fetch;
     let hbTimer = null;
     async function sendPing() {
         try {
-            const res = await window.apiFetch('/api/system/heartbeat', { method: 'POST' });
+            const res = await _nativeGlobalFetch.call(window, '/api/system/heartbeat', {
+                method: 'POST',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            });
+            if (res.status === 401 || res.status === 403) {
+                if (navigator.onLine) {
+                    window.location.href = '/login?error=yetkisiz';
+                }
+                return;
+            }
             if (res && res.ok) {
                 const data = await res.json();
+                if (data && (data.unauthorized || data.status === 'revoked')) {
+                    if (navigator.onLine) {
+                        window.location.href = '/login?error=yetkisiz';
+                    }
+                    return;
+                }
                 if (data && typeof window.updateSystemStatusPill === 'function') {
                     if (data.running) {
                         window.updateSystemStatusPill('fetching', 'Veriler Çekiliyor...');
-                    } else if (data.online === false || data.status === 'offline' || data.status === 'error') {
-                        window.updateSystemStatusPill(false, 'Sistem Deaktif', data.message);
-                    } else if (data.online === true && data.fetched_count > 0) {
-                        window.updateSystemStatusPill(true, 'Sistem Aktif');
+                    } else if (data.status === 'revoked' || data.unauthorized) {
+                        window.updateSystemStatusPill(false, 'Yetkisiz Oturum', data.message);
+                    } else if (data.server_connected || data.online === true || data.is_main_server) {
+                        window.updateSystemStatusPill(true, 'Merkez Sunucu Canlı');
+                    } else if (navigator.onLine) {
+                        window.updateSystemStatusPill(true, 'Sistem Aktif (Yerel Mod)');
+                    } else {
+                        window.updateSystemStatusPill(false, 'Çevrimdışı (İnternet Yok)', data.message);
                     }
                 }
             }
@@ -68,7 +128,7 @@ window.apiFetch = window.fetch;
     }
     function startTimer() {
         if (hbTimer) return;
-        hbTimer = setInterval(sendPing, 10000);
+        hbTimer = setInterval(sendPing, 15000);
     }
     function stopTimer() {
         if (hbTimer) { clearInterval(hbTimer); hbTimer = null; }
@@ -1174,50 +1234,73 @@ async function loadUserInfo() {
 }
 
 async function logoutUser() {
-    if (!confirm("Oturumu kapatmak ve bakanlık giriş bilgilerinizi silmek istediğinize emin misiniz?")) {
+    if (!confirm("Oturumu kapatmak istediğinize emin misiniz?")) {
         return;
     }
+    const btns = document.querySelectorAll('.btn-logout-icon');
+    btns.forEach(b => {
+        b.disabled = true;
+        b.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+    });
     try {
-        sessionStorage.removeItem('bkst_auto_synced');
-        localStorage.removeItem('cached_user_name');
-        const res = await fetch('/api/system/logout', { method: 'POST' });
-        const data = await res.json();
-        if (data.success) {
-            window.location.href = '/login';
-        } else {
-            alert(data.error || "Oturum kapatılamadı.");
-        }
-    } catch (e) {
-        alert("Bağlantı hatası: " + e.message);
-    }
+        sessionStorage.clear();
+        localStorage.clear();
+        document.cookie = "session=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+        document.cookie = "local_session_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+        await fetch('/api/system/logout', {
+            method: 'POST',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        });
+    } catch (_) {}
+    window.location.replace('/login?logout=1');
 }
 
 window.logoutUser = logoutUser;
 
-// ── Sistem Durumu ve Durum Rozeti (Sistem Aktif / Sistem Deaktif) ───────────
+// ── Birleşik Sistem ve Ağ Durumu Rozeti (Merkez Sunucu Canlı / Çevrimdışı) ──
 window.updateSystemStatusPill = function(isOnline, statusText, details) {
-    const pills = document.querySelectorAll('.system-status-pill');
+    const pills = document.querySelectorAll('.system-status-pill, #global-network-badge');
     pills.forEach(pill => {
-        const ind = pill.querySelector('.status-indicator');
-        const textSpan = pill.querySelector('span:not(.status-indicator)');
+        const ind = pill.querySelector('.status-indicator') || pill.querySelector('.net-pulse-dot');
+        const textSpan = pill.querySelector('#network-status-text') || pill.querySelector('span:not(.status-indicator):not(.net-pulse-dot):not(.pending-count-pill)');
+        const icon = pill.querySelector('.net-icon');
         
-        pill.classList.remove('offline', 'fetching');
+        pill.classList.remove('offline', 'fetching', 'online', 'syncing');
         if (ind) ind.classList.remove('online', 'offline', 'fetching');
         
         if (isOnline === true) {
+            pill.classList.add('online');
             if (ind) ind.classList.add('online');
-            if (textSpan) textSpan.textContent = statusText || 'Sistem Aktif';
-            pill.title = details || 'Bakanlık bağlantısı aktif, güncel veriler senkronize.';
+            if (icon) {
+                icon.className = 'fa-solid fa-wifi net-icon';
+                icon.style.color = '#4ade80';
+            }
+            const pCount = window._currentPendingSyncCount || 0;
+            const defaultTxt = pCount > 0 ? `Merkez Sunucu Canlı (${pCount})` : 'Merkez Sunucu Canlı';
+            if (textSpan) textSpan.textContent = statusText || defaultTxt;
+            pill.title = details || 'Merkez sunucu ve internet bağlantısı aktif. Canlı senkronizasyon devrede.';
         } else if (isOnline === false) {
             pill.classList.add('offline');
             if (ind) ind.classList.add('offline');
-            if (textSpan) textSpan.textContent = statusText || 'Sistem Deaktif';
-            pill.title = details || 'Bakanlığa bağlanılamadı. Sistem yerel veritabanı ile deaktif modda çalışıyor.';
+            if (icon) {
+                icon.className = 'fa-solid fa-wifi-slash net-icon';
+                icon.style.color = '#f87171';
+            }
+            if (textSpan) textSpan.textContent = statusText || 'Çevrimdışı (İnternet Yok)';
+            pill.title = details || 'İnternet bağlantısı kesik! Okutmalar yerel depodan eşleştirilerek güvenle kaydediliyor.';
         } else if (isOnline === 'fetching') {
             pill.classList.add('fetching');
             if (ind) ind.classList.add('fetching');
-            if (textSpan) textSpan.textContent = statusText || 'Bağlantı Kuruluyor...';
-            pill.title = details || 'Bakanlık verileri güncelleniyor...';
+            if (icon) {
+                icon.className = 'fa-solid fa-spinner fa-spin net-icon';
+                icon.style.color = '#38bdf8';
+            }
+            if (textSpan) textSpan.textContent = statusText || 'Veriler Çekiliyor...';
+            pill.title = details || 'Bakanlık stok verileri güncelleniyor...';
         }
     });
 };
@@ -1225,6 +1308,13 @@ window.updateSystemStatusPill = function(isOnline, statusText, details) {
 // ── Otomatik Bakanlık Veri Senkronizasyonu (Uygulama Açıldığında) ──────────────────────────
 async function runAutoBkstSync(force = false) {
     if (window.location.pathname === '/login') return;
+
+    const urlPreSynced = window.location.search.includes('pre_synced=1');
+    if (urlPreSynced) {
+        sessionStorage.setItem('app_launch_synced', 'true');
+        try { window.history.replaceState({}, document.title, window.location.pathname); } catch (_) {}
+        return;
+    }
 
     const urlForce = window.location.search.includes('force_sync=1');
     const alreadySynced = sessionStorage.getItem('app_launch_synced');
@@ -1389,6 +1479,9 @@ async function checkWebSystemUpdate() {
 }
 
 async function initApp() {
+    if (window.location.pathname.toLowerCase() === '/login') {
+        return;
+    }
     loadUserInfo();
     loadSystemVersion();
 
@@ -1400,23 +1493,17 @@ async function initApp() {
     }
 
     // 2. Bakanlık Senkronizasyonu Kontrolü:
-    // Sunucunun senkronizasyon durumunu sorgula
-    let serverNeedsSync = false;
-    try {
-        const syncRes = await fetch('/api/system/sync_status');
-        if (syncRes.ok) {
-            const syncData = await syncRes.json();
-            if (!syncData.synced) {
-                serverNeedsSync = true;
-            }
-        }
-    } catch (_) {}
+    // Eğer masaüstü açılışında senkronizasyon yapıldıysa (pre_synced=1), modalı açma
+    const urlPreSynced = window.location.search.includes('pre_synced=1');
+    if (urlPreSynced) {
+        sessionStorage.setItem('app_launch_synced', 'true');
+        try { window.history.replaceState({}, document.title, window.location.pathname); } catch (_) {}
+    }
 
     const urlForce = window.location.search.includes('force_sync=1');
     const sessionSynced = sessionStorage.getItem('app_launch_synced');
 
-    // Sunucu yeni başladıysa VEYA zorlama varsa VEYA bu oturumda henüz veri çekilmediyse veri çek
-    if (serverNeedsSync || urlForce || !sessionSynced) {
+    if (!urlPreSynced && (urlForce || !sessionSynced)) {
         await runAutoBkstSync(true);
     }
 }
@@ -1426,4 +1513,344 @@ if (document.readyState === "loading") {
 } else {
     initApp();
 }
+
+// ── MANUEL SUNUCU SENKRONİZASYON TETİKLEYİCİSİ (BUTON İLE) ─────────────────
+window.triggerServerSync = async function() {
+    const btn = document.getElementById('btn-sync-server') || document.getElementById('btn-sync-server-list');
+    const origHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> İadeli Taahhütlü Doğrulanıyor...';
+    }
+
+    try {
+        const res = await (window.apiFetch || fetch)('/api/sync/manual', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
+        });
+        const data = await res.json();
+        if (data.success) {
+            alert(data.message || '✅ İadeli Taahhütlü Senkronizasyon Başarılı!');
+            // Sayfadaki güncel listeyi yeniden yükle
+            if (typeof loadRecent === 'function') loadRecent();
+            if (typeof loadList === 'function') loadList();
+            if (typeof loadRecentScans === 'function') loadRecentScans();
+            if (typeof loadExitList === 'function') loadExitList();
+            if (typeof window.loadWarehouseStock === 'function') window.loadWarehouseStock();
+        } else {
+            const errMsg = data.error || 'Senkronizasyon doğrulanamadı.';
+            if (errMsg.includes('bağlanılamadı') || errMsg.includes('erişilemiyor') || errMsg.includes('tanımlı değil') || data.offline) {
+                // 🛑 Kullanıcıya tünel adresi sorma! Firebase ve arka plan otomatik eşitlemesi devreye girsin.
+                if (typeof showNetworkToast === 'function') {
+                    showNetworkToast('⚠️ Merkez sunucuya ulaşılamadı. Sunucu geçici olarak kapalı olabilir. Sistem yerel depolama ile çalışmaya devam ediyor ve sunucu açıldığında otomatik eşitlenecektir.', 'warn');
+                }
+                if (window.updateSystemStatusPill) {
+                    window.updateSystemStatusPill(false, 'Sunucu Bekleniyor', 'Sunucu geçici olarak çevrimdışı. Okutmalar yerelde güvendedir.');
+                }
+            } else {
+                if (typeof showNetworkToast === 'function') {
+                    showNetworkToast(`⚠️ ${errMsg}`, 'warn');
+                } else {
+                    alert(errMsg);
+                }
+            }
+        }
+    } catch (e) {
+        if (typeof showNetworkToast === 'function') {
+            showNetworkToast(`⚠️ Bağlantı bekliyor: Sunucu şu an çevrimdışı (${e.message}). Okutmalarınız yerel depoya güvenle kaydediliyor.`, 'warn');
+        }
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = origHtml;
+        }
+    }
+};
+
+// ==============================================================================
+// 🌐 CANLI AĞ, İNTERNET & OTOMATİK SENKRONİZASYON MOTORU
+// ==============================================================================
+(function initNetworkWatcher() {
+    let _wasOnline = true;
+    let _lastPendingCount = 0;
+    let _isSyncing = false;
+    let _pollTimer = null;
+
+    function showNetworkToast(msg, type = 'info') {
+        let container = document.getElementById('network-toast-container');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'network-toast-container';
+            container.style.cssText = 'position:fixed; bottom:24px; right:24px; z-index:999999; display:flex; flex-direction:column; gap:10px; pointer-events:none;';
+            document.body.appendChild(container);
+        }
+
+        const toast = document.createElement('div');
+        const bg = type === 'success' ? 'linear-gradient(135deg, #065f46, #047857)' :
+                   type === 'error'   ? 'linear-gradient(135deg, #991b1b, #b91c1c)' :
+                   type === 'warn'    ? 'linear-gradient(135deg, #92400e, #b45309)' :
+                                        'linear-gradient(135deg, #1e1b4b, #3730a3)';
+        const border = type === 'success' ? '#10b981' :
+                       type === 'error'   ? '#ef4444' :
+                       type === 'warn'    ? '#f59e0b' : '#6366f1';
+
+        toast.style.cssText = `background:${bg}; border:1.5px solid ${border}; color:#fff; padding:12px 18px; border-radius:12px; font-family:var(--font-inter, sans-serif); font-size:0.88rem; font-weight:600; box-shadow:0 8px 24px rgba(0,0,0,0.35); display:flex; align-items:center; gap:10px; pointer-events:auto; animation:slideInUp 0.3s ease-out; max-width:380px;`;
+        toast.innerHTML = msg;
+        container.appendChild(toast);
+
+        setTimeout(() => {
+            toast.style.transition = 'all 0.4s ease';
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateY(15px)';
+            setTimeout(() => toast.remove(), 400);
+        }, 4500);
+    }
+
+    function updateNetworkBadgeUI(isOnline, pendingCount = 0, isMainServer = false) {
+        window._currentPendingSyncCount = pendingCount;
+        const badge = document.getElementById('global-network-badge');
+        const textSpan = document.getElementById('network-status-text') || (badge ? badge.querySelector('.net-text') : null);
+        const countSpan = document.getElementById('pending-sync-badge');
+        if (!badge) return;
+
+        badge.classList.remove('online', 'offline', 'syncing', 'fetching');
+
+        const activeText = pendingCount > 0 ? `Merkez Sunucu Canlı (${pendingCount})` : 'Merkez Sunucu Canlı';
+
+        if (isOnline) {
+            badge.classList.add('online');
+            const icon = badge.querySelector('.net-icon');
+            if (icon) {
+                icon.className = 'fa-solid fa-wifi net-icon';
+                icon.style.color = '#4ade80';
+            }
+            if (textSpan) {
+                textSpan.textContent = activeText;
+            }
+            badge.title = 'Merkez Sunucu bağlantısı aktif. Canlı senkronizasyon devrede. (Tıklayarak Şimdi Eşitleyin)';
+        } else {
+            badge.classList.add('offline');
+            const icon = badge.querySelector('.net-icon');
+            if (icon) {
+                icon.className = 'fa-solid fa-wifi-slash net-icon';
+                icon.style.color = '#f87171';
+            }
+            if (textSpan) {
+                textSpan.textContent = 'Çevrimdışı (İnternet Yok)';
+            }
+            badge.title = 'İnternet bağlantısı kesik! Barkod okumalarınız yerel depodan eşleştirilerek güvenle kaydedilmektedir. İnternet geldiğinde otomatik eşitlenecektir.';
+        }
+
+        if (countSpan) {
+            if (pendingCount > 0) {
+                countSpan.style.display = 'inline-block';
+                countSpan.textContent = `${pendingCount}`;
+            } else {
+                countSpan.style.display = 'none';
+            }
+        }
+    }
+
+    async function triggerAutoSyncOnOnline() {
+        if (_isSyncing) return;
+        _isSyncing = true;
+        const badge = document.getElementById('global-network-badge');
+        if (badge) badge.classList.add('syncing');
+
+        showNetworkToast('🌐 İnternet Bağlantısı Sağlandı! Bekleyen çıkışlar sunucuyla eşitleniyor...', 'info');
+
+        try {
+            const res = await (window.apiFetch || fetch)('/api/sync/manual', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
+            });
+            const data = await res.json();
+            if (data && data.success) {
+                showNetworkToast('✅ Tüm bekleyen kayıtlar ana sunucuyla başarıyla eşitlendi!', 'success');
+                if (typeof loadRecent === 'function') loadRecent();
+                if (typeof loadList === 'function') loadList();
+                if (typeof loadRecentScans === 'function') loadRecentScans();
+                if (typeof loadExitList === 'function') loadExitList();
+            }
+        } catch (e) {
+            console.warn('Otomatik senkron hatası:', e);
+        } finally {
+            _isSyncing = false;
+            if (badge) badge.classList.remove('syncing');
+            checkNetworkStatus();
+        }
+    }
+
+    async function checkNetworkStatus() {
+        try {
+            const res = await fetch('/api/system/network_status', {
+                method: 'GET',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                cache: 'no-store'
+            });
+
+            if (!res.ok) {
+                updateNetworkBadgeUI(false, _lastPendingCount, false);
+                return;
+            }
+
+            const data = await res.json();
+            const isOnline = Boolean(data.has_internet || data.server_connected || data.is_main_server);
+            const pendingCount = data.pending_sync_count || 0;
+            _lastPendingCount = pendingCount;
+
+            updateNetworkBadgeUI(isOnline, pendingCount, data.is_main_server);
+
+            // İnternet kopukken tekrar geri geldiyse:
+            if (!_wasOnline && isOnline) {
+                _wasOnline = true;
+                if (pendingCount > 0) {
+                    triggerAutoSyncOnOnline();
+                } else {
+                    showNetworkToast('🌐 İnternet bağlantısı yeniden kuruldu.', 'success');
+                }
+            } else if (_wasOnline && !isOnline) {
+                _wasOnline = false;
+                showNetworkToast('⚠️ İnternet Bağlantısı Kesildi! Sistem çevrimdışı moda geçti. Okutmalar yerel depoya güvenle kaydedilmeye devam edecektir.', 'warn');
+            }
+
+        } catch (err) {
+            updateNetworkBadgeUI(false, _lastPendingCount, false);
+            if (_wasOnline) {
+                _wasOnline = false;
+                showNetworkToast('⚠️ Ağ bağlantısı koptu. Çevrimdışı mod devrede.', 'warn');
+            }
+        }
+    }
+
+    window.handleNetworkBadgeClick = function() {
+        if (_isSyncing) {
+            showNetworkToast('⏳ Eşitleme işlemi zaten devam ediyor...', 'info');
+            return;
+        }
+        showNetworkToast('🔄 Sunucu ile senkronizasyon kontrolü başlatılıyor...', 'info');
+        window.triggerServerSync();
+    };
+
+    window.addEventListener('online', () => {
+        checkNetworkStatus();
+    });
+
+    window.addEventListener('offline', () => {
+        _wasOnline = false;
+        updateNetworkBadgeUI(false, _lastPendingCount, false);
+        showNetworkToast('⚠️ İnternet Bağlantısı Kesildi! Sistem yerel çevrimdışı modda çalışıyor.', 'warn');
+    });
+
+    // Sayfa açıldığında ilk kontrol ve 20 saniyede bir yoklama (arka plandayken durur)
+    function startNetworkPolling() {
+        if (_pollTimer) return;
+        _pollTimer = setInterval(checkNetworkStatus, 20000);
+    }
+    function stopNetworkPolling() {
+        if (_pollTimer) {
+            clearInterval(_pollTimer);
+            _pollTimer = null;
+        }
+    }
+
+    setTimeout(checkNetworkStatus, 500);
+    startNetworkPolling();
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            stopNetworkPolling();
+        } else {
+            checkNetworkStatus();
+            startNetworkPolling();
+        }
+    });
+})();
+
+/* ══════════════════════════════════════════════════════════════
+   EXCEL'DEN ÇIKIŞ LİSTESİNE VERİ ÇEKME & ÇOKLU YAPIŞTIRMA MODÜLÜ
+   ══════════════════════════════════════════════════════════════ */
+window.handleExitExcelUpload = async function(inputElement) {
+    if (!inputElement || !inputElement.files || !inputElement.files[0]) return;
+    const file = inputElement.files[0];
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const btn = document.getElementById('btn-excel-upload') || document.getElementById('btn-excel-upload-list');
+    const oldHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Excel Yükleniyor...';
+    }
+
+    try {
+        const res = await (window.apiFetch || fetch)('/api/cikis/excel_yukle', {
+            method: 'POST',
+            body: formData,
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+        const data = await res.json();
+        if (data.success) {
+            alert(`✅ ${data.message || (data.eklenen + ' adet ürün başarıyla eklendi!')}`);
+            ['loadRecent', 'loadList', 'loadRecentScans', 'loadExitList'].forEach(fn => {
+                if (typeof window[fn] === 'function') window[fn]();
+            });
+        } else {
+            alert(`❌ Hata: ${data.error || 'Excel yüklenirken bir problem oluştu.'}`);
+        }
+    } catch (err) {
+        alert('❌ Excel dosyası yüklenirken sunucu ile iletişim hatası oluştu: ' + (err.message || err));
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = oldHtml;
+        }
+        inputElement.value = '';
+    }
+};
+
+window.handleBatchQrPaste = async function(lines) {
+    if (!lines || !lines.length) return;
+    const count = lines.length;
+    if (!confirm(`📋 Panodan kopyalanan ${count} adet karekod tespit edildi.\n\nTümünü tek seferde çıkış listesine eklemek istiyor musunuz?`)) {
+        return;
+    }
+
+    const barkodInput = document.getElementById('barkod-input');
+    if (barkodInput) {
+        barkodInput.disabled = true;
+        barkodInput.placeholder = `${count} adet ürün işleniyor...`;
+    }
+
+    try {
+        const res = await (window.apiFetch || fetch)('/api/cikis/excel_yukle', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: JSON.stringify({ karekodlar: lines })
+        });
+        const data = await res.json();
+        if (data.success) {
+            alert(`✅ ${data.message || (data.eklenen + ' adet ürün başarıyla eklendi!')}`);
+            ['loadRecent', 'loadList', 'loadRecentScans', 'loadExitList'].forEach(fn => {
+                if (typeof window[fn] === 'function') window[fn]();
+            });
+        } else {
+            alert(`❌ Hata: ${data.error || 'Karekodlar eklenirken bir problem oluştu.'}`);
+        }
+    } catch (err) {
+        alert('❌ Karekodlar işlenirken iletişim hatası oluştu: ' + (err.message || err));
+    } finally {
+        if (barkodInput) {
+            barkodInput.disabled = false;
+            barkodInput.value = '';
+            barkodInput.placeholder = "Barkodu okutun veya yazın ve Enter'a basın...";
+            barkodInput.focus();
+        }
+    }
+};
+
+
 

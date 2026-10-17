@@ -33,6 +33,9 @@ body {
     position: relative;
     font-size: 0.92rem;
     line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
 }
 
 /* Background Glowing Decorators */
@@ -1253,8 +1256,468 @@ body.sidebar-layout {
         width: 100%;
         height: auto;
         position: relative;
+        padding: 0.75rem 1rem 0.5rem;
+        background: #0b1120;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        border-right: none;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    }
+    .sidebar-brand {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding-bottom: 0.5rem;
+        margin-bottom: 0.5rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .sidebar-brand .logo-icon {
+        font-size: 1.5rem;
+    }
+    .sidebar-brand h2 {
+        font-size: 1.1rem;
+    }
+    .sidebar-menu {
+        display: flex;
+        flex-direction: row;
+        overflow-x: auto;
+        white-space: nowrap;
+        gap: 0.5rem;
+        padding-bottom: 4px;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+    .sidebar-menu::-webkit-scrollbar {
+        display: none;
+    }
+    .sidebar-link {
+        flex: 0 0 auto;
+        padding: 0.5rem 0.85rem;
+        font-size: 0.8rem;
+        gap: 0.5rem;
+        border-radius: 8px;
+    }
+    .sidebar-footer {
+        display: none;
     }
     .main-content {
         margin-left: 0;
+        padding: 1rem 0.8rem;
     }
 }
+
+@media (max-width: 600px) {
+    body {
+        font-size: 0.88rem;
+    }
+    .sidebar {
+        padding: 0.5rem 0.8rem 0.4rem;
+    }
+    .sidebar-link span {
+        font-size: 0.76rem;
+    }
+    .main-content {
+        padding: 0.8rem 0.6rem;
+    }
+    .page-title {
+        font-size: 1.18rem;
+    }
+    .page-subtitle {
+        font-size: 0.75rem;
+    }
+    .content-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.5rem;
+    }
+    .btn {
+        padding: 0.5rem 0.8rem;
+        font-size: 0.8rem;
+    }
+}
+
+/* ── MOBİL BARKOD KAMERA ALANI & KONTROLLERİ ───────────────────────── */
+/* Masaüstü Bilgisayarlarda Kamera Özelliği Gizlidir (USB okuyucu & klavye kullanılır) */
+@media (min-width: 901px) {
+    .camera-control-group,
+    .camera-scanner-wrapper {
+        display: none !important;
+    }
+}
+
+.camera-control-group {
+    display: none;
+    margin-bottom: 0.8rem;
+}
+
+.camera-scanner-wrapper {
+    background: #0f172a;
+    border: 2px solid var(--primary);
+    border-radius: 16px;
+    overflow: hidden;
+    position: relative;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    margin-bottom: 1rem;
+    transition: all 0.3s ease;
+}
+.camera-scanner-header {
+    background: rgba(15, 23, 42, 0.95);
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+.camera-scanner-header h4 {
+    margin: 0;
+    font-size: 0.92rem;
+    color: #38bdf8;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 700;
+}
+.camera-scanner-body {
+    position: relative;
+    width: 100%;
+    min-height: 250px;
+    max-height: 380px;
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+#camera-reader {
+    width: 100% !important;
+    border: none !important;
+}
+#camera-reader video {
+    width: 100% !important;
+    height: auto !important;
+    max-height: 360px !important;
+    object-fit: cover !important;
+    border-radius: 0 0 14px 14px;
+}
+.camera-laser-line {
+    position: absolute;
+    left: 8%;
+    right: 8%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, #ef4444, #f87171, #ef4444, transparent);
+    box-shadow: 0 0 12px #ef4444;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+    z-index: 10;
+    animation: laserScan 2.4s ease-in-out infinite;
+}
+@keyframes laserScan {
+    0%, 100% { top: 20%; opacity: 0.6; }
+    50% { top: 80%; opacity: 1; }
+}
+.camera-badge-counter {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(16, 185, 129, 0.5);
+    color: #10b981;
+    font-size: 0.8rem;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 20px;
+    z-index: 12;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.camera-toggle-btn {
+    background: linear-gradient(135deg, #0284c7, #2563eb);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 0.75rem 1.2rem;
+    font-size: 0.95rem;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    cursor: pointer;
+    width: 100%;
+    box-shadow: 0 4px 15px rgba(37, 99, 235, 0.35);
+    transition: all 0.2s ease;
+}
+.camera-toggle-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5);
+}
+.camera-toggle-btn.active {
+    background: linear-gradient(135deg, #dc2626, #b91c1c);
+    box-shadow: 0 4px 15px rgba(220, 38, 38, 0.35);
+}
+
+/* ── MOBİL & TABLET KAPSAMLI UYUM VE DOKUNMATİK ERGONOMİSİ ─────────── */
+html, body {
+    max-width: 100%;
+    overflow-x: hidden;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.table-wrap, .recent-scroll, .table-responsive {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+}
+
+button, .btn, .sidebar-link {
+    touch-action: manipulation;
+}
+
+button:active, .btn:active {
+    transform: scale(0.98);
+}
+
+@media (max-width: 768px) {
+    /* Tablet ve Mobilde Tek Sütun ve Kart Dolguları */
+    .cikis-layout {
+        grid-template-columns: 1fr !important;
+        gap: 1rem !important;
+    }
+
+    .panel {
+        padding: 1rem !important;
+    }
+
+    .scan-panel {
+        order: 1;
+    }
+
+    .recent-panel {
+        order: 2;
+    }
+
+    /* Mobilde Barkod Inputu ve Butonlar */
+    #barkod-input {
+        font-size: 1rem !important;
+        padding: 0.85rem 0.85rem 0.85rem 2.6rem !important;
+    }
+
+    .btn {
+        min-height: 42px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    /* Mobilde Kamera Alanı Boyutu */
+    .camera-scanner-body {
+        min-height: 220px !important;
+        max-height: 300px !important;
+    }
+
+    #camera-reader video {
+        max-height: 290px !important;
+    }
+
+    /* Modal Pencere Mobil Uyumu */
+    .modal > div {
+        max-width: 92vw !important;
+        margin: 6vh auto !important;
+        padding: 18px !important;
+    }
+}
+
+/* ── EVRENSEL MOBİL ALT NAVİGASYON (TÜM SAYFALAR İÇİN) ──────────────── */
+.global-mobile-nav {
+    display: none;
+}
+
+@media (max-width: 900px) {
+    body {
+        padding-bottom: 72px !important;
+    }
+    .main-content {
+        padding-bottom: 78px !important;
+    }
+    .global-mobile-nav {
+        display: flex !important;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: rgba(9, 13, 22, 0.97);
+        backdrop-filter: blur(14px);
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        padding: 6px 8px 8px;
+        gap: 4px;
+        z-index: 9999;
+        justify-content: space-around;
+        box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.5);
+    }
+    .global-nav-item {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 3px;
+        padding: 6px 2px;
+        color: #94a3b8;
+        text-decoration: none;
+        font-size: 0.68rem;
+        font-weight: 600;
+        border-radius: 8px;
+        background: transparent;
+        transition: all 0.2s ease;
+    }
+    .global-nav-item i {
+        font-size: 1.15rem;
+    }
+    .global-nav-item.active {
+        color: #38bdf8;
+        background: rgba(56, 189, 248, 0.12);
+    }
+    .global-nav-item:active {
+        transform: scale(0.95);
+    }
+}
+
+@media (max-width: 480px) {
+    /* Küçük Ekran Telefonlar */
+    .sidebar-menu {
+        grid-template-columns: 1fr 1fr !important;
+        gap: 0.3rem !important;
+    }
+
+    .sidebar-link {
+        padding: 0.5rem 0.6rem !important;
+        font-size: 0.74rem !important;
+    }
+
+    .page-title {
+        font-size: 1.15rem !important;
+    }
+
+    .result-grid {
+        grid-template-columns: 1fr !important;
+        gap: 0.4rem !important;
+    }
+
+    .counter-bar {
+        padding: 0.5rem 0.8rem !important;
+    }
+
+    .counter-bar .cnt {
+        font-size: 1.5rem !important;
+    }
+}
+
+/* ==============================================================================
+   🌐 CANLI AĞ, İNTERNET VE SENKRONİZASYON DURUM ROZETİ (NETWORK BADGE)
+   ============================================================================== */
+.network-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: 9999px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    font-family: var(--font-inter, sans-serif);
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    user-select: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.sidebar-net-badge {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    width: 100% !important;
+    padding: 0.5rem 0.9rem !important;
+    border-radius: 10px !important;
+    font-size: 0.8rem !important;
+    box-sizing: border-box !important;
+}
+
+.network-badge.online {
+    background: rgba(34, 197, 94, 0.12);
+    border: 1.5px solid rgba(34, 197, 94, 0.45);
+    color: #4ade80;
+}
+.network-badge.online:hover {
+    background: rgba(34, 197, 94, 0.22);
+    border-color: rgba(34, 197, 94, 0.8);
+    box-shadow: 0 0 16px rgba(34, 197, 94, 0.35);
+    transform: translateY(-1px);
+}
+
+.network-badge.offline {
+    background: rgba(239, 68, 68, 0.16);
+    border: 1.5px solid rgba(239, 68, 68, 0.5);
+    color: #f87171;
+}
+.network-badge.offline:hover {
+    background: rgba(239, 68, 68, 0.26);
+    border-color: rgba(239, 68, 68, 0.8);
+    box-shadow: 0 0 16px rgba(239, 68, 68, 0.35);
+    transform: translateY(-1px);
+}
+
+.network-badge.syncing {
+    background: rgba(56, 189, 248, 0.15);
+    border: 1.5px solid rgba(56, 189, 248, 0.5);
+    color: #38bdf8;
+}
+
+.net-pulse-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    display: inline-block;
+}
+.network-badge.online .net-pulse-dot {
+    background: #22c55e;
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7);
+    animation: netPulseGreen 2s infinite;
+}
+.network-badge.offline .net-pulse-dot {
+    background: #ef4444;
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+    animation: netPulseRed 1.5s infinite;
+}
+.network-badge.syncing .net-pulse-dot {
+    background: #38bdf8;
+    box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.7);
+    animation: netPulseBlue 1s infinite;
+}
+
+@keyframes netPulseGreen {
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
+    70% { transform: scale(1); box-shadow: 0 0 0 7px rgba(34, 197, 94, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+}
+@keyframes netPulseRed {
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+    70% { transform: scale(1); box-shadow: 0 0 0 7px rgba(239, 68, 68, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+@keyframes netPulseBlue {
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.7); }
+    70% { transform: scale(1); box-shadow: 0 0 0 7px rgba(56, 189, 248, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(56, 189, 248, 0); }
+}
+
+.pending-count-pill {
+    background: #f59e0b;
+    color: #0f172a;
+    font-size: 0.72rem;
+    font-weight: 800;
+    padding: 2px 7px;
+    border-radius: 9999px;
+    margin-left: 2px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+
