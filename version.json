@@ -1,6 +1,6 @@
 {
-    "commit": "v3.8.1-dealer-auth-fix",
-    "message": "Doğu Dayanıklı ve aktif bayiler için silinen_bayiler kalıntı engeli giderildi, yetkilendirme doğrulandı",
-    "version": "v3.8.1",
-    "date": "17.10.2026 18:25"
+    "commit": "v3.8.2-login-and-pass-fix",
+    "message": "Doğu Dayanıklı ve bayi girişlerinde Bakanlık öncelikli doğrulama sağlandı, şifre hata mesajları netleştirildi",
+    "version": "v3.8.2",
+    "date": "17.10.2026 18:50"
 }

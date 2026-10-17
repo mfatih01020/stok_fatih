@@ -428,7 +428,12 @@ def _get_or_create_master_key() -> bytes:
         import uuid
         return hashlib.sha256(f"QR_COMPARE_{uuid.getnode()}".encode('utf-8')).digest()
 
-_KEY_32 = _get_or_create_master_key()
+_SHARED_KEY_32 = hashlib.sha256(b"QR_COMPARE_SHARED_APP_SECRET_2026").digest()
+try:
+    import uuid
+    _NODE_KEY_32 = hashlib.sha256(f"QR_COMPARE_{uuid.getnode()}".encode('utf-8')).digest()
+except Exception:
+    _NODE_KEY_32 = None
 
 def encrypt_credential(plain_text: str) -> str:
     if not plain_text:
@@ -464,14 +469,25 @@ def decrypt_credential(cipher_text: str) -> str:
         iv = raw[:16]
         ct = raw[16:]
         
-        cipher = Cipher(algorithms.AES(_KEY_32), modes.CBC(iv))
-        decryptor = cipher.decryptor()
-        padded_data = decryptor.update(ct) + decryptor.finalize()
-        unpadder = padding.PKCS7(128).unpadder()
-        plain = unpadder.update(padded_data) + unpadder.finalize()
-        return plain.decode('utf-8')
+        candidate_keys = [_KEY_32]
+        if _SHARED_KEY_32 not in candidate_keys:
+            candidate_keys.append(_SHARED_KEY_32)
+        if _NODE_KEY_32 and _NODE_KEY_32 not in candidate_keys:
+            candidate_keys.append(_NODE_KEY_32)
+
+        for k in candidate_keys:
+            try:
+                cipher = Cipher(algorithms.AES(k), modes.CBC(iv))
+                decryptor = cipher.decryptor()
+                padded_data = decryptor.update(ct) + decryptor.finalize()
+                unpadder = padding.PKCS7(128).unpadder()
+                plain = unpadder.update(padded_data) + unpadder.finalize()
+                return plain.decode('utf-8')
+            except Exception:
+                continue
+        return ""
     except Exception as e:
-        logger.warning(f"decrypt_credential error: {e}")
+        logger.debug(f"decrypt_credential error: {e}")
         return ""
 
 
@@ -9081,13 +9097,16 @@ def api_system_login():
                 'error': '⏳ Uygulama yetkiniz henüz onaylanmamıştır! Yetki verilene kadar bu bilgilerle giriş yapılamaz. Lütfen sistem yöneticisiyle iletişime geçiniz.'
             })
 
-    if remote_auth_error:
-        return jsonify({
-            'success': False,
-            'error': remote_auth_error
-        }), 401
-
     is_test_dealer = bool(b_row[6] if b_row and len(b_row) > 6 else 0) or (b_row and b_row[1] == 'bayi_test')
+
+    if remote_auth_error:
+        # Eğer gerçek bir bayi ise (11 haneli TC ve test bayisi değil), Bakanlık doğrulamasına izin ver.
+        # Çünkü merkez sunucudaki yerel şifre anahtar farkından dolayı eşleşmemiş olabilir, asıl otorite Bakanlık'tır.
+        if not (username.isdigit() and len(username) == 11 and not is_test_dealer):
+            return jsonify({
+                'success': False,
+                'error': remote_auth_error
+            }), 401
 
     # ── 1.5. TEST BAYİSİ İÇİN MERKEZ SUNUCU ONAYI (ŞİFRE SIZDIRMADAN MERKEZİ DOĞRULAMA) ──
     if remote_auth_success and is_test_dealer:
@@ -11305,8 +11324,8 @@ def _authenticate_dealer_request(data, conn=None):
             if not plain_p:
                 return False, "Yetkisiz erişim: Bayi şifresi gereklidir.", 401, d_code, matched_dealer
             if not hmac.compare_digest(d_plain_p, plain_p):
-                logger.warning(f"🚨 Yetkisiz senkronizasyon girişimi reddedildi: Bayi: {d_code}")
-                return False, "Yetkisiz erişim: Geçersiz bayi kimlik doğrulaması.", 401, d_code, matched_dealer
+                logger.warning(f"🚨 Bayi şifre doğrulaması başarısız: Bayi: {d_code}")
+                return False, "❌ Giriş Başarısız: Girdiğiniz şifre hatalı!", 401, d_code, matched_dealer
         else:
             # Bayi şifresi DB'de boşsa, ancak istekte şifre gönderilmişse sunucu anahtarıyla kaydet; aksi halde reddet
             if not plain_p:
