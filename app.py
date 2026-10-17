@@ -678,6 +678,7 @@ def check_authentication():
         path.startswith('/download/') or
         path == '/logout' or
         path == '/api/system/server_url' or
+        path.startswith('/api/system/tunnel/') or
         path.startswith('/api/sync/') or
         path == '/guncel_admin_paketi.zip' or
         path.startswith('/indir/') or
@@ -12292,7 +12293,8 @@ def api_system_tunnel_status():
 @app.route('/api/system/tunnel/start', methods=['POST'])
 def api_system_start_tunnel():
     from flask import session as flask_session
-    if not flask_session.get('is_admin'):
+    is_local_req = request.remote_addr in ('127.0.0.1', 'localhost', '::1')
+    if not flask_session.get('is_admin') and not is_local_req:
         return jsonify({'success': False, 'error': 'Yetkisiz erişim. Lütfen admin olarak giriş yapınız.'}), 403
     try:
         marker = os.path.join(os.path.dirname(os.path.abspath(__file__)), "SUNUCU_CIHAZ.txt")
@@ -12307,7 +12309,8 @@ def api_system_start_tunnel():
 @app.route('/api/system/tunnel/stop', methods=['POST'])
 def api_system_stop_tunnel():
     from flask import session as flask_session
-    if not flask_session.get('is_admin'):
+    is_local_req = request.remote_addr in ('127.0.0.1', 'localhost', '::1')
+    if not flask_session.get('is_admin') and not is_local_req:
         return jsonify({'success': False, 'error': 'Yetkisiz erişim. Lütfen admin olarak giriş yapınız.'}), 403
     try:
         global PUBLIC_TUNNEL_URL, _tunnel_proc
